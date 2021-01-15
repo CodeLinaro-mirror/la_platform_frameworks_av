@@ -52,7 +52,8 @@ DeviceDescriptor::DeviceDescriptor(audio_devices_t type,
 DeviceDescriptor::DeviceDescriptor(const AudioDeviceTypeAddr &deviceTypeAddr,
                                    const std::string &tagName,
                                    const FormatVector &encodedFormats) :
-        DeviceDescriptorBase(deviceTypeAddr), mTagName(tagName), mEncodedFormats(encodedFormats)
+        DeviceDescriptorBase(deviceTypeAddr), mTagName(tagName), mEncodedFormats(encodedFormats),
+        mDeclaredAddress(deviceTypeAddr.getAddress())
 {
     mCurrentEncodedFormat = AUDIO_FORMAT_DEFAULT;
     /* If framework runs against a pre 5.0 Audio HAL, encoded formats are absent from the config.
@@ -75,6 +76,10 @@ void DeviceDescriptor::attach(const sp<HwModule>& module)
 void DeviceDescriptor::detach() {
     mId = AUDIO_PORT_HANDLE_NONE;
     PolicyAudioPort::detach();
+    // The device address may have been overwritten on device connection
+    setAddress(mDeclaredAddress);
+    // Device Port does not have a name unless provided by setDeviceConnectionState
+    setName("");
 }
 
 template<typename T>
@@ -377,7 +382,7 @@ sp<DeviceDescriptor> DeviceVector::getDeviceForOpening() const
     if (isEmpty()) {
         // Return nullptr if this collection is empty.
         return nullptr;
-    } else if (areAllOfSameDeviceType(types(), audio_is_input_device)) {
+    } else if (areAllOfSameDeviceType(types(), audio_call_is_input_device)) {
         // For input case, return the first one when there is only one device.
         return size() > 1 ? nullptr : *begin();
     } else if (areAllOfSameDeviceType(types(), audio_is_output_device)) {

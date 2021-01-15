@@ -38,6 +38,15 @@
 #include <media/MediaMetricsItem.h>
 #include <media/TypeConverter.h>
 
+#define VALUE_OR_FATAL(result)                   \
+    ({                                           \
+       auto _tmp = (result);                     \
+       LOG_ALWAYS_FATAL_IF(!_tmp.ok(),           \
+                           "Failed result (%d)", \
+                           _tmp.error());        \
+       std::move(_tmp.value());                  \
+     })
+
 #define WAIT_PERIOD_MS                  10
 #define WAIT_STREAM_END_TIMEOUT_SEC     120
 static const int kMaxLoopCountNotifications = 32;
@@ -227,7 +236,7 @@ AudioTrack::AudioTrack(const std::string& opPackageName)
 {
     mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
     mAttributes.usage = AUDIO_USAGE_UNKNOWN;
-    mAttributes.flags = 0x0;
+    mAttributes.flags = AUDIO_FLAG_NONE;
     strcpy(mAttributes.tags, "");
 }
 
@@ -467,7 +476,7 @@ status_t AudioTrack::set(
     if (format == AUDIO_FORMAT_DEFAULT) {
         format = AUDIO_FORMAT_PCM_16_BIT;
     } else if (format == AUDIO_FORMAT_IEC61937) { // HDMI pass-through?
-        mAttributes.flags |= AUDIO_OUTPUT_FLAG_IEC958_NONAUDIO;
+        flags = static_cast<audio_output_flags_t>(flags | AUDIO_OUTPUT_FLAG_IEC958_NONAUDIO);
     }
 
     // validate parameters
@@ -538,6 +547,7 @@ status_t AudioTrack::set(
     } else {
         mOffloadInfo = NULL;
         memset(&mOffloadInfoCopy, 0, sizeof(audio_offload_info_t));
+        mOffloadInfoCopy = AUDIO_INFO_INITIALIZER;
     }
 
     mVolume[AUDIO_INTERLEAVE_LEFT] = 1.0f;
@@ -642,6 +652,36 @@ status_t AudioTrack::set(
 exit:
     mStatus = status;
     return status;
+}
+
+
+status_t AudioTrack::set(
+        audio_stream_type_t streamType,
+        uint32_t sampleRate,
+        audio_format_t format,
+        uint32_t channelMask,
+        size_t frameCount,
+        audio_output_flags_t flags,
+        callback_t cbf,
+        void* user,
+        int32_t notificationFrames,
+        const sp<IMemory>& sharedBuffer,
+        bool threadCanCallJava,
+        audio_session_t sessionId,
+        transfer_type transferType,
+        const audio_offload_info_t *offloadInfo,
+        uid_t uid,
+        pid_t pid,
+        const audio_attributes_t* pAttributes,
+        bool doNotReconnect,
+        float maxRequiredSpeed,
+        audio_port_handle_t selectedDeviceId)
+{
+    return set(streamType, sampleRate, format,
+            static_cast<audio_channel_mask_t>(channelMask),
+            frameCount, flags, cbf, user, notificationFrames, sharedBuffer,
+            threadCanCallJava, sessionId, transferType, offloadInfo, uid, pid,
+            pAttributes, doNotReconnect, maxRequiredSpeed, selectedDeviceId);
 }
 
 // -------------------------------------------------------------------------
@@ -1566,11 +1606,13 @@ status_t AudioTrack::createTrack_l()
     input.audioTrackCallback = mAudioTrackCallback;
     input.opPackageName = mOpPackageName;
 
-    IAudioFlinger::CreateTrackOutput output;
-
-    sp<IAudioTrack> track = audioFlinger->createTrack(input,
-                                                      output,
+    media::CreateTrackResponse response;
+    sp<IAudioTrack> track = audioFlinger->createTrack(VALUE_OR_FATAL(input.toAidl()),
+                                                      response,
                                                       &status);
+    IAudioFlinger::CreateTrackOutput output = VALUE_OR_FATAL(
+            IAudioFlinger::CreateTrackOutput::fromAidl(
+                    response));
 
     if (status != NO_ERROR || output.outputId == AUDIO_IO_HANDLE_NONE) {
         ALOGE("%s(%d): AudioFlinger could not create track, status: %d output %d",

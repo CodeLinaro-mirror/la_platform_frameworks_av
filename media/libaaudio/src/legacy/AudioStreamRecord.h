@@ -41,9 +41,6 @@ public:
     aaudio_result_t release_l() override;
     void close_l() override;
 
-    aaudio_result_t requestStart() override;
-    aaudio_result_t requestStop() override;
-
     virtual aaudio_result_t getTimestamp(clockid_t clockId,
                                          int64_t *framePosition,
                                          int64_t *timeNanoseconds) override;
@@ -56,13 +53,9 @@ public:
 
     int32_t getBufferSize() const override;
 
-    int32_t getBufferCapacity() const override;
-
     int32_t getXRunCount() const override;
 
     int64_t getFramesWritten() override;
-
-    int32_t getFramesPerBurst() const override;
 
     aaudio_result_t updateStateMachine() override;
 
@@ -78,6 +71,14 @@ public:
     }
 
     const void * maybeConvertDeviceData(const void *audioData, int32_t numFrames) override;
+
+protected:
+
+    aaudio_result_t requestStart_l() REQUIRES(mStreamLock) override;
+    aaudio_result_t requestStop_l() REQUIRES(mStreamLock) override;
+
+    int32_t getFramesPerBurstFromDevice() const override;
+    int32_t getBufferCapacityFromDevice() const override;
 
 private:
     android::sp<android::AudioRecord> mAudioRecord;

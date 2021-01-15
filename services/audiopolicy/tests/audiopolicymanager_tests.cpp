@@ -58,6 +58,34 @@ TEST(AudioPolicyManagerTestInit, ClientFailure) {
     ASSERT_EQ(NO_INIT, manager.initCheck());
 }
 
+// Verifies that a failure while loading a config doesn't leave
+// APM config in a "dirty" state. Since AudioPolicyConfig object
+// is a proxy for the data hosted by APM, it isn't possible
+// to "deep copy" it, and thus we have to test its elements
+// individually.
+TEST(AudioPolicyManagerTestInit, ConfigLoadingIsTransactional) {
+    AudioPolicyTestClient client;
+    AudioPolicyTestManager manager(&client);
+    ASSERT_TRUE(manager.getConfig().getHwModules().isEmpty());
+    ASSERT_TRUE(manager.getConfig().getInputDevices().isEmpty());
+    ASSERT_TRUE(manager.getConfig().getOutputDevices().isEmpty());
+    status_t status = deserializeAudioPolicyFile(
+            (base::GetExecutableDirectory() +
+                    "/test_invalid_audio_policy_configuration.xml").c_str(),
+            &manager.getConfig());
+    ASSERT_NE(NO_ERROR, status);
+    EXPECT_TRUE(manager.getConfig().getHwModules().isEmpty());
+    EXPECT_TRUE(manager.getConfig().getInputDevices().isEmpty());
+    EXPECT_TRUE(manager.getConfig().getOutputDevices().isEmpty());
+    status = deserializeAudioPolicyFile(
+            (base::GetExecutableDirectory() + "/test_audio_policy_configuration.xml").c_str(),
+            &manager.getConfig());
+    ASSERT_EQ(NO_ERROR, status);
+    EXPECT_FALSE(manager.getConfig().getHwModules().isEmpty());
+    EXPECT_FALSE(manager.getConfig().getInputDevices().isEmpty());
+    EXPECT_FALSE(manager.getConfig().getOutputDevices().isEmpty());
+}
+
 
 class PatchCountCheck {
   public:
@@ -89,7 +117,7 @@ class AudioPolicyManagerTest : public testing::Test {
     void getOutputForAttr(
             audio_port_handle_t *selectedDeviceId,
             audio_format_t format,
-            int channelMask,
+            audio_channel_mask_t channelMask,
             int sampleRate,
             audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE,
             audio_io_handle_t *output = nullptr,
@@ -100,7 +128,7 @@ class AudioPolicyManagerTest : public testing::Test {
             audio_unique_id_t riid,
             audio_port_handle_t *selectedDeviceId,
             audio_format_t format,
-            int channelMask,
+            audio_channel_mask_t channelMask,
             int sampleRate,
             audio_input_flags_t flags = AUDIO_INPUT_FLAG_NONE,
             audio_port_handle_t *portId = nullptr);
@@ -166,7 +194,7 @@ void AudioPolicyManagerTest::dumpToLog() {
 void AudioPolicyManagerTest::getOutputForAttr(
         audio_port_handle_t *selectedDeviceId,
         audio_format_t format,
-        int channelMask,
+        audio_channel_mask_t channelMask,
         int sampleRate,
         audio_output_flags_t flags,
         audio_io_handle_t *output,
@@ -196,7 +224,7 @@ void AudioPolicyManagerTest::getInputForAttr(
         audio_unique_id_t riid,
         audio_port_handle_t *selectedDeviceId,
         audio_format_t format,
-        int channelMask,
+        audio_channel_mask_t channelMask,
         int sampleRate,
         audio_input_flags_t flags,
         audio_port_handle_t *portId) {
@@ -709,7 +737,8 @@ void AudioPolicyManagerTestDPPlaybackReRouting::SetUp() {
 
     audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
     audio_source_t source = AUDIO_SOURCE_REMOTE_SUBMIX;
-    audio_attributes_t attr = {AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN, source, 0, ""};
+    audio_attributes_t attr = {
+        AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN, source, AUDIO_FLAG_NONE, ""};
     std::string tags = "addr=" + mMixAddress;
     strncpy(attr.tags, tags.c_str(), AUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1);
     getInputForAttr(attr, mTracker->getRiid(), &selectedDeviceId, AUDIO_FORMAT_PCM_16_BIT,
@@ -759,9 +788,9 @@ INSTANTIATE_TEST_CASE_P(
         AudioPolicyManagerTestDPPlaybackReRouting,
         testing::Values(
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_MEDIA,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_ALARM,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""}
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""}
                 )
         );
 
@@ -770,47 +799,47 @@ INSTANTIATE_TEST_CASE_P(
         AudioPolicyManagerTestDPPlaybackReRouting,
         testing::Values(
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_MEDIA,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_VOICE_COMMUNICATION,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
-                                     AUDIO_USAGE_VOICE_COMMUNICATION_SIGNALLING,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_USAGE_VOICE_COMMUNICATION_SIGNALLING,
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_ALARM,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_NOTIFICATION,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
-                                     AUDIO_USAGE_NOTIFICATION_TELEPHONY_RINGTONE,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_USAGE_NOTIFICATION_TELEPHONY_RINGTONE,
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
-                                     AUDIO_USAGE_NOTIFICATION_COMMUNICATION_REQUEST,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_USAGE_NOTIFICATION_COMMUNICATION_REQUEST,
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
-                                     AUDIO_USAGE_NOTIFICATION_COMMUNICATION_INSTANT,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_USAGE_NOTIFICATION_COMMUNICATION_INSTANT,
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
-                                     AUDIO_USAGE_NOTIFICATION_COMMUNICATION_DELAYED,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_USAGE_NOTIFICATION_COMMUNICATION_DELAYED,
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_NOTIFICATION_EVENT,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
-                                     AUDIO_USAGE_ASSISTANCE_ACCESSIBILITY,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_USAGE_ASSISTANCE_ACCESSIBILITY,
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
-                                     AUDIO_USAGE_ASSISTANCE_NAVIGATION_GUIDANCE,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_USAGE_ASSISTANCE_NAVIGATION_GUIDANCE,
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
-                                     AUDIO_USAGE_ASSISTANCE_SONIFICATION,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_USAGE_ASSISTANCE_SONIFICATION,
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_GAME,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_VIRTUAL_SOURCE,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_ASSISTANT,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"},
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_SPEECH, AUDIO_USAGE_ASSISTANT,
-                                     AUDIO_SOURCE_DEFAULT, 0, "addr=remote_submix_media"}
+                    AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, "addr=remote_submix_media"}
                 )
         );
 
@@ -819,41 +848,41 @@ INSTANTIATE_TEST_CASE_P(
         AudioPolicyManagerTestDPPlaybackReRouting,
         testing::Values(
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_VOICE_COMMUNICATION,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
                                      AUDIO_USAGE_VOICE_COMMUNICATION_SIGNALLING,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_NOTIFICATION,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
                                      AUDIO_USAGE_NOTIFICATION_TELEPHONY_RINGTONE,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
                                      AUDIO_USAGE_NOTIFICATION_COMMUNICATION_REQUEST,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
                                      AUDIO_USAGE_NOTIFICATION_COMMUNICATION_INSTANT,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
                                      AUDIO_USAGE_NOTIFICATION_COMMUNICATION_DELAYED,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_NOTIFICATION_EVENT,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
                                      AUDIO_USAGE_ASSISTANCE_ACCESSIBILITY,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
                                      AUDIO_USAGE_ASSISTANCE_NAVIGATION_GUIDANCE,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC,
                                      AUDIO_USAGE_ASSISTANCE_SONIFICATION,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_GAME,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_MUSIC, AUDIO_USAGE_ASSISTANT,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""},
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_SPEECH, AUDIO_USAGE_ASSISTANT,
-                                     AUDIO_SOURCE_DEFAULT, 0, ""}
+                                     AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""}
                 )
         );
 
@@ -894,7 +923,8 @@ void AudioPolicyManagerTestDPMixRecordInjection::SetUp() {
 
     audio_port_handle_t selectedDeviceId = AUDIO_PORT_HANDLE_NONE;
     audio_usage_t usage = AUDIO_USAGE_VIRTUAL_SOURCE;
-    audio_attributes_t attr = {AUDIO_CONTENT_TYPE_UNKNOWN, usage, AUDIO_SOURCE_DEFAULT, 0, ""};
+    audio_attributes_t attr =
+            {AUDIO_CONTENT_TYPE_UNKNOWN, usage, AUDIO_SOURCE_DEFAULT, AUDIO_FLAG_NONE, ""};
     std::string tags = std::string("addr=") + mMixAddress;
     strncpy(attr.tags, tags.c_str(), AUDIO_ATTRIBUTES_TAGS_MAX_SIZE - 1);
     getOutputForAttr(&selectedDeviceId, AUDIO_FORMAT_PCM_16_BIT, AUDIO_CHANNEL_OUT_STEREO,
@@ -943,17 +973,19 @@ INSTANTIATE_TEST_CASE_P(
         AudioPolicyManagerTestDPMixRecordInjection,
         testing::Values(
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-                                     AUDIO_SOURCE_CAMCORDER, 0, ""},
+                                     AUDIO_SOURCE_CAMCORDER, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-                                     AUDIO_SOURCE_CAMCORDER, 0, "addr=remote_submix_media"},
+                                     AUDIO_SOURCE_CAMCORDER, AUDIO_FLAG_NONE,
+                                     "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-                                     AUDIO_SOURCE_MIC, 0, "addr=remote_submix_media"},
+                                     AUDIO_SOURCE_MIC, AUDIO_FLAG_NONE,
+                                     "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-                                     AUDIO_SOURCE_MIC, 0, ""},
+                                     AUDIO_SOURCE_MIC, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-                                     AUDIO_SOURCE_VOICE_COMMUNICATION, 0, ""},
+                                     AUDIO_SOURCE_VOICE_COMMUNICATION, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-                                     AUDIO_SOURCE_VOICE_COMMUNICATION, 0,
+                                     AUDIO_SOURCE_VOICE_COMMUNICATION, AUDIO_FLAG_NONE,
                                      "addr=remote_submix_media"}
                 )
         );
@@ -964,14 +996,15 @@ INSTANTIATE_TEST_CASE_P(
         AudioPolicyManagerTestDPMixRecordInjection,
         testing::Values(
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-                                     AUDIO_SOURCE_VOICE_RECOGNITION, 0, ""},
+                                     AUDIO_SOURCE_VOICE_RECOGNITION, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-                                     AUDIO_SOURCE_HOTWORD, 0, ""},
+                                     AUDIO_SOURCE_HOTWORD, AUDIO_FLAG_NONE, ""},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-                                     AUDIO_SOURCE_VOICE_RECOGNITION, 0,
+                                     AUDIO_SOURCE_VOICE_RECOGNITION, AUDIO_FLAG_NONE,
                                      "addr=remote_submix_media"},
                 (audio_attributes_t){AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN,
-                                     AUDIO_SOURCE_HOTWORD, 0, "addr=remote_submix_media"}
+                                     AUDIO_SOURCE_HOTWORD, AUDIO_FLAG_NONE,
+                                     "addr=remote_submix_media"}
                 )
         );
 
