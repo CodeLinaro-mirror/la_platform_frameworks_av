@@ -25,6 +25,7 @@
 #include <utils/threads.h>
 #include <media/stagefright/foundation/AHandlerReflector.h>
 #include <media/stagefright/foundation/ALooper.h>
+#include <mutex>
 
 namespace android {
 
@@ -58,6 +59,10 @@ public:
     void writeFourcc(const char *fourcc);
     void write(const void *data, size_t size);
     inline size_t write(const void *ptr, size_t size, size_t nmemb);
+    // Write to file system by calling ::write() or post error message to looper on failure.
+    void writeOrPostError(int fd, const void *buf, size_t count);
+    // Seek in the file by calling ::lseek64() or post error message to looper on failure.
+    void seekOrPostError(int fd, off64_t offset, int whence);
     void endBox();
     uint32_t interleaveDuration() const { return mInterleaveDurationUs; }
     status_t setInterleaveDuration(uint32_t duration);
@@ -80,6 +85,8 @@ private:
 
     enum {
         kWhatSwitch                          = 'swch',
+        kWhatHandleIOError                   = 'ioer',
+        kWhatHandleFallocateError            = 'faer'
     };
 
     int  mFd;
@@ -96,7 +103,9 @@ protected:
     bool mWriterThreadStarted;  // Only writer thread started successfully
     bool mSendNotify;
     off64_t mOffset;
-    off_t mMdatOffset;
+    off64_t mPreAllocateFileEndOffset;  //End of file offset during preallocation.
+    off64_t mMdatOffset;
+    off64_t mMdatEndOffset;  // End offset of mdat atom.
     uint8_t *mInMemoryCache;
     off64_t mInMemoryCacheOffset;
     off64_t mInMemoryCacheSize;
@@ -113,11 +122,18 @@ protected:
     bool mAreGeoTagsAvailable;
     int32_t mStartTimeOffsetMs;
     bool mSwitchPending;
+    bool mWriteSeekErr;
+    bool mFallocateErr;
+    bool mPreAllocationEnabled;
 
     sp<ALooper> mLooper;
     sp<AHandlerReflector<MPEG4Writer> > mReflector;
 
     Mutex mLock;
+    std::mutex mResetMutex;
+    std::mutex mFallocMutex;
+    bool mPreAllocFirstTime; // Pre-allocate space for file and track headers only once per file.
+    uint64_t mPrevAllTracksTotalMetaDataSizeEstimate;
 
     List<Track *> mTracks;
 
@@ -202,6 +218,7 @@ protected:
     } ItemProperty;
 
     bool mHasFileLevelMeta;
+    uint64_t mFileLevelMetaDataSize;
     bool mHasMoovBox;
     uint32_t mPrimaryItemId;
     uint32_t mAssociationEntryCount;
@@ -212,9 +229,11 @@ protected:
 
     // Writer thread handling
     status_t startWriterThread();
-    void stopWriterThread();
+    status_t stopWriterThread();
     static void *ThreadWrapper(void *me);
     void threadFunc();
+    void setupAndStartLooper();
+    void stopAndReleaseLooper();
 
     // Buffer a single chunk to be written out later.
     void bufferChunk(const Chunk& chunk);
@@ -286,6 +305,16 @@ protected:
     void writeKeys();
     void writeIlst();
     void writeMoovLevelMetaBox();
+
+    /*
+     * Allocate space needed for MOOV atom in advance and maintain just enough before write
+     * of any data.  Stop writing and save MOOV atom if there was any error.
+     */
+    bool preAllocate(uint64_t wantSize);
+    /*
+     * Truncate file as per the size used for meta data and actual data in a session.
+     */
+    bool truncatePreAllocation();
 
     // HEIF writing
     void writeIlocBox();
