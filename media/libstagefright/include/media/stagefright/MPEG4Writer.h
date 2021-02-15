@@ -97,6 +97,7 @@ private:
     sp<MetaData> mStartMeta;
     status_t mInitCheck;
     bool mIsRealTimeRecording;
+protected:
     bool mUse4ByteNalLength;
     bool mIsFileSizeLimitExplicitlyRequested;
     bool mPaused;
@@ -283,7 +284,8 @@ private:
     off64_t addSample_l(
             MediaBuffer *buffer, bool usePrefix,
             uint32_t tiffHdrOffset, size_t *bytesWritten);
-    void addLengthPrefixedSample_l(MediaBuffer *buffer);
+    static void StripStartcode(MediaBuffer *buffer);
+    virtual void addLengthPrefixedSample_l(MediaBuffer *buffer);
     void addMultipleLengthPrefixedSamples_l(MediaBuffer *buffer);
     uint16_t addProperty_l(const ItemProperty &);
     status_t reserveItemId_l(size_t numItems, uint16_t *itemIdBase);
