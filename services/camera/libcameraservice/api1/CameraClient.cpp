@@ -1210,8 +1210,10 @@ status_t CameraClient::setVideoTarget(const sp<IGraphicBufferProducer>& bufferPr
 
 status_t CameraClient::setAudioRestriction(int mode) {
     if (!isValidAudioRestriction(mode)) {
-        ALOGE("%s: invalid audio restriction mode %d", __FUNCTION__, mode);
-        return BAD_VALUE;
+        String8 msg = String8::format("Camera %s: invalid audio restriction mode %d",
+          mCameraIdStr.string(), mode);
+        ALOGW("%s: %s", __FUNCTION__, msg.string());
+        return CameraService::ERROR_ILLEGAL_ARGUMENT;
     }
 
     Mutex::Autolock lock(mLock);
