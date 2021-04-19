@@ -985,9 +985,9 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                     policyDesc = mOutputs.valueFor(newOutput);
                     primaryMix->setOutput(policyDesc);
                 }
-                return NO_ERROR;
             }
-        } else if (policyDesc != nullptr) {
+        }
+        if (policyDesc != nullptr) {
             policyDesc->mPolicyMix = primaryMix;
             *output = policyDesc->mIoHandle;
             *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
