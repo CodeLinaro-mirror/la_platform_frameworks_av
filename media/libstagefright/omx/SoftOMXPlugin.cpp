@@ -25,6 +25,7 @@
 #include <media/stagefright/foundation/AString.h>
 
 #include <dlfcn.h>
+#define QTI_FLAC_DECODER
 
 namespace android {
 
