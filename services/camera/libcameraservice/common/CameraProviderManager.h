@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/*
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+*/
+
 #ifndef ANDROID_SERVERS_CAMERA_CAMERAPROVIDER_H
 #define ANDROID_SERVERS_CAMERA_CAMERAPROVIDER_H
 
@@ -346,6 +352,10 @@ private:
 
         status_t dump(int fd, const Vector<String16>& args) const;
 
+        status_t cameraDeviceStatusChangeLocked(
+            std::string* id, const hardware::hidl_string& cameraDeviceName,
+            hardware::camera::common::V1_0::CameraDeviceStatus newStatus);
+
         // ICameraProviderCallbacks interface - these lock the parent mInterfaceMutex
         virtual hardware::Return<void> cameraDeviceStatusChange(
                 const hardware::hidl_string& cameraDeviceName,
@@ -534,7 +544,21 @@ private:
 
         CameraProviderManager *mManager;
 
+        struct CameraStatusInfoT {
+            bool isPhysicalCameraStatus = false;
+            hardware::hidl_string cameraId;
+            hardware::hidl_string physicalCameraId;
+            hardware::camera::common::V1_0::CameraDeviceStatus status;
+            CameraStatusInfoT(bool isForPhysicalCamera, const hardware::hidl_string& id,
+                    const hardware::hidl_string& physicalId,
+                    hardware::camera::common::V1_0::CameraDeviceStatus s) :
+                    isPhysicalCameraStatus(isForPhysicalCamera), cameraId(id),
+                    physicalCameraId(physicalId), status(s) {}
+        };
+
+        std::mutex mInitLock;
         bool mInitialized = false;
+        std::vector<CameraStatusInfoT> mCachedStatus;
 
         // Templated method to instantiate the right kind of DeviceInfo and call the
         // right CameraProvider getCameraDeviceInterface_* method.
