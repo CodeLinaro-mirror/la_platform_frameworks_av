@@ -328,7 +328,8 @@ status_t checkCompatibleProfile(const AudioProfileVector &audioProfileVector,
                                 audio_channel_mask_t &channelMask,
                                 audio_format_t &format,
                                 audio_port_type_t portType,
-                                audio_port_role_t portRole)
+                                audio_port_role_t portRole,
+				bool checkExactFormat)
 {
     if (audioProfileVector.empty()) {
         return NO_ERROR;
@@ -350,6 +351,8 @@ status_t checkCompatibleProfile(const AudioProfileVector &audioProfileVector,
             // rate and channels as well
             audio_channel_mask_t updatedChannels;
             uint32_t updatedRate;
+	    if ((checkExactFormat) && (formatToCompare != format))
+		continue;
             if (checkCompatibleChannelMask(profile, channelMask, updatedChannels,
                                            portType, portRole) == NO_ERROR &&
                     checkCompatibleSamplingRate(profile, samplingRate, updatedRate) == NO_ERROR) {

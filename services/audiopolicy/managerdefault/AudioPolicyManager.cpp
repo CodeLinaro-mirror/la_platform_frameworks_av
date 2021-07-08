@@ -837,9 +837,10 @@ sp<IOProfile> AudioPolicyManager::getProfileForOutput(
                 continue;
             }
             if (!directOnly) return curProfile;
-            // when searching for direct outputs, if several profiles are compatible, give priority
-            // to one with offload capability
-            if (profile != 0 && ((curProfile->getFlags() & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) == 0)) {
+            // if several profiles are compatible, give priority to one with offload capability
+            // exact match is also not skipped as it should be preferred over any existing selection
+            if (profile != 0 && ((curProfile->getFlags() & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) == 0) &&
+               (curProfile->getFlags() != flags)) {
                 continue;
             }
             profile = curProfile;
@@ -945,30 +946,45 @@ status_t AudioPolicyManager::getOutputForAttrInt(
     bool usePrimaryOutputFromPolicyMixes = requestedDevice == nullptr && primaryMix != nullptr;
 
     // FIXME: in case of RENDER policy, the output capabilities should be checked
-    if ((usePrimaryOutputFromPolicyMixes
-            || (secondaryMixes != nullptr && !secondaryMixes->empty()))
-        && !audio_is_linear_pcm(config->format)) {
+    if (!secondaryMixes->empty() && !audio_is_linear_pcm(config->format)) {
         ALOGD("%s: rejecting request as dynamic audio policy only support pcm", __func__);
         return BAD_VALUE;
     }
     if (usePrimaryOutputFromPolicyMixes) {
+        /* BUG 73287368: Support compress-offload playback with dynamic audio policy */
         sp<DeviceDescriptor> deviceDesc =
                 mAvailableOutputDevices.getDevice(primaryMix->mDeviceType,
                                                   primaryMix->mDeviceAddress,
                                                   AUDIO_FORMAT_DEFAULT);
         sp<SwAudioOutputDescriptor> policyDesc = primaryMix->getOutput();
-        if (deviceDesc != nullptr
-                && (policyDesc == nullptr || (policyDesc->mFlags & AUDIO_OUTPUT_FLAG_DIRECT))) {
-            audio_io_handle_t newOutput;
-            status = openDirectOutput(
-                    *stream, session, config,
-                    (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT),
-                    DeviceVector(deviceDesc), &newOutput);
-            if (status != NO_ERROR) {
-                policyDesc = nullptr;
-            } else {
-                policyDesc = mOutputs.valueFor(newOutput);
-                primaryMix->setOutput(policyDesc);
+        bool requestOffloadOrDirect =
+            (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) || (*flags & AUDIO_OUTPUT_FLAG_DIRECT);
+        sp<IOProfile> profile = getProfileForOutput(DeviceVector(deviceDesc),
+                                                config->sample_rate,
+                                                config->format,
+                                                config->channel_mask,
+                                                (audio_output_flags_t)*flags,
+                                                requestOffloadOrDirect);
+        ALOGD("%s() profile %sfound sample rate: %u, format: 0x%x, channel_mask: 0x%x, flags: 0x%x",
+            __FUNCTION__, profile != 0 ? "" : "NOT ",
+            config->sample_rate, config->format, config->channel_mask, *flags);
+        if ((deviceDesc->type() & AUDIO_DEVICE_OUT_BUS) && (*stream == AUDIO_STREAM_MUSIC) &&
+                (profile != 0) && (requestOffloadOrDirect)) {
+            ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
+                deviceDesc->type());
+            if (deviceDesc != nullptr
+                    && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
+                audio_io_handle_t newOutput;
+                status = openDirectOutput(
+                        *stream, session, config,
+                        (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT),
+                        DeviceVector(deviceDesc), &newOutput);
+                if (status != NO_ERROR) {
+                    policyDesc = nullptr;
+                } else {
+                    policyDesc = mOutputs.valueFor(newOutput);
+                    primaryMix->setOutput(policyDesc);
+                }
             }
         }
         if (policyDesc != nullptr) {
@@ -2712,9 +2728,10 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
     // 1: An offloaded output. If the effect ends up not being offloadable,
     //    AudioFlinger will invalidate the track and the offloaded output
     //    will be closed causing the effect to be moved to a PCM output.
-    // 2: A deep buffer output
-    // 3: The primary output
-    // 4: the first output in the list
+    // 2: Non offloaded Direct output
+    // 3: A deep buffer output
+    // 4: The primary output
+    // 5: the first output in the list
 
     DeviceVector devices = mEngine->getOutputDevicesForAttributes(
                 attributes_initializer(AUDIO_USAGE_MEDIA), nullptr, false /*fromCache*/);
@@ -2729,6 +2746,7 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
 
     while (output == AUDIO_IO_HANDLE_NONE) {
         audio_io_handle_t outputOffloaded = AUDIO_IO_HANDLE_NONE;
+        audio_io_handle_t outputDirect = AUDIO_IO_HANDLE_NONE;
         audio_io_handle_t outputDeepBuffer = AUDIO_IO_HANDLE_NONE;
         audio_io_handle_t outputPrimary = AUDIO_IO_HANDLE_NONE;
 
@@ -2742,6 +2760,9 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) != 0) {
                 outputOffloaded = output;
             }
+            if ((desc->mFlags == AUDIO_OUTPUT_FLAG_DIRECT) != 0) {
+                outputDirect = output;
+            }
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_DEEP_BUFFER) != 0) {
                 outputDeepBuffer = output;
             }
@@ -2751,7 +2772,9 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
         }
         if (outputOffloaded != AUDIO_IO_HANDLE_NONE) {
             output = outputOffloaded;
-        } else if (outputDeepBuffer != AUDIO_IO_HANDLE_NONE) {
+        } else if (outputDirect != AUDIO_IO_HANDLE_NONE) {
+            output = outputDirect;
+        }  else if (outputDeepBuffer != AUDIO_IO_HANDLE_NONE) {
             output = outputDeepBuffer;
         } else if (outputPrimary != AUDIO_IO_HANDLE_NONE) {
             output = outputPrimary;
@@ -4192,7 +4215,8 @@ status_t AudioPolicyManager::setMasterMono(bool mono)
         Vector<audio_io_handle_t> offloaded;
         for (size_t i = 0; i < mOutputs.size(); ++i) {
             sp<SwAudioOutputDescriptor> desc = mOutputs.valueAt(i);
-            if (desc->mFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) {
+            if (desc->mFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD ||
+                desc->mFlags == AUDIO_OUTPUT_FLAG_DIRECT) {
                 offloaded.push(desc->mIoHandle);
             }
         }
