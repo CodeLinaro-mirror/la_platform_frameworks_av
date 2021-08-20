@@ -97,6 +97,13 @@ void NuPlayer::GenericSource::resetDataSource() {
     }
     mUri.clear();
     mUriHeaders.clear();
+    if (mAudioTrack.mSource != NULL ) {
+        mAudioTrack.mSource->stop();
+    }
+    if (mVideoTrack.mSource != NULL ) {
+        mVideoTrack.mSource->stop();
+    }
+
     mSources.clear();
     mFd.reset();
     mOffset = 0;
