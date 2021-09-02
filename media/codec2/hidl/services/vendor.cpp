@@ -122,18 +122,6 @@ private:
                 })
                 .withSetter(SetIonUsage)
                 .build());
-
-            addParameter(
-                DefineParam(mDmaBufUsageInfo, "dmabuf-usage")
-                .withDefault(new C2StoreDmaBufUsageInfo())
-                .withFields({
-                    C2F(mDmaBufUsageInfo, usage).flags({C2MemoryUsage::CPU_READ | C2MemoryUsage::CPU_WRITE}),
-                    C2F(mDmaBufUsageInfo, capacity).inRange(0, UINT32_MAX, 1024),
-                    C2F(mDmaBufUsageInfo, heapName).any(),
-                    C2F(mDmaBufUsageInfo, allocFlags).flags({}),
-                })
-                .withSetter(SetDmaBufUsage)
-                .build());
         }
 
         virtual ~Interface() = default;
