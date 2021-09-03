@@ -135,7 +135,16 @@ private:
             return C2R::Ok();
         }
 
+        static C2R SetDmaBufUsage(bool /* mayBlock */, C2P<C2StoreDmaBufUsageInfo> &me) {
+            // Vendor's TODO: put appropriate mapping logic
+            strlcpy(me.set().m.heapName, "system", me.v.flexCount());
+            me.set().m.allocFlags = 0;
+            return C2R::Ok();
+        }
+
+
         std::shared_ptr<C2StoreIonUsageInfo> mIonUsageInfo;
+        std::shared_ptr<C2StoreDmaBufUsageInfo> mDmaBufUsageInfo;
     };
     std::shared_ptr<C2ReflectorHelper> mReflectorHelper;
     Interface mInterface;
