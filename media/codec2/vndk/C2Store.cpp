@@ -645,6 +645,7 @@ private:
 
     struct Interface : public C2InterfaceHelper {
         std::shared_ptr<C2StoreIonUsageInfo> mIonUsageInfo;
+        std::shared_ptr<C2StoreDmaBufUsageInfo> mDmaBufUsageInfo;
 
         Interface(std::shared_ptr<C2ReflectorHelper> reflector)
             : C2InterfaceHelper(reflector) {
@@ -681,6 +682,12 @@ private:
 #endif
                     return C2R::Ok();
                 }
+
+                static C2R setDmaBufUsage(bool /* mayBlock */, C2P<C2StoreDmaBufUsageInfo> &me) {
+                    strlcpy(me.set().m.heapName, "system", me.v.flexCount());
+                    me.set().m.allocFlags = 0;
+                    return C2R::Ok();
+                };
             };
 
             addParameter(
