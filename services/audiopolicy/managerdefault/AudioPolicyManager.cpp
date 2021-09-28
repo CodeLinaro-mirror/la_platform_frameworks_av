@@ -946,7 +946,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
     bool usePrimaryOutputFromPolicyMixes = requestedDevice == nullptr && primaryMix != nullptr;
 
     // FIXME: in case of RENDER policy, the output capabilities should be checked
-    if (!secondaryMixes->empty() && !audio_is_linear_pcm(config->format)) {
+    if ((secondaryMixes != nullptr && !secondaryMixes->empty()) && !audio_is_linear_pcm(config->format)) {
         ALOGD("%s: rejecting request as dynamic audio policy only support pcm", __func__);
         return BAD_VALUE;
     }
