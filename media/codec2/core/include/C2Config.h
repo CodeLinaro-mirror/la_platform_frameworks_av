@@ -221,6 +221,7 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     kParamIndexDrcEffectType, // drc, enum
     kParamIndexDrcOutputLoudness, // drc, float (dBFS)
     kParamIndexDrcAlbumMode, // drc, enum
+    kParamIndexAudioFrameSize, // int
 
     /* ============================== platform-defined parameters ============================== */
 
@@ -249,6 +250,8 @@ enum C2ParamIndexKind : C2Param::type_index_t {
 
     // low latency mode
     kParamIndexLowLatencyMode, // bool
+
+    kParamIndexStoreDmaBufUsage,  // store, struct
 };
 
 }
@@ -1964,9 +1967,20 @@ constexpr char C2_PARAMKEY_DRC_ALBUM_MODE[] = "coding.drc.album-mode";
 /**
  * DRC output loudness in dBFS. Retrieved during decoding
  */
- typedef C2StreamParam<C2Info, C2FloatValue, kParamIndexDrcOutputLoudness>
+typedef C2StreamParam<C2Info, C2FloatValue, kParamIndexDrcOutputLoudness>
         C2StreamDrcOutputLoudnessTuning;
- constexpr char C2_PARAMKEY_DRC_OUTPUT_LOUDNESS[] = "output.drc.output-loudness";
+constexpr char C2_PARAMKEY_DRC_OUTPUT_LOUDNESS[] = "output.drc.output-loudness";
+
+/**
+ * Audio frame size in samples.
+ *
+ * Audio encoders can expose this parameter to signal the desired audio frame
+ * size that corresponds to a single coded access unit.
+ * Default value is 0, meaning that the encoder accepts input buffers of any size.
+ */
+typedef C2StreamParam<C2Info, C2Uint32Value, kParamIndexAudioFrameSize>
+        C2StreamAudioFrameSizeInfo;
+constexpr char C2_PARAMKEY_AUDIO_FRAME_SIZE[] = "raw.audio-frame-size";
 
 /* --------------------------------------- AAC components --------------------------------------- */
 
@@ -2036,6 +2050,33 @@ struct C2StoreIonUsageStruct {
 // store, private
 typedef C2GlobalParam<C2Info, C2StoreIonUsageStruct, kParamIndexStoreIonUsage>
         C2StoreIonUsageInfo;
+
+/**
+ * This structure describes the preferred DMA-Buf allocation parameters for a given memory usage.
+ */
+struct C2StoreDmaBufUsageStruct {
+    inline C2StoreDmaBufUsageStruct() { memset(this, 0, sizeof(*this)); }
+
+    inline C2StoreDmaBufUsageStruct(size_t flexCount, uint64_t usage_, uint32_t capacity_)
+        : usage(usage_), capacity(capacity_), allocFlags(0) {
+        memset(heapName, 0, flexCount);
+    }
+
+    uint64_t usage;                         ///< C2MemoryUsage
+    uint32_t capacity;                      ///< capacity
+    int32_t allocFlags;                     ///< ion allocation flags
+    char heapName[];                        ///< dmabuf heap name
+
+    DEFINE_AND_DESCRIBE_FLEX_C2STRUCT(StoreDmaBufUsage, heapName)
+    C2FIELD(usage, "usage")
+    C2FIELD(capacity, "capacity")
+    C2FIELD(allocFlags, "alloc-flags")
+    C2FIELD(heapName, "heap-name")
+};
+
+// store, private
+typedef C2GlobalParam<C2Info, C2StoreDmaBufUsageStruct, kParamIndexStoreDmaBufUsage>
+        C2StoreDmaBufUsageInfo;
 
 /**
  * Flexible pixel format descriptors
