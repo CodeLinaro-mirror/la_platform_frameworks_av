@@ -261,12 +261,6 @@ status_t CCodecBufferChannel::queueInputBufferInternal(sp<MediaCodecBuffer> buff
             work->input.buffers.push_back(c2buffer);
         }
     } else if (eos) {
-        Mutexed<Input>::Locked input(mInput);
-        if (input->frameReassembler) {
-            usesFrameReassembler = true;
-            // drain any pending items with eos
-            input->frameReassembler.process(buffer, &items);
-        }
         flags |= C2FrameData::FLAG_END_OF_STREAM;
     }
     if (usesFrameReassembler) {
