@@ -40,6 +40,23 @@ cc_defaults {
     },
 }
 
+soong_config_module_type {
+    name: "soft_omx_plugin_cc_defaults",
+    module_type: "cc_defaults",
+    config_namespace: "soft_omx",
+    bool_variables: ["disable_soft_omx_flac_dec"],
+    properties: ["cflags"],
+}
+
+soft_omx_plugin_cc_defaults {
+    name: "soft_omx_plugin_defaults",
+    soong_config_variables: {
+       disable_soft_omx_flac_dec: {
+            cflags: ["-DDISABLE_QTI_FLAC_DECODER"],
+       },
+    },
+}
+
 cc_library_shared {
     name: "libstagefright_omx",
     vendor_available: true,
@@ -188,6 +205,7 @@ cc_library_shared {
 cc_library_shared {
     name: "libstagefright_softomx_plugin",
     vendor_available: true,
+    defaults: ["soft_omx_plugin_defaults"],
 
     srcs: [
         "SoftOMXPlugin.cpp",
