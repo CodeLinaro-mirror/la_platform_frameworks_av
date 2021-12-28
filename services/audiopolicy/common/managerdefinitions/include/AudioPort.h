@@ -91,11 +91,10 @@ public:
     status_t checkCompatibleAudioProfile(uint32_t &samplingRate,
                                          audio_channel_mask_t &channelMask,
                                          audio_format_t &format,
-                                         bool checkExactFormat,
-                                         bool checkExactChannelMask) const
+                                         bool checkExactFormat) const
     {
         return mProfiles.checkCompatibleProfile(samplingRate, channelMask, format, mType,
-                                                  mRole, checkExactFormat, checkExactChannelMask);
+                                                  mRole, checkExactFormat);
     }
 
     void clearAudioProfiles() { return mProfiles.clearProfiles(); }

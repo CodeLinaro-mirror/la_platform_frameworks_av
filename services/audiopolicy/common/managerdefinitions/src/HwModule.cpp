@@ -382,13 +382,11 @@ sp<DeviceDescriptor> HwModuleCollection::createDevice(const audio_devices_t type
             // @todo quid of audio profile? import the profile from device of the same type?
             const auto &isoTypeDeviceForProfile =
                 profile->getSupportedDevices().getDevice(type, String8(), AUDIO_FORMAT_DEFAULT);
-            if (isoTypeDeviceForProfile) {
-                device->importAudioPort(isoTypeDeviceForProfile, true /* force */);
+            device->importAudioPort(isoTypeDeviceForProfile, true /* force */);
 
-                ALOGV("%s: adding device %s to profile %s", __FUNCTION__,
-                      device->toString().c_str(), profile->getTagName().c_str());
-                profile->addSupportedDevice(device);
-            }
+            ALOGV("%s: adding device %s to profile %s", __FUNCTION__,
+                  device->toString().c_str(), profile->getTagName().c_str());
+            profile->addSupportedDevice(device);
         }
     }
     return device;

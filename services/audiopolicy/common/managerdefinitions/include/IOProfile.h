@@ -85,8 +85,7 @@ public:
                              // FIXME parameter type
                              uint32_t flags,
                              bool exactMatchRequiredForInputFlags = false,
-                             bool checkExactFormatMatch = false,
-                             bool checkExactchannelMask = false) const;
+                             bool checkExactFormatMatch = false) const;
 
     void dump(String8 *dst) const;
     void log();

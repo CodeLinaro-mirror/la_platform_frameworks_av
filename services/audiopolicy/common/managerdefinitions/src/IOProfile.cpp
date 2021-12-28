@@ -35,8 +35,7 @@ bool IOProfile::isCompatibleProfile(const DeviceVector &devices,
                                     // FIXME type punning here
                                     uint32_t flags,
                                     bool exactMatchRequiredForInputFlags,
-                                    bool checkExactFormat,
-                                    bool checkExactChannelMask) const
+                                    bool checkExactFormat) const
 {
     const bool isPlaybackThread =
             getType() == AUDIO_PORT_TYPE_MIX && getRole() == AUDIO_PORT_ROLE_SOURCE;
@@ -72,8 +71,7 @@ bool IOProfile::isCompatibleProfile(const DeviceVector &devices,
                 return false;
             }
         } else if (checkCompatibleAudioProfile(
-                myUpdatedSamplingRate, myUpdatedChannelMask, myUpdatedFormat, checkExactFormat,
-                checkExactChannelMask) != NO_ERROR) {
+                myUpdatedSamplingRate, myUpdatedChannelMask, myUpdatedFormat, checkExactFormat) != NO_ERROR) {
             return false;
         }
     } else {

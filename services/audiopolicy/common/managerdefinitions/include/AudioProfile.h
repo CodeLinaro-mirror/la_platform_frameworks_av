@@ -140,8 +140,7 @@ public:
                                     audio_format_t &format,
                                     audio_port_type_t portType,
                                     audio_port_role_t portRole,
-                                    bool checkExactFormat = false,
-                                    bool checkExactChannelMask = false) const;
+                                    bool checkExactFormat = false) const;
     void clearProfiles();
     // Assuming that this profile vector contains input profiles,
     // find the best matching config from 'outputProfiles', according to
