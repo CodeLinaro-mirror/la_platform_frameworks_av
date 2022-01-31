@@ -154,7 +154,9 @@ private:
 
     enum {
         kPortIndexInput  = 0,
-        kPortIndexOutput = 1
+        kPortIndexOutput = 1,
+        kPortIndexInputExtradata = 2,
+        kPortIndexOutputExtradata = 3
     };
 
     enum {
@@ -243,7 +245,7 @@ private:
     sp<IOMX> mOMX;
     sp<IOMXNode> mOMXNode;
     int32_t mNodeGeneration;
-    sp<TAllocator> mAllocator[2];
+    sp<TAllocator> mAllocator[4];
 
     bool mUsingNativeWindow;
     sp<ANativeWindow> mNativeWindow;
@@ -262,7 +264,7 @@ private:
     sp<AMessage> mBaseOutputFormat;
 
     FrameRenderTracker mRenderTracker; // render information for buffers rendered by ACodec
-    Vector<BufferInfo> mBuffers[2];
+    Vector<BufferInfo> mBuffers[4];
     bool mPortEOS[2];
     status_t mInputEOSResult;
 
