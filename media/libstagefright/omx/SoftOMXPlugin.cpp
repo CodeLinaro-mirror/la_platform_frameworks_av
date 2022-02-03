@@ -26,6 +26,7 @@
 
 #include <dlfcn.h>
 #define QTI_FLAC_DECODER
+#undef QTI_FLAC_DECODER
 
 namespace android {
 
