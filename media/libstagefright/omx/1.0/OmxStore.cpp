@@ -130,8 +130,6 @@ OmxStore::OmxStore(
         mRoleList[i] = std::move(role);
         ++i;
     }
-
-    mPrefix = parser.getCommonPrefix();
 }
 
 OmxStore::~OmxStore() {
