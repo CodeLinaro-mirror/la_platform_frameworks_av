@@ -2208,6 +2208,11 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
         if (samplingRate > SAMPLE_RATE_HZ_DEFAULT) {
             currentMatchCriteria[4] = outputDesc->getSamplingRate();
         }
+        if (flags & AUDIO_OUTPUT_FLAG_FAST && samplingRate <= SAMPLE_RATE_HZ_DEFAULT) {
+            ALOGV("%s match criterion modifed for AUDIO_OUTPUT_FLAG_FAST, outputDesc->mSamplingRate=%d, samplingRate=%d",
+                    __func__, outputDesc->getSamplingRate(), samplingRate);
+            currentMatchCriteria[4] = (outputDesc->getSamplingRate() == samplingRate);
+        }
 
         // performance flags match
         if (flags & AUDIO_OUTPUT_FLAG_FAST) {
@@ -6409,6 +6414,7 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
         // direct outputs are closed immediately after checking the availability of attached devices
         // This also validates mAvailableOutputDevices list
         for (const auto& outProfile : hwModule->getOutputProfiles()) {
+            ALOGV("%s: Intializing output profile(mixport): %s", __func__, (outProfile->getTagName()).c_str());
             if (!outProfile->canOpenNewIo()) {
                 ALOGE("Invalid Output profile max open count %u for profile %s",
                       outProfile->maxOpenCount, outProfile->getTagName().c_str());
