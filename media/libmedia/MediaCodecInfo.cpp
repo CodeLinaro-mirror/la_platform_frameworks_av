@@ -33,6 +33,7 @@ constexpr char MediaCodecInfo::Capabilities::FEATURE_ADAPTIVE_PLAYBACK[];
 constexpr char MediaCodecInfo::Capabilities::FEATURE_DYNAMIC_TIMESTAMP[];
 constexpr char MediaCodecInfo::Capabilities::FEATURE_FRAME_PARSING[];
 constexpr char MediaCodecInfo::Capabilities::FEATURE_INTRA_REFRESH[];
+constexpr char MediaCodecInfo::Capabilities::FEATURE_SECURE_RECORD[];
 constexpr char MediaCodecInfo::Capabilities::FEATURE_MULTIPLE_FRAMES[];
 constexpr char MediaCodecInfo::Capabilities::FEATURE_SECURE_PLAYBACK[];
 constexpr char MediaCodecInfo::Capabilities::FEATURE_TUNNELED_PLAYBACK[];
