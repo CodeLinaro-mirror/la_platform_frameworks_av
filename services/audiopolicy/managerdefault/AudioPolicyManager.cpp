@@ -1134,21 +1134,20 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                 } else {
                     policyDesc = mOutputs.valueFor(newOutput);
                     primaryMix->setOutput(policyDesc);
+
+                    policyDesc->mPolicyMix = primaryMix;
+                    *output = policyDesc->mIoHandle;
+                    *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
+
+                    ALOGV("getOutputForAttr() returns output %d", *output);
+                    if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+                        *outputType = API_OUT_MIX_PLAYBACK;
+                    } else {
+                        *outputType = API_OUTPUT_LEGACY;
+                    }
+                    return NO_ERROR;
                 }
             }
-        }
-        if (policyDesc != nullptr) {
-            policyDesc->mPolicyMix = primaryMix;
-            *output = policyDesc->mIoHandle;
-            *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
-
-            ALOGV("getOutputForAttr() returns output %d", *output);
-            if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
-                *outputType = API_OUT_MIX_PLAYBACK;
-            } else {
-                *outputType = API_OUTPUT_LEGACY;
-            }
-            return NO_ERROR;
         }
     }
 
