@@ -3882,8 +3882,7 @@ bool AudioPolicyManager::isOffloadSupportedInternal(const audio_offload_info_t& 
         }
         int channelCount = popcount(offloadInfo.channel_mask);
         if (channelCount > 2) {
-            if (audioFormat == AUDIO_FORMAT_FLAC || audioFormat == AUDIO_FORMAT_AAC_ADTS ||
-                audioFormat == AUDIO_FORMAT_AAC || audioFormat == AUDIO_FORMAT_VORBIS) {
+            if (audioFormat == AUDIO_FORMAT_FLAC || audioFormat == AUDIO_FORMAT_VORBIS) {
                 ALOGD("%s, Offload denied for format %0x, channels %d",
                         __func__, audioFormat, channelCount);
                 return false;
@@ -3927,12 +3926,11 @@ bool AudioPolicyManager::isOffloadSupportedInternal(const audio_offload_info_t& 
             return false;
         }
         if ((offloadInfo.format == AUDIO_FORMAT_MP3) ||
-            ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC) ||
             ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_FLAC) ||
             ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_VORBIS) ||
-            ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_DSD) ||
-            ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC_ADTS)) {
-            ALOGD("Offload denied internal for MP3/AAC/VORBIS/FLAC format %0x", offloadInfo.format & AUDIO_FORMAT_MAIN_MASK);
+            ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_DSD)) {
+            ALOGD("Offload denied internal for MP3/VORBIS/FLAC format %0x",
+                    offloadInfo.format & AUDIO_FORMAT_MAIN_MASK);
             return false;
         }
     }
