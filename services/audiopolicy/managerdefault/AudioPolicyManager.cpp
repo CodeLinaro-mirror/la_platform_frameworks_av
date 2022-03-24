@@ -917,7 +917,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
     DeviceVector outputDevices;
     const audio_port_handle_t requestedPortId = *selectedDeviceId;
     DeviceVector msdDevices = getMsdAudioOutDevices();
-    const sp<DeviceDescriptor> requestedDevice =
+    sp<DeviceDescriptor> requestedDevice =
         mAvailableOutputDevices.getDeviceFromId(requestedPortId);
 
     *outputType = API_OUTPUT_INVALID;
@@ -932,6 +932,11 @@ status_t AudioPolicyManager::getOutputForAttrInt(
 
     ALOGV("%s() attributes=%s stream=%s session %d selectedDeviceId %d", __func__,
           toString(*resultAttr).c_str(), toString(*stream).c_str(), session, requestedPortId);
+    outputDevices = mEngine->getOutputDevicesForAttributes(*resultAttr, requestedDevice, false);
+    if (outputDevices.containsDeviceAmongTypes({AUDIO_DEVICE_OUT_BLUETOOTH_A2DP, AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES,
+        AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER})){
+        requestedDevice = outputDevices.getDeviceForOpening();
+    }
 
     // The primary output is the explicit routing (eg. setPreferredDevice) if specified,
     //       otherwise, fallback to the dynamic policies, if none match, query the engine.
