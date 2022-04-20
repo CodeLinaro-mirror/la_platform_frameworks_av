@@ -148,6 +148,22 @@ std::vector<std::string> MediaCodecsXmlParser::getDefaultXmlNames() {
             prefixes[0] + variants[0] + ".xml",
             prefixes[1] + variants[1] + ".xml"
         };
+
+    /* Overwrite XML names in value add builds for features like
+    ** avc secure encoder, if files are not found for any platform
+    ** then fallback to the default XML files
+    */
+    names[0] = prefixes[0] + variants[0] + "_va" + ".xml";
+    names[1] = prefixes[1] + variants[1] + "_va" + ".xml";
+
+    std::string codecs_path      = "/vendor/etc/" + names[0];
+    std::string codecs_perf_path = "/vendor/etc/" + names[1];
+
+    if (!fileExists(codecs_path) || !fileExists(codecs_perf_path)) {
+        /* fallback to the default files */
+        names[0] = prefixes[0] + variants[0] + ".xml";
+        names[1] = prefixes[1] + variants[1] + ".xml";
+    }
     return names;
 }
 
