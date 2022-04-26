@@ -1,5 +1,6 @@
 service drm /system/bin/drmserver
     class main
+    disabled
     user drm
     group drm system inet drmrpc readproc
     writepid /dev/cpuset/foreground/tasks
