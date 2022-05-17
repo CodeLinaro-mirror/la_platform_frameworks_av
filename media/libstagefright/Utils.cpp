@@ -50,6 +50,11 @@
 // TODO : Remove the defines once mainline media is built against NDK >= 31.
 // The mp4 extractor is part of mainline and builds against NDK 29 as of
 // writing. These keys are available only from NDK 31:
+
+#ifndef __NO_AVEXTENSIONS__
+#include <stagefright/AVExtensions.h>
+#endif
+
 #define AMEDIAFORMAT_KEY_MPEGH_PROFILE_LEVEL_INDICATION \
   "mpegh-profile-level-indication"
 #define AMEDIAFORMAT_KEY_MPEGH_REFERENCE_CHANNEL_LAYOUT \
