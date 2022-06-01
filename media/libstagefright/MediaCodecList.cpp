@@ -259,6 +259,7 @@ ssize_t MediaCodecList::findCodecByType(
     static const char *advancedFeatures[] = {
         "feature-secure-playback",
         "feature-tunneled-playback",
+        "feature-secure-record",
     };
 
     size_t numCodecInfos = mCodecInfos.size();

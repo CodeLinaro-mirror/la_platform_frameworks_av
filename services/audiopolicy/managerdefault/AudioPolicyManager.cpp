@@ -1134,21 +1134,20 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                 } else {
                     policyDesc = mOutputs.valueFor(newOutput);
                     primaryMix->setOutput(policyDesc);
+
+                    policyDesc->mPolicyMix = primaryMix;
+                    *output = policyDesc->mIoHandle;
+                    *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
+
+                    ALOGV("getOutputForAttr() returns output %d", *output);
+                    if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+                        *outputType = API_OUT_MIX_PLAYBACK;
+                    } else {
+                        *outputType = API_OUTPUT_LEGACY;
+                    }
+                    return NO_ERROR;
                 }
             }
-        }
-        if (policyDesc != nullptr) {
-            policyDesc->mPolicyMix = primaryMix;
-            *output = policyDesc->mIoHandle;
-            *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
-
-            ALOGV("getOutputForAttr() returns output %d", *output);
-            if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
-                *outputType = API_OUT_MIX_PLAYBACK;
-            } else {
-                *outputType = API_OUTPUT_LEGACY;
-            }
-            return NO_ERROR;
         }
     }
 
@@ -1898,6 +1897,11 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
         if (samplingRate > SAMPLE_RATE_HZ_DEFAULT &&
                 samplingRate <= outputDesc->getSamplingRate()) {
             currentMatchCriteria[4] = outputDesc->getSamplingRate();
+        }
+        if (flags & AUDIO_OUTPUT_FLAG_FAST && samplingRate <= SAMPLE_RATE_HZ_DEFAULT) {
+            ALOGV("%s match criterion modifed for AUDIO_OUTPUT_FLAG_FAST, outputDesc->mSamplingRate=%d, samplingRate=%d",
+                    __func__, outputDesc->getSamplingRate(), samplingRate);
+            currentMatchCriteria[4] = (outputDesc->getSamplingRate() == samplingRate);
         }
 
         // performance flags match
@@ -3882,8 +3886,7 @@ bool AudioPolicyManager::isOffloadSupportedInternal(const audio_offload_info_t& 
         }
         int channelCount = popcount(offloadInfo.channel_mask);
         if (channelCount > 2) {
-            if (audioFormat == AUDIO_FORMAT_FLAC || audioFormat == AUDIO_FORMAT_AAC_ADTS ||
-                audioFormat == AUDIO_FORMAT_AAC || audioFormat == AUDIO_FORMAT_VORBIS) {
+            if (audioFormat == AUDIO_FORMAT_FLAC || audioFormat == AUDIO_FORMAT_VORBIS) {
                 ALOGD("%s, Offload denied for format %0x, channels %d",
                         __func__, audioFormat, channelCount);
                 return false;
@@ -3927,12 +3930,11 @@ bool AudioPolicyManager::isOffloadSupportedInternal(const audio_offload_info_t& 
             return false;
         }
         if ((offloadInfo.format == AUDIO_FORMAT_MP3) ||
-            ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC) ||
             ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_FLAC) ||
             ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_VORBIS) ||
-            ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_DSD) ||
-            ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC_ADTS)) {
-            ALOGD("Offload denied internal for MP3/AAC/VORBIS/FLAC format %0x", offloadInfo.format & AUDIO_FORMAT_MAIN_MASK);
+            ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_DSD)) {
+            ALOGD("Offload denied internal for MP3/VORBIS/FLAC format %0x",
+                    offloadInfo.format & AUDIO_FORMAT_MAIN_MASK);
             return false;
         }
     }
@@ -5427,6 +5429,7 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
         // required by an app.
         // This also validates mAvailableOutputDevices list
         for (const auto& outProfile : hwModule->getOutputProfiles()) {
+            ALOGV("%s: Intializing output profile(mixport): %s", __func__, (outProfile->getTagName()).c_str());
             if (!outProfile->canOpenNewIo()) {
                 ALOGE("Invalid Output profile max open count %u for profile %s",
                       outProfile->maxOpenCount, outProfile->getTagName().c_str());
