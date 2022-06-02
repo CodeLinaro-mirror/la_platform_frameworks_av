@@ -1129,24 +1129,23 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                         *stream, session, config,
                         (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT),
                         DeviceVector(deviceDesc), &newOutput);
-                if (status != NO_ERROR) {
+                if (status != NO_ERROR)
                     policyDesc = nullptr;
-                } else {
+                else
                     policyDesc = mOutputs.valueFor(newOutput);
-                    primaryMix->setOutput(policyDesc);
+            }
+            if (policyDesc != nullptr){
+                policyDesc->mPolicyMix = primaryMix;
+                *output = policyDesc->mIoHandle;
+                *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
 
-                    policyDesc->mPolicyMix = primaryMix;
-                    *output = policyDesc->mIoHandle;
-                    *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
-
-                    ALOGV("getOutputForAttr() returns output %d", *output);
-                    if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
-                        *outputType = API_OUT_MIX_PLAYBACK;
-                    } else {
-                        *outputType = API_OUTPUT_LEGACY;
-                    }
-                    return NO_ERROR;
+                ALOGV("getOutputForAttr() returns output %d", *output);
+                if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+                    *outputType = API_OUT_MIX_PLAYBACK;
+                } else {
+                    *outputType = API_OUTPUT_LEGACY;
                 }
+                return NO_ERROR;
             }
         }
     }
