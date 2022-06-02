@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-//#define LOG_NDEBUG 0
+#define LOG_NDEBUG 0
 #include "hidl/HidlSupport.h"
 #define LOG_TAG "MediaCodec"
 #include <utils/Log.h>
@@ -1472,9 +1472,14 @@ status_t MediaCodec::init(const AString &name, bool nameIsType) {
     if (mDomain == DOMAIN_VIDEO) {
         // video codec needs dedicated looper
         if (mCodecLooper == NULL) {
+            status_t err = OK;
             mCodecLooper = new ALooper;
             mCodecLooper->setName("CodecLooper");
-            mCodecLooper->start(false, false, ANDROID_PRIORITY_AUDIO);
+            err = mCodecLooper->start(false, false, ANDROID_PRIORITY_AUDIO);
+            if (OK != err) {
+                ALOGE("Codec Looper failed to start");
+                return err;
+            }
         }
 
         mCodecLooper->registerHandler(mCodec);
@@ -3067,8 +3072,9 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                     CHECK(msg->findInt32("err", &err));
                     CHECK(msg->findInt32("actionCode", &actionCode));
 
-                    ALOGE("Codec reported err %#x, actionCode %d, while in state %d/%s",
-                            err, actionCode, mState, stateString(mState).c_str());
+                    ALOGE("Codec reported err %#x/%s, actionCode %d, while in state %d/%s",
+                                              err, StrMediaError(err).c_str(), actionCode,
+                                              mState, stateString(mState).c_str());
                     if (err == DEAD_OBJECT) {
                         mFlags |= kFlagSawMediaServerDie;
                         mFlags &= ~kFlagIsComponentAllocated;

@@ -65,6 +65,7 @@
 #include <media/nbaio/PipeReader.h>
 #include <media/nbaio/SourceAudioBufferProvider.h>
 #include <mediautils/BatteryNotifier.h>
+#include <mediautils/Process.h>
 
 #include <audiomanager/AudioManager.h>
 #include <powermanager/PowerManager.h>
@@ -926,6 +927,20 @@ void AudioFlinger::ThreadBase::dump(int fd, const Vector<String16>& args)
 
     dprintf(fd, "  Local log:\n");
     mLocalLog.dump(fd, "   " /* prefix */, 40 /* lines */);
+
+    // --all does the statistics
+    bool dumpAll = false;
+    for (const auto &arg : args) {
+        if (arg == String16("--all")) {
+            dumpAll = true;
+        }
+    }
+    if (dumpAll || type() == SPATIALIZER) {
+        const std::string sched = mThreadSnapshot.toString();
+        if (!sched.empty()) {
+            (void)write(fd, sched.c_str(), sched.size());
+        }
+    }
 }
 
 void AudioFlinger::ThreadBase::dumpBase_l(int fd, const Vector<String16>& args __unused)
@@ -2104,6 +2119,7 @@ void AudioFlinger::PlaybackThread::onFirstRef()
         }
     }
     run(mThreadName, ANDROID_PRIORITY_URGENT_AUDIO);
+    mThreadSnapshot.setTid(getTid());
 }
 
 // ThreadBase virtuals
@@ -2234,7 +2250,8 @@ sp<AudioFlinger::PlaybackThread::Track> AudioFlinger::PlaybackThread::createTrac
         pid_t tid,
         status_t *status,
         audio_port_handle_t portId,
-        const sp<media::IAudioTrackCallback>& callback)
+        const sp<media::IAudioTrackCallback>& callback,
+        bool isSpatialized)
 {
     size_t frameCount = *pFrameCount;
     size_t notificationFrameCount = *pNotificationFrameCount;
@@ -2526,7 +2543,8 @@ sp<AudioFlinger::PlaybackThread::Track> AudioFlinger::PlaybackThread::createTrac
                           channelMask, frameCount,
                           nullptr /* buffer */, (size_t)0 /* bufferSize */, sharedBuffer,
                           sessionId, creatorPid, attributionSource, trackFlags,
-                          TrackBase::TYPE_DEFAULT, portId, SIZE_MAX /*frameCountToBeReady*/, speed);
+                          TrackBase::TYPE_DEFAULT, portId, SIZE_MAX /*frameCountToBeReady*/,
+                          speed, isSpatialized);
 
         lStatus = track != 0 ? track->initCheck() : (status_t) NO_MEMORY;
         if (lStatus != NO_ERROR) {
@@ -3357,6 +3375,7 @@ ssize_t AudioFlinger::PlaybackThread::threadLoop_write()
     mInWrite = false;
     if (mStandby) {
         mThreadMetrics.logBeginInterval();
+        mThreadSnapshot.onBegin();
         mStandby = false;
     }
     return bytesWritten;
@@ -3842,6 +3861,7 @@ bool AudioFlinger::PlaybackThread::threadLoop()
                     if (!mStandby) {
                         LOG_AUDIO_STATE();
                         mThreadMetrics.logEndInterval();
+                        mThreadSnapshot.onEnd();
                         mStandby = true;
                     }
                     sendStatistics(false /* force */);
@@ -3905,14 +3925,14 @@ bool AudioFlinger::PlaybackThread::threadLoop()
                             && effectChain->containsHapticGeneratingEffect_l()) {
                         activeHapticSessionId = track->sessionId();
                         isHapticSessionSpatialized =
-                                mType == SPATIALIZER && track->canBeSpatialized();
+                                mType == SPATIALIZER && track->isSpatialized();
                         break;
                     }
                     if (activeHapticSessionId == AUDIO_SESSION_NONE
                             && track->getHapticPlaybackEnabled()) {
                         activeHapticSessionId = track->sessionId();
                         isHapticSessionSpatialized =
-                                mType == SPATIALIZER && track->canBeSpatialized();
+                                mType == SPATIALIZER && track->isSpatialized();
                     }
                 }
             }
@@ -5604,7 +5624,7 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::MixerThread::prepareTrac
                 AudioMixer::TRACK,
                 AudioMixer::CHANNEL_MASK, (void *)(uintptr_t)track->channelMask());
 
-            if (mType == SPATIALIZER && !track->canBeSpatialized()) {
+            if (mType == SPATIALIZER && !track->isSpatialized()) {
                 mAudioMixer->setParameter(
                     trackId,
                     AudioMixer::TRACK,
@@ -5654,7 +5674,7 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::MixerThread::prepareTrac
             if (mMixerBufferEnabled
                     && (track->mainBuffer() == mSinkBuffer
                             || track->mainBuffer() == mMixerBuffer)) {
-                if (mType == SPATIALIZER && !track->canBeSpatialized()) {
+                if (mType == SPATIALIZER && !track->isSpatialized()) {
                     mAudioMixer->setParameter(
                             trackId,
                             AudioMixer::TRACK,
@@ -5992,6 +6012,7 @@ bool AudioFlinger::MixerThread::checkForNewParameter_l(const String8& keyValuePa
             mOutput->standby();
             if (!mStandby) {
                 mThreadMetrics.logEndInterval();
+                mThreadSnapshot.onEnd();
                 mStandby = true;
             }
             mBytesWritten = 0;
@@ -6547,6 +6568,7 @@ bool AudioFlinger::DirectOutputThread::checkForNewParameter_l(const String8& key
             mOutput->standby();
             if (!mStandby) {
                 mThreadMetrics.logEndInterval();
+                mThreadSnapshot.onEnd();
                 mStandby = true;
             }
             mBytesWritten = 0;
@@ -7181,6 +7203,7 @@ ssize_t AudioFlinger::DuplicatingThread::threadLoop_write()
     }
     if (mStandby) {
         mThreadMetrics.logBeginInterval();
+        mThreadSnapshot.onBegin();
         mStandby = false;
     }
     return (ssize_t)mSinkBufferSize;
@@ -7706,6 +7729,7 @@ reacquire_wakelock:
                     doBroadcast = true;
                     if (mStandby) {
                         mThreadMetrics.logBeginInterval();
+                        mThreadSnapshot.onBegin();
                         mStandby = false;
                     }
                     activeTrack->mState = TrackBase::ACTIVE;
@@ -8187,6 +8211,7 @@ void AudioFlinger::RecordThread::standbyIfNotAlreadyInStandby()
     if (!mStandby) {
         inputStandBy();
         mThreadMetrics.logEndInterval();
+        mThreadSnapshot.onEnd();
         mStandby = true;
     }
 }
@@ -9572,6 +9597,7 @@ status_t AudioFlinger::MmapThread::exitStandby()
     }
     if (mStandby) {
         mThreadMetrics.logBeginInterval();
+        mThreadSnapshot.onBegin();
         mStandby = false;
     }
     return NO_ERROR;
@@ -9611,6 +9637,7 @@ status_t AudioFlinger::MmapThread::start(const AudioClient& client,
                 (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_MMAP_NOIRQ | AUDIO_OUTPUT_FLAG_DIRECT);
         audio_port_handle_t deviceId = mDeviceId;
         std::vector<audio_io_handle_t> secondaryOutputs;
+        bool isSpatialized;
         ret = AudioSystem::getOutputForAttr(&mAttr, &io,
                                             mSessionId,
                                             &stream,
@@ -9619,7 +9646,8 @@ status_t AudioFlinger::MmapThread::start(const AudioClient& client,
                                             flags,
                                             &deviceId,
                                             &portId,
-                                            &secondaryOutputs);
+                                            &secondaryOutputs,
+                                            &isSpatialized);
         ALOGD_IF(!secondaryOutputs.empty(),
                  "MmapThread::start does not support secondary outputs, ignoring them");
     } else {
@@ -9766,6 +9794,7 @@ status_t AudioFlinger::MmapThread::standby()
     mHalStream->standby();
     if (!mStandby) {
         mThreadMetrics.logEndInterval();
+        mThreadSnapshot.onEnd();
         mStandby = true;
     }
     releaseWakeLock();

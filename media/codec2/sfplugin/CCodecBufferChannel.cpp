@@ -14,9 +14,12 @@
  * limitations under the License.
  */
 
-//#define LOG_NDEBUG 0
+#define LOG_NDEBUG 0
+#include <utils/Errors.h>
 #define LOG_TAG "CCodecBufferChannel"
+#define ATRACE_TAG  ATRACE_TAG_VIDEO
 #include <utils/Log.h>
+#include <utils/Trace.h>
 
 #include <algorithm>
 #include <atomic>
@@ -45,9 +48,9 @@
 #include <media/stagefright/foundation/AMessage.h>
 #include <media/stagefright/foundation/AUtils.h>
 #include <media/stagefright/foundation/hexdump.h>
-#include <media/stagefright/MediaCodec.h>
 #include <media/stagefright/MediaCodecConstants.h>
 #include <media/stagefright/SkipCutBuffer.h>
+#include <media/stagefright/SurfaceUtils.h>
 #include <media/MediaCodecBuffer.h>
 #include <mediadrm/ICrypto.h>
 #include <system/window.h>
@@ -153,6 +156,7 @@ CCodecBufferChannel::CCodecBufferChannel(
       mMetaMode(MODE_NONE),
       mInputMetEos(false),
       mLastInputBufferAvailableTs(0u),
+      mIsHWDecoder(false),
       mSendEncryptedInfoBuffer(false) {
     mOutputSurface.lock()->maxDequeueBuffers = kSmoothnessFactor + kRenderingDepth;
     {
@@ -187,6 +191,8 @@ void CCodecBufferChannel::setComponent(
     mComponent = component;
     mComponentName = component->getName() + StringPrintf("#%d", int(uintptr_t(component.get()) % 997));
     mName = mComponentName.c_str();
+    std::regex pattern{"c2\\.qti\\..*\\.decoder.*"};
+    mIsHWDecoder = std::regex_match(mComponentName, pattern);
 }
 
 status_t CCodecBufferChannel::setInputSurface(
@@ -334,6 +340,8 @@ status_t CCodecBufferChannel::queueInputBufferInternal(
     }
     c2_status_t err = C2_OK;
     if (!items.empty()) {
+        ScopedTrace trace(ATRACE_TAG, android::base::StringPrintf(
+                "CCodecBufferChannel::queue(%s@ts=%lld)", mName, (long long)timeUs).c_str());
         {
             Mutexed<PipelineWatcher>::Locked watcher(mPipelineWatcher);
             PipelineWatcher::Clock::time_point now = PipelineWatcher::Clock::now();
@@ -721,8 +729,7 @@ void CCodecBufferChannel::feedInputBufferIfAvailable() {
     // limit this WA to qc hw decoder only
     // if feedInputBufferIfAvailableInternal() successfully (has available input buffer),
     // mLastInputBufferAvailableTs would be updated. otherwise, not input buffer available
-    std::regex pattern{"c2\\.qti\\..*\\.decoder.*"};
-    if (std::regex_match(mComponentName, pattern)) {
+    if (mIsHWDecoder) {
         std::lock_guard<std::mutex> tsLock(mTsLock);
         uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
                 PipelineWatcher::Clock::now().time_since_epoch()).count();
@@ -758,8 +765,13 @@ void CCodecBufferChannel::feedInputBufferIfAvailableInternal() {
             if (numActiveSlots >= input->numSlots) {
                 break;
             }
+
+            // Control the inputs based on pipelineRoom only for HW decoder
+            if (!mIsHWDecoder) {
+                pipelineRoom = SIZE_MAX;
+            }
             if (pipelineRoom <= input->buffers->numClientBuffers()) {
-                ALOGI("pipelineRoom(%zu) is <= numClientBuffers(%zu). "
+                ALOGV("pipelineRoom(%zu) is <= numClientBuffers(%zu). "
                     "Not signalling any more buffers to client",
                     pipelineRoom, input->buffers->numClientBuffers());
                 break;
@@ -926,6 +938,17 @@ status_t CCodecBufferChannel::renderOutputBuffer(
         return UNKNOWN_ERROR;
     }
     const C2ConstGraphicBlock &block = blocks.front();
+    C2Fence c2fence = block.fence();
+    sp<Fence> fence = Fence::NO_FENCE;
+    if (c2fence.isHW()) {
+        int fenceFd = c2fence.fd();
+        fence = sp<Fence>::make(fenceFd);
+        if (!fence) {
+            ALOGE("[%s] Failed to allocate a fence", mName);
+            close(fenceFd);
+            return NO_MEMORY;
+        }
+    }
 
     // TODO: revisit this after C2Fence implementation.
     android::IGraphicBufferProducer::QueueBufferInput qbi(
@@ -938,7 +961,7 @@ status_t CCodecBufferChannel::renderOutputBuffer(
                  blocks.front().crop().bottom()),
             videoScalingMode,
             transform,
-            Fence::NO_FENCE, 0);
+            fence, 0);
     if (hdrStaticInfo || hdrDynamicInfo) {
         HdrMetadata hdr;
         if (hdrStaticInfo) {
@@ -974,6 +997,11 @@ status_t CCodecBufferChannel::renderOutputBuffer(
                 };
                 hdr.validTypes |= HdrMetadata::CTA861_3;
                 hdr.cta8613 = cta861_meta;
+            }
+
+            // does not have valid info
+            if (!(hdr.validTypes & (HdrMetadata::SMPTE2086 | HdrMetadata::CTA861_3))) {
+                hdrStaticInfo.reset();
             }
         }
         if (hdrDynamicInfo
@@ -1971,7 +1999,7 @@ bool CCodecBufferChannel::handleWork(
 
     int32_t flags = 0;
     if (worklet->output.flags & C2FrameData::FLAG_END_OF_STREAM) {
-        flags |= MediaCodec::BUFFER_FLAG_EOS;
+        flags |= BUFFER_FLAG_END_OF_STREAM;
         ALOGV("[%s] onWorkDone: output EOS", mName);
     }
 
@@ -1988,6 +2016,8 @@ bool CCodecBufferChannel::handleWork(
         // When using input surface we need to restore the original input timestamp.
         timestamp = work->input.ordinal.customOrdinal;
     }
+    ScopedTrace trace(ATRACE_TAG, android::base::StringPrintf(
+            "CCodecBufferChannel::onWorkDone(%s@ts=%lld)", mName, timestamp.peekll()).c_str());
     ALOGV("[%s] onWorkDone: input %lld, codec %lld => output %lld => %lld",
           mName,
           work->input.ordinal.customOrdinal.peekll(),
@@ -2009,7 +2039,7 @@ bool CCodecBufferChannel::handleWork(
         sp<MediaCodecBuffer> outBuffer;
         if (output->buffers && output->buffers->registerCsd(initData, &index, &outBuffer) == OK) {
             outBuffer->meta()->setInt64("timeUs", timestamp.peek());
-            outBuffer->meta()->setInt32("flags", MediaCodec::BUFFER_FLAG_CODECCONFIG);
+            outBuffer->meta()->setInt32("flags", BUFFER_FLAG_CODEC_CONFIG);
             ALOGV("[%s] onWorkDone: csd index = %zu [%p]", mName, index, outBuffer.get());
             if (outputFormat) {
                 ALOGD("[%s] sending CSD : output format changed to %s",
@@ -2050,7 +2080,7 @@ bool CCodecBufferChannel::handleWork(
             switch (info->coreIndex().coreIndex()) {
                 case C2StreamPictureTypeMaskInfo::CORE_INDEX:
                     if (((C2StreamPictureTypeMaskInfo *)info.get())->value & C2Config::SYNC_FRAME) {
-                        flags |= MediaCodec::BUFFER_FLAG_SYNCFRAME;
+                        flags |= BUFFER_FLAG_KEY_FRAME;
                     }
                     break;
                 default:
@@ -2254,6 +2284,15 @@ status_t toStatusT(c2_status_t c2s, c2_operation_t c2op) {
     default:
         return -static_cast<status_t>(c2s);
     }
+}
+
+status_t CCodecBufferChannel::pushBlankBufferToOutputSurface() {
+  Mutexed<OutputSurface>::Locked output(mOutputSurface);
+  sp<ANativeWindow> nativeWindow = static_cast<ANativeWindow *>(output->surface.get());
+  if (nativeWindow == nullptr) {
+      return INVALID_OPERATION;
+  }
+  return pushBlankBuffersToNativeWindow(nativeWindow.get());
 }
 
 }  // namespace android
