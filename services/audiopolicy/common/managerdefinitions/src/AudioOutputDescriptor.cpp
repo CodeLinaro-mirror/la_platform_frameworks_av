@@ -577,7 +577,7 @@ void SwAudioOutputDescriptor::stop()
 
 void SwAudioOutputDescriptor::close()
 {
-    if (mIoHandle != AUDIO_IO_HANDLE_NONE) {
+    if ((mIoHandle != AUDIO_IO_HANDLE_NONE) && (mProfile->curOpenCount > 0)) {
         // clean up active clients if any (can happen if close() is called to force
         // clients to reconnect
         for (const auto &client : getClientIterable()) {
