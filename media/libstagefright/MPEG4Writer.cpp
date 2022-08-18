@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_NDEBUG 0
+//#define LOG_NDEBUG 0
 #define LOG_TAG "MPEG4Writer"
 
 #include <algorithm>
@@ -3570,26 +3570,26 @@ status_t MPEG4Writer::Track::threadEntry() {
         updateTrackSizeEstimate();
 
         if (mOwner->exceedsFileSizeLimit()) {
-            ALOGE("Recorded file size exceeds limit %" PRId64 " bytes",
-                        mOwner->mMaxFileSizeLimitBytes);
-            mOwner->notify(
-                        MEDIA_RECORDER_EVENT_INFO, MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED, 0);
             copy->release();
             if (mOwner->switchFd() != OK) {
+                ALOGW("Recorded file size exceeds limit %" PRId64 "bytes",
+                        mOwner->mMaxFileSizeLimitBytes);
                 mSource->stop();
+                mOwner->notify(
+                        MEDIA_RECORDER_EVENT_INFO, MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED, 0);
             } else {
-                ALOGE("%s Current recorded file size exceeds limit %" PRId64 " bytes. Switching output",
+                ALOGV("%s Current recorded file size exceeds limit %" PRId64 "bytes. Switching output",
                         getTrackType(), mOwner->mMaxFileSizeLimitBytes);
             }
             break;
         }
 
         if (mOwner->exceedsFileDurationLimit()) {
-            ALOGE("Recorded file duration exceeds limit %" PRId64 " microseconds",
+            ALOGW("Recorded file duration exceeds limit %" PRId64 "microseconds",
                     mOwner->mMaxFileDurationLimitUs);
-            mOwner->notify(MEDIA_RECORDER_EVENT_INFO, MEDIA_RECORDER_INFO_MAX_DURATION_REACHED, 0);
             copy->release();
             mSource->stop();
+            mOwner->notify(MEDIA_RECORDER_EVENT_INFO, MEDIA_RECORDER_INFO_MAX_DURATION_REACHED, 0);
             break;
         }
 
