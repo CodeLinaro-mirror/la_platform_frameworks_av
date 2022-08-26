@@ -131,7 +131,6 @@ OmxStore::OmxStore(
         ++i;
     }
 
-    mPrefix = parser.getCommonPrefix();
 }
 
 OmxStore::~OmxStore() {
