@@ -1370,11 +1370,18 @@ VolumeShaper::Status AudioFlinger::PlaybackThread::Track::applyVolumeShaper(
             (newConfiguration.get() != nullptr ? newConfiguration : configuration), operation);
 
     if (isOffloadedOrDirect()) {
-        // Signal thread to fetch new volume.
-        sp<ThreadBase> thread = mThread.promote();
-        if (thread != 0) {
-            Mutex::Autolock _l(thread->mLock);
-            thread->broadcast_l();
+        switch(mState) {
+           case PAUSED:
+                break;
+           case STOPPED:
+                break;
+           default:
+                // Signal thread to fetch new volume.
+                sp<ThreadBase> thread = mThread.promote();
+                if (thread != 0) {
+                    Mutex::Autolock _l(thread->mLock);
+                    thread->broadcast_l();
+                }
         }
     }
     return status;
