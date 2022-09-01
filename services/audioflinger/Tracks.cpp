@@ -1780,11 +1780,18 @@ VolumeShaper::Status Track::applyVolumeShaper(
     VolumeShaper::Status status = mVolumeHandler->applyVolumeShaper(configuration, operation);
 
     if (isOffloadedOrDirect()) {
-        // Signal thread to fetch new volume.
-        const sp<IAfThreadBase> thread = mThread.promote();
-        if (thread != 0) {
-            audio_utils::lock_guard _l(thread->mutex());
-            thread->broadcast_l();
+        switch(mState) {
+           case PAUSED:
+                break;
+           case STOPPED:
+                break;
+           default:
+                // Signal thread to fetch new volume.
+                const sp<IAfThreadBase> thread = mThread.promote();
+                if (thread != 0) {
+                    audio_utils::lock_guard _l(thread->mutex());
+                    thread->broadcast_l();
+                }
         }
     }
     return status;
