@@ -162,7 +162,7 @@ int main(int argc __unused, char **argv)
         AudioPolicyService::instantiate();
         ALOGI("ServiceManager: AudioPolicyService instantiate done %p", sm.get());
 
-	if (enable1GLowMem){
+	if (!enable1GLowMem){
             instantiateVRAudioServer();
             ALOGI("ServiceManager: VRAudioServer instantiate done %p", sm.get());
 	}
