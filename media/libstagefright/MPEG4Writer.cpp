@@ -3391,6 +3391,9 @@ status_t MPEG4Writer::Track::threadEntry() {
     int64_t lastSampleDurationUs = -1;      // Duration calculated from EOS buffer and its timestamp
     int64_t lastSampleDurationTicks = -1;   // Timescale based ticks
 
+    int32_t duration_reached = 0;
+    int32_t max_size_reached = 0;
+
     if (mIsAudio) {
         prctl(PR_SET_NAME, (unsigned long)"MP4WtrAudTrkThread", 0, 0, 0);
     } else if (mIsVideo) {
@@ -3410,6 +3413,23 @@ status_t MPEG4Writer::Track::threadEntry() {
     const char *trackName = getTrackType();
     while (!mDone && (err = mSource->read(&buffer)) == OK) {
         int32_t isEOS = false;
+        if (mOwner->exceedsFileSizeLimit()) {
+            if (mOwner->switchFd() != OK) {
+                mOwner->notify(
+                        MEDIA_RECORDER_EVENT_INFO, MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED, 0);
+                ALOGE("Notify Recorded file size exceeds limit %" PRId64 "bytes in advance",
+                        mOwner->mMaxFileSizeLimitBytes);
+            }
+            max_size_reached = 1;
+        }
+
+        if (mOwner->exceedsFileDurationLimit()) {
+            ALOGE("notify Recorded file duration exceeds limit %" PRId64 "microseconds in advance",
+                    mOwner->mMaxFileDurationLimitUs);
+            mOwner->notify(MEDIA_RECORDER_EVENT_INFO, MEDIA_RECORDER_INFO_MAX_DURATION_REACHED, 0);
+            duration_reached = 1;
+        }
+
         if (buffer->range_length() == 0) {
             if (buffer->meta_data().findInt32(kKeyIsEndOfStream, &isEOS) && isEOS) {
                 int64_t eosSampleTimestampUs = -1;
@@ -3569,14 +3589,12 @@ status_t MPEG4Writer::Track::threadEntry() {
         mMdatSizeBytes += sampleSize;
         updateTrackSizeEstimate();
 
-        if (mOwner->exceedsFileSizeLimit()) {
+        if (max_size_reached) {
             copy->release();
             if (mOwner->switchFd() != OK) {
-                ALOGW("Recorded file size exceeds limit %" PRId64 "bytes",
+                ALOGE("Recorded file size exceeds limit %" PRId64 "bytes",
                         mOwner->mMaxFileSizeLimitBytes);
                 mSource->stop();
-                mOwner->notify(
-                        MEDIA_RECORDER_EVENT_INFO, MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED, 0);
             } else {
                 ALOGV("%s Current recorded file size exceeds limit %" PRId64 "bytes. Switching output",
                         getTrackType(), mOwner->mMaxFileSizeLimitBytes);
@@ -3584,12 +3602,11 @@ status_t MPEG4Writer::Track::threadEntry() {
             break;
         }
 
-        if (mOwner->exceedsFileDurationLimit()) {
-            ALOGW("Recorded file duration exceeds limit %" PRId64 "microseconds",
+        if (duration_reached) {
+            ALOGE("Recorded file duration exceeds limit %" PRId64 "microseconds",
                     mOwner->mMaxFileDurationLimitUs);
             copy->release();
             mSource->stop();
-            mOwner->notify(MEDIA_RECORDER_EVENT_INFO, MEDIA_RECORDER_INFO_MAX_DURATION_REACHED, 0);
             break;
         }
 
