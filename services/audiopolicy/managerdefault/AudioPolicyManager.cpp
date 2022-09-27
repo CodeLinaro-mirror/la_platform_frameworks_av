@@ -3023,12 +3023,13 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             halInputSource = AUDIO_SOURCE_VOICE_RECOGNITION;
         }
     } else if (attributes.source == AUDIO_SOURCE_VOICE_COMMUNICATION &&
-               audio_is_linear_pcm(config->format)) {
+               audio_is_linear_pcm(config->format) && (((flags & AUDIO_INPUT_FLAG_FAST) == 0))) {
         if ((flags & AUDIO_INPUT_FLAG_MMAP_NOIRQ) != 0) {
             flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_MMAP_NOIRQ;
         }
         else {
             flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
+            ALOGV("Set VoIP flag for PCM format");
         }
     }
 
