@@ -2439,7 +2439,12 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const std::set<audio_io_handl
         }
 
         // performance flags match
-        currentMatchCriteria[5] = popcount(outputDesc->mFlags & performanceFlags);
+        if (flags & AUDIO_OUTPUT_FLAG_FAST) {
+            currentMatchCriteria[5] = popcount(outputDesc->mFlags & AUDIO_OUTPUT_FLAG_NONE);
+        }
+	else {
+	    currentMatchCriteria[5] = popcount(outputDesc->mFlags & performanceFlags);
+	}
 
         // format match
         if (format != AUDIO_FORMAT_INVALID) {
@@ -2449,7 +2454,13 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const std::set<audio_io_handl
         }
 
         // primary output match
-        currentMatchCriteria[7] = outputDesc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY;
+        if (flags & AUDIO_OUTPUT_FLAG_FAST && (outputDesc->getSamplingRate() == samplingRate) && (channelCount <= outputChannelCount)) {
+            currentMatchCriteria[7] = (outputDesc->mFlags == AUDIO_OUTPUT_FLAG_FAST);
+            ALOGV("%s match criterion modified for AUDIO_OUTPUT_FLAG_FAST",  __func__);
+        }
+	else {
+            currentMatchCriteria[7] = outputDesc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY;
+	}
 
         // compare match criteria by priority then value
         if (std::lexicographical_compare(bestMatchCriteria.begin(), bestMatchCriteria.end(),
@@ -3371,8 +3382,17 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             halInputSource = AUDIO_SOURCE_VOICE_RECOGNITION;
         }
     } else if (attributes.source == AUDIO_SOURCE_VOICE_COMMUNICATION &&
-               audio_is_linear_pcm(config.format)) {
-        flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
+               audio_is_linear_pcm(config.format) && (((flags & AUDIO_INPUT_FLAG_FAST) == 0))) {
+        if ((flags & AUDIO_INPUT_FLAG_MMAP_NOIRQ) != 0) {
+            flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_MMAP_NOIRQ;
+        }
+        else if ((flags & AUDIO_INPUT_FLAG_FAST) != 0) {
+            flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_FAST;
+        }
+        else {
+            flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
+            ALOGV("Set VoIP flag for PCM format");
+        }
     }
 
     if (attributes.source == AUDIO_SOURCE_ULTRASOUND) {
