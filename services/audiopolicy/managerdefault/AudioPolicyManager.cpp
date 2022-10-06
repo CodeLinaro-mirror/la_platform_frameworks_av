@@ -974,7 +974,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
             if ((deviceDesc->type() & AUDIO_DEVICE_OUT_BUS) && (*stream == AUDIO_STREAM_MUSIC) &&
                     (profile != 0) && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
                 ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
-                    deviceDesc->type());
+                deviceDesc->type());
                 audio_io_handle_t newOutput;
                 status = openDirectOutput(
                         *stream, session, config,
@@ -982,22 +982,21 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                         DeviceVector(deviceDesc), &newOutput);
                 if (status != NO_ERROR) {
                     policyDesc = nullptr;
-                } else {
+                } else
                     policyDesc = mOutputs.valueFor(newOutput);
-                    primaryMix->setOutput(policyDesc);
+            }
+            if (policyDesc != nullptr) {
+                policyDesc->mPolicyMix = primaryMix;
+                *output = policyDesc->mIoHandle;
+                *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
 
-                    policyDesc->mPolicyMix = primaryMix;
-                    *output = policyDesc->mIoHandle;
-                    *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
-
-                    ALOGV("getOutputForAttr() returns output %d", *output);
-                    if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
-                        *outputType = API_OUT_MIX_PLAYBACK;
-                    } else {
-                        *outputType = API_OUTPUT_LEGACY;
-                    }
-                    return NO_ERROR;
+                ALOGV("getOutputForAttr() returns output %d", *output);
+                if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+                    *outputType = API_OUT_MIX_PLAYBACK;
+                } else {
+                    *outputType = API_OUTPUT_LEGACY;
                 }
+                return NO_ERROR;
             }
         }
     }
