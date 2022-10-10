@@ -6780,8 +6780,6 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::OffloadThread::prepareTr
             }
             // Always perform pause if last, as an immediate flush will change
             // the pause state to be no longer isPausing().
-        } else if (track->isPausing()) {
-            track->setPaused();
             if (last) {
                 if (mHwSupportsPause && !mHwPaused) {
                     doHwPause = true;
