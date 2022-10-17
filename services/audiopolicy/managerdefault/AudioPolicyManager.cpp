@@ -1364,11 +1364,15 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
     if (stream == AUDIO_STREAM_TTS) {
         *flags = AUDIO_OUTPUT_FLAG_TTS;
     } else if (stream == AUDIO_STREAM_VOICE_CALL &&
-               audio_is_linear_pcm(config->format) &&
-               (*flags & AUDIO_OUTPUT_FLAG_INCALL_MUSIC) == 0) {
-        *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX |
+               audio_is_linear_pcm(config->format)) {
+        if (*flags & AUDIO_OUTPUT_FLAG_FAST) {
+           ALOGV("Set Fast output flags for PCM format");
+        }
+        else if ((*flags & AUDIO_OUTPUT_FLAG_INCALL_MUSIC) == 0) {
+           *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX |
                                        AUDIO_OUTPUT_FLAG_DIRECT);
-        ALOGV("Set VoIP and Direct output flags for PCM format");
+           ALOGV("Set VoIP and Direct output flags for PCM format");
+        }
     }
 
     if (mSpatializerOutput != nullptr
@@ -1767,6 +1771,10 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
 
         // primary output match
         currentMatchCriteria[7] = outputDesc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY;
+        if (flags & AUDIO_OUTPUT_FLAG_FAST && (outputDesc->getSamplingRate() == samplingRate) && (channelCount <= outputChannelCount)) {
+            currentMatchCriteria[7] = (outputDesc->mFlags == AUDIO_OUTPUT_FLAG_NONE);
+            ALOGV("%s match criterion modified for AUDIO_OUTPUT_FLAG_FAST",  __func__);
+        }
 
         // compare match criteria by priority then value
         if (std::lexicographical_compare(bestMatchCriteria.begin(), bestMatchCriteria.end(),
@@ -2350,8 +2358,9 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             halInputSource = AUDIO_SOURCE_VOICE_RECOGNITION;
         }
     } else if (attributes.source == AUDIO_SOURCE_VOICE_COMMUNICATION &&
-               audio_is_linear_pcm(config->format)) {
+               audio_is_linear_pcm(config->format) && (((flags & AUDIO_INPUT_FLAG_FAST) == 0))) {
         flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
+        ALOGV("Set VoIP flag for PCM format");
     }
 
     // find a compatible input profile (not necessarily identical in parameters)
