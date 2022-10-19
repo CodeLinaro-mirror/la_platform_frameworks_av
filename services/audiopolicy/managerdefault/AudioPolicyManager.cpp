@@ -1095,61 +1095,46 @@ status_t AudioPolicyManager::getOutputForAttrInt(
     bool usePrimaryOutputFromPolicyMixes = requestedDevice == nullptr && primaryMix != nullptr;
 
     // FIXME: in case of RENDER policy, the output capabilities should be checked
-    if ((secondaryMixes != nullptr && !secondaryMixes->empty()) && !audio_is_linear_pcm(config->format)) {
+    if ((usePrimaryOutputFromPolicyMixes
+            || (secondaryMixes != nullptr && !secondaryMixes->empty()))
+        && !audio_is_linear_pcm(config->format)) {
         ALOGD("%s: rejecting request as dynamic audio policy only support pcm", __func__);
         return BAD_VALUE;
     }
-
     if (usePrimaryOutputFromPolicyMixes) {
-        /* BUG 73287368: Support compress-offload playback with dynamic audio policy */
         sp<DeviceDescriptor> deviceDesc =
                 mAvailableOutputDevices.getDevice(primaryMix->mDeviceType,
                                                   primaryMix->mDeviceAddress,
                                                   AUDIO_FORMAT_DEFAULT);
         sp<SwAudioOutputDescriptor> policyDesc = primaryMix->getOutput();
-
-        if (deviceDesc != nullptr) {
-            bool requestOffloadOrDirect =
-                (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) || (*flags & AUDIO_OUTPUT_FLAG_DIRECT);
-            sp<IOProfile> profile = getProfileForOutput(DeviceVector(deviceDesc),
-                                                    config->sample_rate,
-                                                    config->format,
-                                                    config->channel_mask,
-                                                    (audio_output_flags_t)*flags,
-                                                    requestOffloadOrDirect);
-            ALOGD("%s() profile %sfound sample rate: %u, format: 0x%x, channel_mask: 0x%x, flags: 0x%x",
-                __FUNCTION__, profile != 0 ? "" : "NOT ",
-                config->sample_rate, config->format, config->channel_mask, *flags);
-            if ((deviceDesc->type() & AUDIO_DEVICE_OUT_BUS) && (*stream == AUDIO_STREAM_MUSIC) &&
-                    (profile != 0) && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
-                ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
-                deviceDesc->type());
-                audio_io_handle_t newOutput;
-                status = openDirectOutput(
-                        *stream, session, config,
-                        (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT),
-                        DeviceVector(deviceDesc), &newOutput);
-                if (status != NO_ERROR)
-                    policyDesc = nullptr;
-                else
-                    policyDesc = mOutputs.valueFor(newOutput);
-            }
-            if (policyDesc != nullptr){
-                policyDesc->mPolicyMix = primaryMix;
-                *output = policyDesc->mIoHandle;
-                *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
-
-                ALOGV("getOutputForAttr() returns output %d", *output);
-                if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
-                    *outputType = API_OUT_MIX_PLAYBACK;
-                } else {
-                    *outputType = API_OUTPUT_LEGACY;
-                }
-                return NO_ERROR;
+        if (deviceDesc != nullptr
+                && (policyDesc == nullptr || (policyDesc->mFlags & AUDIO_OUTPUT_FLAG_DIRECT))) {
+            audio_io_handle_t newOutput;
+            status = openDirectOutput(
+                    *stream, session, config,
+                    (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT),
+                    DeviceVector(deviceDesc), &newOutput);
+            if (status != NO_ERROR) {
+                policyDesc = nullptr;
+            } else {
+                policyDesc = mOutputs.valueFor(newOutput);
+                primaryMix->setOutput(policyDesc);
             }
         }
-    }
+        if (policyDesc != nullptr) {
+            policyDesc->mPolicyMix = primaryMix;
+            *output = policyDesc->mIoHandle;
+            *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
 
+            ALOGV("getOutputForAttr() returns output %d", *output);
+            if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+                *outputType = API_OUT_MIX_PLAYBACK;
+            } else {
+                *outputType = API_OUTPUT_LEGACY;
+            }
+            return NO_ERROR;
+        }
+    }
     // Virtual sources must always be dynamicaly or explicitly routed
     if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
         ALOGW("getOutputForAttr() no policy mix found for usage AUDIO_USAGE_VIRTUAL_SOURCE");
