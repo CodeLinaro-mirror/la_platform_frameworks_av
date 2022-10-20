@@ -917,7 +917,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
     DeviceVector outputDevices;
     const audio_port_handle_t requestedPortId = *selectedDeviceId;
     DeviceVector msdDevices = getMsdAudioOutDevices();
-    const sp<DeviceDescriptor> requestedDevice =
+    sp<DeviceDescriptor> requestedDevice =
         mAvailableOutputDevices.getDeviceFromId(requestedPortId);
 
     *outputType = API_OUTPUT_INVALID;
@@ -932,6 +932,11 @@ status_t AudioPolicyManager::getOutputForAttrInt(
 
     ALOGV("%s() attributes=%s stream=%s session %d selectedDeviceId %d", __func__,
           toString(*resultAttr).c_str(), toString(*stream).c_str(), session, requestedPortId);
+    outputDevices = mEngine->getOutputDevicesForAttributes(*resultAttr, requestedDevice, false);
+    if (outputDevices.containsDeviceAmongTypes({AUDIO_DEVICE_OUT_BLUETOOTH_A2DP, AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES,
+        AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER})){
+        requestedDevice = outputDevices.getDeviceForOpening();
+    }
 
     // The primary output is the explicit routing (eg. setPreferredDevice) if specified,
     //       otherwise, fallback to the dynamic policies, if none match, query the engine.
@@ -950,6 +955,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
         ALOGD("%s: rejecting request as dynamic audio policy only support pcm", __func__);
         return BAD_VALUE;
     }
+
     if (usePrimaryOutputFromPolicyMixes) {
         /* BUG 73287368: Support compress-offload playback with dynamic audio policy */
         sp<DeviceDescriptor> deviceDesc =
@@ -957,23 +963,23 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                                                   primaryMix->mDeviceAddress,
                                                   AUDIO_FORMAT_DEFAULT);
         sp<SwAudioOutputDescriptor> policyDesc = primaryMix->getOutput();
-        bool requestOffloadOrDirect =
-            (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) || (*flags & AUDIO_OUTPUT_FLAG_DIRECT);
-        sp<IOProfile> profile = getProfileForOutput(DeviceVector(deviceDesc),
-                                                config->sample_rate,
-                                                config->format,
-                                                config->channel_mask,
-                                                (audio_output_flags_t)*flags,
-                                                requestOffloadOrDirect);
-        ALOGD("%s() profile %sfound sample rate: %u, format: 0x%x, channel_mask: 0x%x, flags: 0x%x",
-            __FUNCTION__, profile != 0 ? "" : "NOT ",
-            config->sample_rate, config->format, config->channel_mask, *flags);
-        if ((deviceDesc->type() & AUDIO_DEVICE_OUT_BUS) && (*stream == AUDIO_STREAM_MUSIC) &&
-                (profile != 0) && (requestOffloadOrDirect)) {
-            ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
+
+        if(deviceDesc != nullptr){
+            bool requestOffloadOrDirect =
+                (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) || (*flags & AUDIO_OUTPUT_FLAG_DIRECT);
+            sp<IOProfile> profile = getProfileForOutput(DeviceVector(deviceDesc),
+                                                    config->sample_rate,
+                                                    config->format,
+                                                    config->channel_mask,
+                                                    (audio_output_flags_t)*flags,
+                                                    requestOffloadOrDirect);
+            ALOGD("%s() profile %sfound sample rate: %u, format: 0x%x, channel_mask: 0x%x, flags: 0x%x",
+                __FUNCTION__, profile != 0 ? "" : "NOT ",
+                config->sample_rate, config->format, config->channel_mask, *flags);
+            if ((deviceDesc->type() & AUDIO_DEVICE_OUT_BUS) && (*stream == AUDIO_STREAM_MUSIC) &&
+                    (profile != 0) && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
+                ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
                 deviceDesc->type());
-            if (deviceDesc != nullptr
-                    && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
                 audio_io_handle_t newOutput;
                 status = openDirectOutput(
                         *stream, session, config,
@@ -981,24 +987,22 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                         DeviceVector(deviceDesc), &newOutput);
                 if (status != NO_ERROR) {
                     policyDesc = nullptr;
-                } else {
+                } else
                     policyDesc = mOutputs.valueFor(newOutput);
-                    primaryMix->setOutput(policyDesc);
-                }
             }
-        }
-        if (policyDesc != nullptr) {
-            policyDesc->mPolicyMix = primaryMix;
-            *output = policyDesc->mIoHandle;
-            *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
+            if (policyDesc != nullptr) {
+                policyDesc->mPolicyMix = primaryMix;
+                *output = policyDesc->mIoHandle;
+                *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
 
-            ALOGV("getOutputForAttr() returns output %d", *output);
-            if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
-                *outputType = API_OUT_MIX_PLAYBACK;
-            } else {
-                *outputType = API_OUTPUT_LEGACY;
+                ALOGV("getOutputForAttr() returns output %d", *output);
+                if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+                    *outputType = API_OUT_MIX_PLAYBACK;
+                } else {
+                    *outputType = API_OUTPUT_LEGACY;
+                }
+                return NO_ERROR;
             }
-            return NO_ERROR;
         }
     }
     // Virtual sources must always be dynamicaly or explicitly routed
