@@ -688,6 +688,7 @@ constexpr char FEATURE_IntraRefresh[] = "intra-refresh";
 constexpr char FEATURE_PartialFrame[] = "partial-frame";
 constexpr char FEATURE_QpBounds[] = "qp-bounds";
 constexpr char FEATURE_SecurePlayback[]         = "secure-playback";
+constexpr char FEATURE_SecureRecord[]           = "secure-record";
 constexpr char FEATURE_TunneledPlayback[]       = "tunneled-playback";
 
 // from MediaFormat.java

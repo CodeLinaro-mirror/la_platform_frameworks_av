@@ -44,7 +44,7 @@
 #include <media/stagefright/MediaExtractorFactory.h>
 #include <media/stagefright/MetaData.h>
 #include <media/stagefright/Utils.h>
-
+#include "mediaplayerservice/AVNuExtensions.h"
 namespace android {
 
 static const int kInitialMarkMs        = 5000;  // 5secs

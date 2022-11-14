@@ -66,6 +66,7 @@ struct MediaCodecInfo : public RefBase {
         constexpr static char FEATURE_DYNAMIC_TIMESTAMP[] = "feature-dynamic-timestamp";
         constexpr static char FEATURE_FRAME_PARSING[] = "feature-frame-parsing";
         constexpr static char FEATURE_INTRA_REFRESH[] = "feature-frame-parsing";
+        constexpr static char FEATURE_SECURE_RECORD[] = "feature-secure-record";
         constexpr static char FEATURE_MULTIPLE_FRAMES[] = "feature-multiple-frames";
         constexpr static char FEATURE_SECURE_PLAYBACK[] = "feature-secure-playback";
         constexpr static char FEATURE_TUNNELED_PLAYBACK[] = "feature-tunneled-playback";

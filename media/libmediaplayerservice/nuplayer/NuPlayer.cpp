@@ -62,6 +62,7 @@
 
 #include "ESDS.h"
 #include <media/stagefright/Utils.h>
+#include "mediaplayerservice/AVNuExtensions.h"
 
 namespace android {
 
@@ -183,6 +184,7 @@ NuPlayer::NuPlayer(pid_t pid, const sp<MediaClock> &mediaClock)
       mAudioDecoderGeneration(0),
       mVideoDecoderGeneration(0),
       mRendererGeneration(0),
+      mMaxOutputFrameRate(60),
       mLastStartedPlayingTimeNs(0),
       mLastStartedRebufferingTimeNs(0),
       mPreviousSeekTimeUs(0),
@@ -238,7 +240,7 @@ void NuPlayer::setDataSourceAsync(const sp<IStreamSource> &source) {
     mDataSourceType = DATA_SOURCE_TYPE_STREAM;
 }
 
-static bool IsHTTPLiveURL(const char *url) {
+bool NuPlayer::IsHTTPLiveURL(const char *url) {
     if (!strncasecmp("http://", url, 7)
             || !strncasecmp("https://", url, 8)
             || !strncasecmp("file://", url, 7)) {
@@ -873,8 +875,7 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
             if (mRenderer != NULL) {
                 // AudioSink allows only 1.f and 0.f for offload and direct modes.
                 // For other speeds, restart audio to fallback to supported paths
-                bool audioDirectOutput = (mAudioSink->getFlags() & AUDIO_OUTPUT_FLAG_DIRECT) != 0;
-                if ((mOffloadAudio || audioDirectOutput) &&
+                if ((mOffloadAudio || (mAudioSink->getFlags() & AUDIO_OUTPUT_FLAG_DIRECT)) &&
                         ((rate.mSpeed != 0.f && rate.mSpeed != 1.f) || rate.mPitch != 1.f)) {
 
                     int64_t currentPositionUs;
@@ -1352,6 +1353,9 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
                         FLUSH_CMD_SHUTDOWN /* video */));
 
             mDeferredActions.push_back(
+                    new SimpleAction(&NuPlayer::closeAudioSink));
+
+            mDeferredActions.push_back(
                     new SimpleAction(&NuPlayer::performReset));
 
             processDeferredActions();
@@ -1597,7 +1601,7 @@ void NuPlayer::onStart(int64_t startPositionUs, MediaPlayerSeekMode mode) {
     sp<AMessage> notify = new AMessage(kWhatRendererNotify, this);
     ++mRendererGeneration;
     notify->setInt32("generation", mRendererGeneration);
-    mRenderer = new Renderer(mAudioSink, mMediaClock, notify, flags);
+    mRenderer = AVNuFactory::get()->createRenderer(mAudioSink, mMediaClock, notify, flags);
     mRendererLooper = new ALooper;
     mRendererLooper->setName("NuPlayerRenderer");
     mRendererLooper->start(false, false, ANDROID_PRIORITY_AUDIO);
@@ -1957,10 +1961,22 @@ status_t NuPlayer::instantiateDecoder(
         if (mSourceFlags & Source::FLAG_PROTECTED) {
             format->setInt32("protected", true);
         }
+        if (mSurface != NULL) {
+            int64_t refreshDuration = 0;
+            native_window_get_refresh_cycle_duration(mSurface.get(), &refreshDuration);
+            if (refreshDuration > 0)
+                mMaxOutputFrameRate = round(1000000000.0f / refreshDuration);
+        }
 
         float rate = getFrameRate();
         if (rate > 0) {
             format->setFloat("operating-rate", rate * mPlaybackSettings.mSpeed);
+            mRenderer->setVideoFrameRate(rate > mMaxOutputFrameRate ? mMaxOutputFrameRate : rate);
+        }
+        if (rate <= 0 || rate > mMaxOutputFrameRate) {
+            format->setInt32("output-frame-rate", mMaxOutputFrameRate);
+            format->setFloat("vendor.qti-ext-dec-output-render-frame-rate.value",
+                    mMaxOutputFrameRate);
         }
     }
 
@@ -1979,12 +1995,13 @@ status_t NuPlayer::instantiateDecoder(
 
             const bool hasVideo = (mSource->getFormat(false /*audio */) != NULL);
             format->setInt32("has-video", hasVideo);
-            *decoder = new DecoderPassThrough(notify, mSource, mRenderer);
-            ALOGV("instantiateDecoder audio DecoderPassThrough  hasVideo: %d", hasVideo);
+	    *decoder = AVNuFactory::get()->createPassThruDecoder(notify, mSource, mRenderer);
+	    ALOGV("instantiateDecoder audio DecoderPassThrough hasVideo: %d", hasVideo);
         } else {
+	    AVNuUtils::get()->setCodecOutputFormat(format);
             mSource->setOffloadAudio(false /* offload */);
 
-            *decoder = new Decoder(notify, mSource, mPID, mUID, mRenderer);
+	    *decoder = AVNuFactory::get()->createDecoder(notify, mSource, mPID, mUID, mRenderer);
             ALOGV("instantiateDecoder audio Decoder");
         }
         mAudioDecoderError = false;
