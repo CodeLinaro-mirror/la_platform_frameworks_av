@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/*
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 #define LOG_TAG "CameraService"
 #define ATRACE_TAG ATRACE_TAG_CAMERA
 //#define LOG_NDEBUG 0
@@ -379,9 +385,6 @@ void CameraService::onDeviceStatusChanged(const String8& id,
             clientToDisconnect->notifyError(
                     hardware::camera2::ICameraDeviceCallbacks::ERROR_CAMERA_DISCONNECTED,
                     CaptureResultExtras{});
-            // Ensure not in binder RPC so client disconnect PID checks work correctly
-            LOG_ALWAYS_FATAL_IF(CameraThreadState::getCallingPid() != getpid(),
-                    "onDeviceStatusChanged must be called from the camera service process!");
             clientToDisconnect->disconnect();
         }
 
