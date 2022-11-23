@@ -1388,7 +1388,8 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
     {
         Mutex::Autolock autoLock(mLock);
         if (mAnchorTimeMediaUs < 0) {
-            mMediaClock->updateAnchor(mediaTimeUs, nowUs, -1);
+            mMediaClock->updateAnchor(mediaTimeUs, nowUs,
+               (mHasAudio ? -1 : mediaTimeUs + kDefaultVideoFrameIntervalUs));
             mAnchorTimeMediaUs = mediaTimeUs;
         }
     }
