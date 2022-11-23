@@ -240,6 +240,11 @@ status_t NuPlayer::Renderer::onConfigPlayback(const AudioPlaybackRate &rate /* s
             return err;
         }
     }
+
+    if (!mHasAudio) {
+       mNeedVideoClearAnchor = true;
+    }
+
     mPlaybackSettings = rate;
     mPlaybackRate = rate.mSpeed;
     mMediaClock->setPlaybackRate(mPlaybackRate);
@@ -1360,6 +1365,10 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
 
     {
         Mutex::Autolock autoLock(mLock);
+        if (mNeedVideoClearAnchor) {
+            mNeedVideoClearAnchor = false;
+            clearAnchorTime();
+        }
         if (mAnchorTimeMediaUs < 0) {
             mMediaClock->updateAnchor(mediaTimeUs, nowUs, mediaTimeUs);
             mAnchorTimeMediaUs = mediaTimeUs;
