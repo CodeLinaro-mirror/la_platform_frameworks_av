@@ -236,8 +236,7 @@ status_t NuPlayer::Renderer::onConfigPlayback(const AudioPlaybackRate &rate /* s
             return err;
         }
     }
-
-    if (!mHasAudio) {
+    if (!mHasAudio && mHasVideo) {
        mNeedVideoClearAnchor = true;
     }
 
@@ -1349,7 +1348,7 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
 
     {
         Mutex::Autolock autoLock(mLock);
-        if (mNeedVideoClearAnchor) {
+        if (mNeedVideoClearAnchor && !mHasAudio) {
             mNeedVideoClearAnchor = false;
             clearAnchorTime();
         }
