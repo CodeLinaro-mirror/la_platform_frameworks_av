@@ -53,7 +53,11 @@ cc_defaults {
     ],
 
     include_dirs: [
+        "frameworks/av/media/libstagefright",
+        "frameworks/native/include/media/openmax",
+        "frameworks/native/include/android",
         "frameworks/av/media/libavextensions",
+        "frameworks/av/media/libmediaplayerservice",
     ],
 
     arch: {

@@ -27,6 +27,7 @@
 #include <media/IOMX.h>
 #include <media/stagefright/AHierarchicalStateMachine.h>
 #include <media/stagefright/CodecBase.h>
+#include <media/stagefright/FrameRenderTracker.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/SkipCutBuffer.h>
 #include <ui/GraphicBuffer.h>
@@ -164,7 +165,9 @@ protected:
 
     enum {
         kPortIndexInput  = 0,
-        kPortIndexOutput = 1
+        kPortIndexOutput = 1,
+        kPortIndexInputExtradata = 2,
+        kPortIndexOutputExtradata = 3
     };
 
     enum {
@@ -259,7 +262,7 @@ protected:
     sp<IOMX> mOMX;
     sp<IOMXNode> mOMXNode;
     int32_t mNodeGeneration;
-    sp<TAllocator> mAllocator[2];
+    sp<TAllocator> mAllocator[4];
 
     std::deque<TrackedFrame> mTrackedFrames; // render information for buffers sent to a window
     bool mAreRenderMetricsEnabled;
@@ -282,7 +285,8 @@ protected:
     // format updates. This will equal to mOutputFormat until the first actual frame is received.
     sp<AMessage> mBaseOutputFormat;
 
-    std::vector<BufferInfo> mBuffers[2];
+    FrameRenderTracker mRenderTracker; // render information for buffers rendered by ACodec
+    std::vector<BufferInfo> mBuffers[4];
     bool mPortEOS[2];
     status_t mInputEOSResult;
     std::set<int64_t> mDecodeOnlyTimesUs;
@@ -608,6 +612,7 @@ protected:
     status_t requestIDRFrame();
     virtual status_t setParameters(const sp<AMessage> &params);
 
+    status_t setSurfaceParameters(const sp<AMessage> &params);
 
     // set vendor extension parameters specified in params that are supported by the codec
     status_t setVendorParameters(const sp<AMessage> &params);

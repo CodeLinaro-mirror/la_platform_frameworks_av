@@ -64,7 +64,15 @@ cc_library_static {
     ],
 
     include_dirs: [
+        "frameworks/av/media/libstagefright",
+        "frameworks/av/media/libstagefright/httplive",
+        "frameworks/av/media/libstagefright/include",
+        "frameworks/av/media/module/mpeg2ts",
+        "frameworks/av/media/libstagefright/rtsp",
+        "frameworks/av/media/libstagefright/timedtext",
+        "frameworks/native/include/android",
         "frameworks/av/media/libavextensions",
+        "frameworks/av/media/libmediaplayerservice",
         "frameworks/av/media/libmediaextractor",
     ],
 
@@ -90,6 +98,9 @@ cc_library_static {
         "libmedia",
         "libmediadrm",
         "libpowermanager",
+        "libhidlmemory",
+        "libcrypto",
+        "libcamera_client",
     ],
 
     static_libs: [
