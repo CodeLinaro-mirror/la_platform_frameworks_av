@@ -81,7 +81,7 @@ struct ElementaryStreamQueue {
 
     void signalNewSampleAesKey(const sp<AMessage> &keyItem);
 
-private:
+protected:
     struct RangeInfo {
         int64_t mTimestampUs;
         size_t mLength;
@@ -139,6 +139,7 @@ private:
 
     sp<ABuffer> dequeueScrambledAccessUnit();
 
+private:
     DISALLOW_EVIL_CONSTRUCTORS(ElementaryStreamQueue);
 };
 
