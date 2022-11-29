@@ -121,6 +121,7 @@ cc_library_static {
         "-Werror",
         "-Wno-error=deprecated-declarations",
         "-Wno-multichar",
+        "-D__NO_AVEXTENSIONS__",
     ],
 
     sanitize: {
@@ -351,7 +352,11 @@ cc_library {
         "libyuv",
     ],
 
-    header_libs: [
+    whole_static_libs: [
+        "libavextensions"
+    ],
+
+    header_libs:[
         "libmediadrm_headers",
         "libmediaformatshaper_headers",
         "libnativeloader-headers",
@@ -370,6 +375,12 @@ cc_library {
 
     export_include_dirs: [
         "include",
+
+    ],
+
+    include_dirs: [
+        "frameworks/av/media/libavextensions",
+        "frameworks/av/media/libmediaextractor",
     ],
 
     cflags: [

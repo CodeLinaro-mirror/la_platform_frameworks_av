@@ -101,6 +101,10 @@ cc_defaults {
         "libstagefright_timedtext",
     ],
 
+    whole_static_libs: [
+        "libavmediaserviceextensions",
+    ],
+
     cflags: [
         "-Wall",
         "-Werror",
@@ -130,6 +134,11 @@ cc_library {
 
     export_include_dirs: [
         ".",
+    ],
+
+    include_dirs: [
+        "frameworks/av/media/libavextensions",
+        "frameworks/av/media/libmediaextractor",
     ],
 
     local_include_dirs: ["include"],

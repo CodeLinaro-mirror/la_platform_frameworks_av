@@ -209,6 +209,9 @@ cc_library {
         "libmediautils",
     ],
 
+    include_dirs: [
+        "frameworks/av/media/libavextensions",
+    ],
     header_libs: [
         "libaudioutils_headers",
         "libbase_headers",
@@ -221,6 +224,7 @@ cc_library {
         "effect-aidl-cpp",
         // for memory heap analysis
         "libc_malloc_debug_backtrace",
+        "libavmediaextentions",
     ],
     cflags: [
         "-Wall",

@@ -66,6 +66,7 @@
 #include "include/SecureBuffer.h"
 #include "include/SharedMemoryBuffer.h"
 #include <media/stagefright/omx/OMXUtils.h>
+#include <stagefright/AVExtensions.h>
 
 #include <server_configurable_flags/get_flags.h>
 
@@ -636,6 +637,10 @@ ACodec::ACodec()
 }
 
 ACodec::~ACodec() {
+}
+
+status_t ACodec::setupCustomCodec(status_t err, const char *, const sp<AMessage> &) {
+    return err;
 }
 
 void ACodec::initiateSetup(const sp<AMessage> &msg) {
@@ -1776,7 +1781,7 @@ status_t ACodec::fillBuffer(BufferInfo *info) {
 
 status_t ACodec::setComponentRole(
         bool isEncoder, const char *mime) {
-    const char *role = GetComponentRole(isEncoder, mime);
+    const char *role = AVUtils::get()->getComponentRole(isEncoder, mime);
     if (role == NULL) {
         return BAD_VALUE;
     }
@@ -2397,6 +2402,8 @@ status_t ACodec::configureCodec(
         } else {
             err = setupAC4Codec(encoder, numChannels, sampleRate);
         }
+    } else {
+        err = setupCustomCodec(err, mime, msg);
     }
 
     if (err != OK) {
@@ -3554,7 +3561,7 @@ static const struct VideoCodingMapEntry {
     { MEDIA_MIMETYPE_VIDEO_AV1, OMX_VIDEO_CodingAV1 },
 };
 
-static status_t GetVideoCodingTypeFromMime(
+status_t ACodec::GetVideoCodingTypeFromMime(
         const char *mime, OMX_VIDEO_CODINGTYPE *codingType) {
     for (size_t i = 0;
          i < sizeof(kVideoCodingMapEntry) / sizeof(kVideoCodingMapEntry[0]);
@@ -6696,6 +6703,14 @@ bool ACodec::BaseState::onOMXFillBufferDone(
             }
             buffer->setFormat(mCodec->mOutputFormat);
 
+	    sp<AMessage> updatedFormat = mCodec->mOutputFormat;
+	    if (mCodec->mIsVideo && (flags & OMX_BUFFERFLAG_EXTRADATA)) {
+		updatedFormat = AVUtils::get()->fillExtradata(
+			mCodec->mBuffers[kPortIndexOutputExtradata][index].mCodecData,
+			mCodec->mOutputFormat);
+	    }
+            buffer->setFormat(updatedFormat);
+
             if (mCodec->usingSecureBufferOnEncoderOutput()) {
                 native_handle_t *handle = NULL;
                 sp<SecureBuffer> secureBuffer = static_cast<SecureBuffer *>(buffer.get());
@@ -8571,6 +8586,13 @@ void ACodec::onSignalEndOfInputStream() {
     mCallback->onSignaledInputEOS(err);
 }
 
+sp<IOMXObserver> ACodec::createObserver() {
+    sp<AMessage> notify = new AMessage(kWhatOMXMessageList, this);
+    notify->setInt32("generation", this->mNodeGeneration + 1);
+    sp<CodecObserver> observer = new CodecObserver(notify);
+    return observer;
+}
+
 void ACodec::forceStateTransition(int generation) {
     if (generation != mStateGeneration) {
         ALOGV("Ignoring stale force state transition message: #%d (now #%d)",
@@ -9202,7 +9224,7 @@ void ACodec::FlushingState::changeStateIfWeOwnAllBuffers() {
 status_t ACodec::queryCapabilities(
         const char* owner, const char* name, const char* mime, bool isEncoder,
         MediaCodecInfo::CapabilitiesWriter* caps) {
-    const char *role = GetComponentRole(isEncoder, mime);
+    const char *role = AVUtils::get()->getComponentRole(isEncoder, mime);
     if (role == NULL) {
         return BAD_VALUE;
     }

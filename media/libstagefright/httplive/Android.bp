@@ -28,6 +28,11 @@ cc_library {
         "PlaylistFetcher.cpp",
     ],
 
+    include_dirs: [
+        "frameworks/av/media/libstagefright",
+        "frameworks/av/media/libavextensions",
+    ],
+
     cflags: [
         "-Werror",
         "-Wall",

@@ -63,6 +63,11 @@ cc_library_static {
         "libstagefright_rtsp_headers",
     ],
 
+    include_dirs: [
+        "frameworks/av/media/libavextensions",
+        "frameworks/av/media/libmediaextractor",
+    ],
+
     cflags: [
         "-Werror",
         "-Wall",
