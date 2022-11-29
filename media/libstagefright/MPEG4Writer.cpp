@@ -56,6 +56,7 @@
 #include <com_android_internal_camera_flags.h>
 #include <com_android_media_editing_flags.h>
 namespace editing_flags = com::android::media::editing::flags;
+#include <stagefright/AVExtensions.h>
 
 #ifndef __predict_false
 #define __predict_false(exp) __builtin_expect((exp) != 0, 0)
@@ -755,6 +756,12 @@ status_t MPEG4Writer::addSource(const sp<MediaSource> &source) {
         mHasDolbyVision = true;
     } else if (Track::getFourCCForMime(mime) == NULL) {
         ALOGE("Unsupported mime '%s'", mime);
+        return ERROR_UNSUPPORTED;
+    }
+
+    bool isAudio = !strncasecmp(mime, "audio/", 6);
+    if (isAudio && !AVUtils::get()->isAudioMuxFormatSupported(mime)) {
+        ALOGE("Muxing is not supported for %s", mime);
         return ERROR_UNSUPPORTED;
     }
 
