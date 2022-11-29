@@ -53,6 +53,8 @@
 #include <media/esds/ESDS.h>
 #include "include/HevcUtils.h"
 
+#include <stagefright/AVExtensions.h>
+
 #ifndef __predict_false
 #define __predict_false(exp) __builtin_expect((exp) != 0, 0)
 #endif
@@ -719,6 +721,12 @@ status_t MPEG4Writer::addSource(const sp<MediaSource> &source) {
         mHasDolbyVision = true;
     } else if (Track::getFourCCForMime(mime) == NULL) {
         ALOGE("Unsupported mime '%s'", mime);
+        return ERROR_UNSUPPORTED;
+    }
+
+    bool isAudio = !strncasecmp(mime, "audio/", 6);
+    if (isAudio && !AVUtils::get()->isAudioMuxFormatSupported(mime)) {
+        ALOGE("Muxing is not supported for %s", mime);
         return ERROR_UNSUPPORTED;
     }
 
