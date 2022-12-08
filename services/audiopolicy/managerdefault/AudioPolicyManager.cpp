@@ -2095,7 +2095,12 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
         }
 
         // performance flags match
-        currentMatchCriteria[5] = popcount(outputDesc->mFlags & performanceFlags);
+        if (flags & AUDIO_OUTPUT_FLAG_FAST) {
+            currentMatchCriteria[5] = popcount(outputDesc->mFlags & AUDIO_OUTPUT_FLAG_NONE);
+        }
+	else {
+	    currentMatchCriteria[5] = popcount(outputDesc->mFlags & performanceFlags);
+	}
 
         // format match
         if (format != AUDIO_FORMAT_INVALID) {
@@ -2105,7 +2110,13 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
         }
 
         // primary output match
-        currentMatchCriteria[7] = outputDesc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY;
+        if (flags & AUDIO_OUTPUT_FLAG_FAST && (outputDesc->getSamplingRate() == samplingRate) && (channelCount <= outputChannelCount)) {
+            currentMatchCriteria[7] = (outputDesc->mFlags == AUDIO_OUTPUT_FLAG_FAST);
+            ALOGV("%s match criterion modified for AUDIO_OUTPUT_FLAG_FAST",  __func__);
+        }
+	else {
+            currentMatchCriteria[7] = outputDesc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY;
+	}
 
         // compare match criteria by priority then value
         if (std::lexicographical_compare(bestMatchCriteria.begin(), bestMatchCriteria.end(),
