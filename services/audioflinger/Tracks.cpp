@@ -3746,6 +3746,9 @@ getHardeningDecision(audio_usage_t usage, IAfThreadCallback& cb, uid_t uid) {
     }
 
     if (hardening_strict()) {
+        if (pp.getHighestTargetSdkForUid(uid).value_or(1000) < 37) {
+            return {EnforcementLevel::NONE, TARGET_SDK};
+        }
         if (hardening_usage()) {
             if (usage == AUDIO_USAGE_ALARM) {
                 if (pp.checkPermission(PermissionEnum::SCHEDULE_EXACT_ALARM, uid).value_or(false) ||
@@ -3764,11 +3767,11 @@ getHardeningDecision(audio_usage_t usage, IAfThreadCallback& cb, uid_t uid) {
         if (pp.checkPermission(PermissionEnum::BLUETOOTH_CONNECT, uid).value_or(false)) {
             return {EnforcementLevel::PARTIAL, PRIVILEGED_APP};
         }
-        if (pp.getHighestTargetSdkForUid(uid).value_or(1000) < 37) {
-            return {EnforcementLevel::PARTIAL, TARGET_SDK};
-        }
         return {EnforcementLevel::FULL, NONE};
     } else if (hardening_partial()) {
+        if (pp.getHighestTargetSdkForUid(uid).value_or(1000) < 37) {
+            return {EnforcementLevel::NONE, TARGET_SDK};
+        }
         return {EnforcementLevel::PARTIAL, FLAG_DISABLED};
     } else {
         return {EnforcementLevel::NONE, FLAG_DISABLED};
@@ -3849,7 +3852,7 @@ void AfPlaybackCommon::maybeLogPlaybackHardening(media::IAudioManagerNative& am)
                     !isPlaybackRestrictedControl(), mExemptionReason, mSelf.attributes().usage);
         }
     } else if (!hasOpControlFull()) {
-        if (!mPlaybackHardeningLogged.exchange(true, std::memory_order_acq_rel)) {
+        if (!mPlaybackHardeningLoggedFull.exchange(true, std::memory_order_acq_rel)) {
             am.playbackHardeningEvent(mSelf.uid(), FULL,
                      /* bypassed= */
                      !isPlaybackRestrictedControl(), mExemptionReason, mSelf.attributes().usage);
