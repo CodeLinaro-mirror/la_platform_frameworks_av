@@ -83,6 +83,10 @@ cc_library {
         "framework-permission-aidl-cpp",
     ],
 
+    whole_static_libs: [
+        "libavmediaserviceextensions",
+    ],
+
     export_shared_lib_headers: [
         "libmedia",
         "framework-permission-aidl-cpp",
@@ -90,6 +94,14 @@ cc_library {
 
     export_header_lib_headers: [
         "libmediautils_headers",
+    ],
+
+    include_dirs: [
+        "frameworks/av/media/libstagefright/rtsp",
+        "frameworks/av/media/libstagefright/webm",
+        "frameworks/av/media/libavextensions",
+        "frameworks/av/media/libmediaextractor",
+        "frameworks/av/media/libstagefright/mpeg2ts",
     ],
 
     local_include_dirs: ["include"],
