@@ -36,6 +36,8 @@
 #include <utils/SystemClock.h>
 
 #include <inttypes.h>
+#include "mediaplayerservice/AVNuExtensions.h"
+#include "stagefright/AVExtensions.h"
 
 namespace android {
 
@@ -2011,19 +2013,34 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
             ALOGV("Mime \"%s\" mapped to audio_format 0x%x",
                     mime.c_str(), audioFormat);
 
+            audioFormat = AVUtils::get()->updateAudioFormat(audioFormat, format);
+
+            bitWidth = AVUtils::get()->getAudioSampleBits(format);
             int avgBitRate = 0;
-            format->findInt32("bitrate", &avgBitRate);
+            format->findInt32("bit-rate", &avgBitRate);
 
             int32_t aacProfile = -1;
             if (audioFormat == AUDIO_FORMAT_AAC
                     && format->findInt32("aac-profile", &aacProfile)) {
                 // Redefine AAC format as per aac profile
-                mapAACProfileToAudioFormat(
-                        audioFormat,
-                        aacProfile);
+                int32_t isADTSSupported;
+                isADTSSupported = AVUtils::get()->mapAACProfileToAudioFormat(format,
+                                          audioFormat,
+                                          aacProfile);
+                if (!isADTSSupported) {
+                    mapAACProfileToAudioFormat(audioFormat,
+                            aacProfile);
+                } else {
+                    ALOGV("Format is AAC ADTS\n");
+                }
             }
 
+            int32_t offloadBufferSize =
+                                    AVUtils::get()->getAudioMaxInputBufferSize(
+                                                   audioFormat,
+                                                   format);
             audio_offload_info_t offloadInfo = AUDIO_INFO_INITIALIZER;
+
             offloadInfo.duration_us = -1;
             format->findInt64(
                     "durationUs", &offloadInfo.duration_us);

@@ -40,6 +40,8 @@
 #include <media/AudioSystem.h>
 #include <media/MediaMetricsItem.h>
 #include <media/TypeConverter.h>
+#include <binder/MemoryDealer.h>
+#include "media/AVMediaExtensions.h"
 
 #define WAIT_PERIOD_MS                  10
 #define WAIT_STREAM_END_TIMEOUT_SEC     120
@@ -1901,6 +1903,7 @@ status_t AudioTrack::createTrack_l()
     }
     ALOG_ASSERT(output.audioTrack != 0);
 
+    mTrackOffloaded = AVMediaUtils::get()->AudioTrackIsTrackOffloaded(output.outputId);
     mFrameCount = output.frameCount;
     mNotificationFramesAct = (uint32_t)output.notificationFrameCount;
     mRoutedDeviceId = output.selectedDeviceId;

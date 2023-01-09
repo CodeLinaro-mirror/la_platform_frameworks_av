@@ -42,7 +42,7 @@ struct NuPlayer : public AHandler {
 
     void setDataSourceAsync(const sp<IStreamSource> &source);
 
-    void setDataSourceAsync(
+    virtual void setDataSourceAsync(
             const sp<IMediaHTTPService> &httpService,
             const char *url,
             const KeyedVector<String8, String8> *headers);
@@ -110,12 +110,15 @@ protected:
     virtual ~NuPlayer();
 
     virtual void onMessageReceived(const sp<AMessage> &msg);
-
+    virtual bool ifDecodedPCMOffload() {return false;}
+    virtual void setDecodedPcmOffload(bool /*decodePcmOffload*/) {}
+    virtual bool canOffloadDecodedPCMStream(const sp<MetaData> /*meta*/,
+		bool /*hasVideo*/, bool /*isStreaming*/, audio_stream_type_t /*streamType*/) {return false;}
+    static bool IsHTTPLiveURL(const char *url);
 public:
     struct NuPlayerStreamListener;
     struct Source;
 
-private:
     struct Decoder;
     struct DecoderBase;
     struct DecoderPassThrough;
@@ -134,6 +137,7 @@ private:
     struct PostMessageAction;
     struct SimpleAction;
 
+protected:
     enum {
         kWhatSetDataSource              = '=DaS',
         kWhatPrepare                    = 'prep',
@@ -292,7 +296,7 @@ private:
             int64_t currentPositionUs, bool forceNonOffload, bool needsToCreateAudioDecoder);
     void determineAudioModeChange(const sp<AMessage> &audioFormat);
 
-    status_t instantiateDecoder(
+    virtual status_t instantiateDecoder(
             bool audio, sp<DecoderBase> *decoder, bool checkAudioModeChange = true);
 
     status_t onInstantiateSecureDecoders();
@@ -333,7 +337,7 @@ private:
     void performSetSurface(const sp<Surface> &wrapper);
     void performResumeDecoders(bool needNotify);
 
-    void onSourceNotify(const sp<AMessage> &msg);
+    virtual void onSourceNotify(const sp<AMessage> &msg);
     void onClosedCaptionNotify(const sp<AMessage> &msg);
 
     void queueDecoderShutdown(

@@ -32,6 +32,8 @@
 #include <media/stagefright/foundation/ALooper.h>
 #include <cutils/properties.h>
 
+#include <stagefright/AVExtensions.h>
+
 namespace android {
 
 using content::AttributionSourceState;
@@ -50,23 +52,13 @@ AudioSource::AudioSource(
 {
   set(attr, attributionSource, sampleRate, channelCount, outSampleRate, selectedDeviceId,
       selectedMicDirection, selectedMicFieldDimension);
-}
 
-AudioSource::AudioSource(
-        const audio_attributes_t *attr, const String16 &opPackageName,
-        uint32_t sampleRate, uint32_t channelCount, uint32_t outSampleRate,
-        uid_t uid, pid_t pid, audio_port_handle_t selectedDeviceId,
-        audio_microphone_direction_t selectedMicDirection,
-        float selectedMicFieldDimension)
-{
-    // TODO b/182392769: use attribution source util
-    AttributionSourceState attributionSource;
-    attributionSource.packageName = VALUE_OR_FATAL(legacy2aidl_String16_string(opPackageName));
-    attributionSource.uid = VALUE_OR_FATAL(legacy2aidl_uid_t_int32_t(uid));
-    attributionSource.pid = VALUE_OR_FATAL(legacy2aidl_pid_t_int32_t(pid));
-    attributionSource.token = sp<BBinder>::make();
-    set(attr, attributionSource, sampleRate, channelCount, outSampleRate, selectedDeviceId,
-      selectedMicDirection, selectedMicFieldDimension);
+  bool bAggregate = AVUtils::get()->isAudioSourceAggregate(attr, channelCount);
+  if (bAggregate) {
+      mInitCheck = NO_INIT;
+      return;
+  }
+
 }
 
 void AudioSource::set(
@@ -226,7 +218,7 @@ sp<MetaData> AudioSource::getFormat() {
     meta->setCString(kKeyMIMEType, MEDIA_MIMETYPE_AUDIO_RAW);
     meta->setInt32(kKeySampleRate, mSampleRate);
     meta->setInt32(kKeyChannelCount, mRecord->channelCount());
-    meta->setInt32(kKeyMaxInputSize, kMaxBufferSize);
+    meta->setInt32(kKeyMaxInputSize, mMaxBufferSize);
     meta->setInt32(kKeyPcmEncoding, kAudioEncodingPcm16bit);
 
     return meta;
@@ -423,9 +415,9 @@ size_t AudioSource::onMoreData(const AudioRecord::Buffer& audioBuffer) {
 
     while (numLostBytes > 0) {
         uint64_t bufferSize = numLostBytes;
-        if (numLostBytes > kMaxBufferSize) {
-            numLostBytes -= kMaxBufferSize;
-            bufferSize = kMaxBufferSize;
+        if (numLostBytes > mMaxBufferSize) {
+            numLostBytes -= mMaxBufferSize;
+            bufferSize = mMaxBufferSize;
         } else {
             numLostBytes = 0;
         }
