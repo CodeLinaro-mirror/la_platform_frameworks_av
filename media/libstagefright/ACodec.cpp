@@ -68,7 +68,10 @@
 #include <media/stagefright/omx/OMXUtils.h>
 #include <stagefright/AVExtensions.h>
 
+
 #include <server_configurable_flags/get_flags.h>
+#define QTI_FLAC_DECODER
+
 
 namespace android {
 
@@ -893,6 +896,11 @@ status_t ACodec::setPortMode(int32_t portIndex, IOMX::PortMode mode) {
 }
 
 status_t ACodec::allocateBuffersOnPort(OMX_U32 portIndex) {
+    if (portIndex == kPortIndexInputExtradata ||
+            portIndex == kPortIndexOutputExtradata) {
+        return OK;
+    }
+
     CHECK(portIndex == kPortIndexInput || portIndex == kPortIndexOutput);
 
     CHECK(mAllocator[portIndex] == NULL);
@@ -1659,6 +1667,11 @@ void ACodec::pollForRenderedFrames() {
 }
 
 status_t ACodec::freeBuffersOnPort(OMX_U32 portIndex) {
+    if (portIndex == kPortIndexInputExtradata ||
+            portIndex == kPortIndexOutputExtradata) {
+        return OK;
+    }
+
     if (portIndex == kPortIndexInput) {
         mBufferChannel->setInputBufferArray({});
     } else {
@@ -2330,13 +2343,14 @@ status_t ACodec::configureCodec(
             }
             err = setupG711Codec(encoder, sampleRate, numChannels);
         }
-    } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_OPUS)) {
-        int32_t numChannels = 1, sampleRate = 48000;
-        if (msg->findInt32("channel-count", &numChannels) &&
-            msg->findInt32("sample-rate", &sampleRate)) {
-            err = setupOpusCodec(encoder, sampleRate, numChannels);
-        }
+#ifdef QTI_FLAC_DECODER
+/* Setup qti component From setupCustomCodec only when it starts with OMX.qti.
+ * otherwise create incoming component
+*/
+    } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_FLAC) && !mComponentName.startsWith("OMX.qti.")) {
+#else
     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_FLAC)) {
+#endif
         // numChannels needs to be set to properly communicate PCM values.
         int32_t numChannels = 2, sampleRate = 44100, compressionLevel = -1;
         if (encoder &&
@@ -5469,6 +5483,12 @@ status_t ACodec::getPortFormat(OMX_U32 portIndex, sp<AMessage> &notify) {
                     } else if (params.eNumData == OMX_NumericalDataFloat
                             && params.nBitPerSample == 32u) {
                         encoding = kAudioEncodingPcmFloat;
+		    } else if (params.eNumData == OMX_NumericalDataSigned
+			    && params.nBitPerSample == 24u) {
+			encoding = kAudioEncodingPcm24bitPacked;
+		    } else if (params.eNumData == OMX_NumericalDataSigned
+			    && params.nBitPerSample == 32u) {
+			encoding = kAudioEncodingPcm32bit;
                     } else if (params.nBitPerSample != 16u
                             || params.eNumData != OMX_NumericalDataSigned) {
                         ALOGE("unsupported PCM port: %s(%d), %s(%d) mode ",
@@ -7510,6 +7530,12 @@ void ACodec::LoadedToIdleState::stateEntered() {
         if (mCodec->allYourBuffersAreBelongToUs(kPortIndexOutput)) {
             mCodec->freeBuffersOnPort(kPortIndexOutput);
         }
+        if (mCodec->allYourBuffersAreBelongToUs(kPortIndexInputExtradata)) {
+            mCodec->freeBuffersOnPort(kPortIndexInputExtradata);
+        }
+        if (mCodec->allYourBuffersAreBelongToUs(kPortIndexOutputExtradata)) {
+            mCodec->freeBuffersOnPort(kPortIndexOutputExtradata);
+        }
 
         mCodec->changeState(mCodec->mLoadedState);
     }
@@ -7524,6 +7550,11 @@ status_t ACodec::LoadedToIdleState::allocateBuffers() {
     err = mCodec->allocateBuffersOnPort(kPortIndexOutput);
     if (err != OK) {
         return err;
+    }
+    err = mCodec->allocateBuffersOnPort(kPortIndexInputExtradata);
+    err = mCodec->allocateBuffersOnPort(kPortIndexOutputExtradata);
+    if (err != OK) {
+        err = OK; // Ignore Extradata buffer allocation failure
     }
 
     mCodec->mCallback->onStartCompleted();
@@ -8954,6 +8985,15 @@ void ACodec::ExecutingToIdleState::changeStateIfWeOwnAllBuffers() {
             if (err == OK) {
                 err = err2;
             }
+            status_t err3 = mCodec->freeBuffersOnPort(kPortIndexInputExtradata);
+            if (err == OK) {
+                err = err3;
+            }
+            status_t err4 = mCodec->freeBuffersOnPort(kPortIndexOutputExtradata);
+            if (err == OK) {
+                err = err4;
+            }
+
         }
 
         if ((mCodec->mFlags & kFlagPushBlankBuffersToNativeWindowOnShutdown)
