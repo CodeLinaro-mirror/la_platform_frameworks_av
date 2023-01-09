@@ -162,6 +162,7 @@ cc_library {
     ],
 
     include_dirs: [
+        "frameworks/av/media/libavextensions",
         "frameworks/av/media/libnbaio/include_mono/",
     ],
     local_include_dirs: [
@@ -184,6 +185,7 @@ cc_library {
         // for memory heap analysis
         "libc_malloc_debug_backtrace",
         "shared-file-region-aidl-cpp",
+        "libavmediaextentions",
     ],
     cflags: [
         "-Wall",
