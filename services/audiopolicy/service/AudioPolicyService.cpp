@@ -13,6 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
 
 #define LOG_TAG "AudioPolicyService"
 //#define LOG_NDEBUG 0
@@ -1889,6 +1894,24 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                     status = AudioSystem::setVoiceVolume(data->mVolume);
                     ul.lock();
                     }break;
+                case START_OUTPUT: {
+                    StartOutputData *data = (StartOutputData *)command->mParam.get();
+                    ALOGV("AudioCommandThread() processing start output portId %d", data->mPortId);
+                    svc = mService.promote();
+                    if (svc == 0) {
+                        audio_utils::lock_guard _l(command->mMutex);
+                        command->mStatus = UNKNOWN_ERROR;
+                        break;
+                    }
+                    ul.unlock();
+                    status_t tempStatus = svc->doStartOutput(data->mPortId, data->mVolume,
+                                                            data->mMuted);
+                    ul.lock();
+                    {
+                        audio_utils::lock_guard _l(command->mMutex);
+                        command->mStatus = tempStatus;
+                    }
+                    } break;
                 case STOP_OUTPUT: {
                     StopOutputData *data = (StopOutputData *)command->mParam.get();
                     ALOGV("AudioCommandThread() processing stop output portId %d",
@@ -2235,6 +2258,18 @@ status_t AudioPolicyService::AudioCommandThread::voiceVolumeCommand(float volume
     auto command = sp<AudioCommand>::make(SET_VOICE_VOLUME, true, data);
     ALOGV("AudioCommandThread() adding set voice volume volume %f", volume);
     return sendCommand(command, delayMs);
+}
+
+status_t AudioPolicyService::AudioCommandThread::startOutputCommand(audio_port_handle_t portId,
+                                                                    float *volume, bool *muted)
+{
+    auto data = sp<StartOutputData>::make();
+    data->mPortId = portId;
+    data->mVolume = volume;
+    data->mMuted = muted;
+    auto command = sp<AudioCommand>::make(START_OUTPUT, true, data);
+    ALOGV("AudioCommandThread() adding start output portId %d", portId);
+    return sendCommand(command);
 }
 
 void AudioPolicyService::AudioCommandThread::setEffectSuspendedCommand(int effectId,
