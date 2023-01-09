@@ -31,6 +31,8 @@
 
 #include "TestPlayerStub.h"
 #include <nuplayer/NuPlayerDriver.h>
+#include "nuplayer/NuPlayerDriver.h"
+#include <mediaplayerservice/AVMediaServiceExtensions.h>
 
 namespace android {
 

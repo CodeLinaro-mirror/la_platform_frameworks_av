@@ -71,6 +71,7 @@
 #include <media/stagefright/rtsp/ARTPWriter.h>
 #include <android_media_mediarecorder.h>
 #include <com_android_media_editing_flags.h>
+#include <stagefright/AVExtensions.h>
 
 namespace android {
 
@@ -1384,8 +1385,7 @@ sp<MediaCodecSource> StagefrightRecorder::createAudioSource() {
         }
     }
 
-    sp<AudioSource> audioSource =
-        new AudioSource(
+    sp<AudioSource> audioSource = AVFactory::get()->createAudioSource(
                 &attr,
                 mAttributionSource,
                 sourceSampleRate,

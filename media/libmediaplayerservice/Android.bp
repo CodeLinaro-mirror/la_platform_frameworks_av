@@ -98,6 +98,10 @@ cc_defaults {
         "libstagefright_timedtext",
     ],
 
+    whole_static_libs: [
+        "libavmediaserviceextensions",
+    ],
+
     cflags: [
         "-Wall",
         "-Werror",
@@ -127,6 +131,14 @@ cc_library {
 
     export_include_dirs: [
         ".",
+    ],
+
+    include_dirs: [
+        "frameworks/av/media/libstagefright/rtsp",
+        "frameworks/av/media/libstagefright/webm",
+        "frameworks/av/media/libavextensions",
+        "frameworks/av/media/libmediaextractor",
+        "frameworks/av/media/libstagefright/mpeg2ts",
     ],
 
     local_include_dirs: ["include"],
