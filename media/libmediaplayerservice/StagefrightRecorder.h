@@ -89,7 +89,7 @@ struct StagefrightRecorder : public MediaRecorderBase {
             status_t getPortId(audio_port_handle_t *portId) const override;
     virtual status_t getRtpDataUsage(uint64_t *bytes);
 
-private:
+protected:
 
     enum privacy_sensitive_t {
         PRIVACY_SENSITIVE_DEFAULT = -1,
@@ -194,7 +194,7 @@ private:
 
     static const int kMaxHighSpeedFps = 1000;
 
-    status_t prepareInternal();
+    virtual status_t prepareInternal();
     status_t setupMPEG4orWEBMRecording();
     void setupMPEG4orWEBMMetaData(sp<MetaData> *meta);
     status_t setupAMRRecording();
@@ -261,6 +261,11 @@ private:
     void setDefaultProfileIfNecessary();
     void setDefaultVideoEncoderIfNecessary();
 
+    virtual status_t handleCustomOutputFormats() {return UNKNOWN_ERROR;}
+    virtual status_t handleCustomRecording() {return UNKNOWN_ERROR;}
+    virtual status_t handleCustomAudioSource(sp<AMessage> /*format*/) {return UNKNOWN_ERROR;}
+    virtual status_t handleCustomAudioEncoder() {return UNKNOWN_ERROR;}
+    virtual sp<MediaSource> setPCMRecording() {return NULL;}
 
     StagefrightRecorder(const StagefrightRecorder &);
     StagefrightRecorder &operator=(const StagefrightRecorder &);
