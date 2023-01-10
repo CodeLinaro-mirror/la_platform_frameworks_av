@@ -246,6 +246,10 @@ status_t AudioTrack::getMetrics(mediametrics::Item * &item)
 AudioTrack::AudioTrack(const AttributionSourceState& attributionSource)
     : mClientAttributionSource(attributionSource)
 {
+    mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
+    mAttributes.usage = AUDIO_USAGE_UNKNOWN;
+    mAttributes.flags = AUDIO_FLAG_NONE;
+    strlcpy(mAttributes.tags, "", AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
 }
 
 AudioTrack::AudioTrack(
@@ -297,6 +301,45 @@ AudioTrack::AudioTrack(
                           callback, notificationFrames, sharedBuffer, false /*threadCanCallJava*/,
                           sessionId, transferType, offloadInfo, attributionSource, pAttributes,
                           doNotReconnect, maxRequiredSpeed, AUDIO_PORT_HANDLE_NONE}};
+}
+
+AudioTrack::AudioTrack(
+        audio_stream_type_t streamType,
+        uint32_t sampleRate,
+        audio_format_t format,
+        audio_channel_mask_t channelMask,
+        const sp<IMemory>& sharedBuffer,
+        audio_output_flags_t flags,
+        legacy_callback_t callback,
+        void* user,
+        int32_t notificationFrames,
+        audio_session_t sessionId,
+        transfer_type transferType,
+        const audio_offload_info_t *offloadInfo,
+        const AttributionSourceState& attributionSource,
+        const audio_attributes_t* pAttributes,
+        bool doNotReconnect,
+        float maxRequiredSpeed)
+    : mStatus(NO_INIT),
+      mState(STATE_STOPPED),
+      mPreviousPriority(ANDROID_PRIORITY_NORMAL),
+      mPreviousSchedulingGroup(SP_DEFAULT),
+      mPausedPosition(0),
+      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
+      mTrackOffloaded(false),
+      mAudioTrackCallback(new AudioTrackCallback())
+{
+    mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
+    if (callback) {
+        mLegacyCallbackWrapper = sp<LegacyCallbackWrapper>::make(callback, user);
+    } else if (user) {
+        LOG_ALWAYS_FATAL("Callback data provided without callback pointer!");
+    }
+    mSetParams = std::unique_ptr<SetParams>{new SetParams{
+            streamType, sampleRate, format, channelMask, 0 /*frameCount*/, flags,
+            mLegacyCallbackWrapper, notificationFrames, sharedBuffer, false /*threadCanCallJava*/,
+            sessionId, transferType, offloadInfo, attributionSource, pAttributes, doNotReconnect,
+            maxRequiredSpeed, AUDIO_PORT_HANDLE_NONE}};
 }
 
 void AudioTrack::onFirstRef() {
@@ -518,6 +561,10 @@ status_t AudioTrack::set(
                     BAD_VALUE, StringPrintf("%s: Invalid stream type %d", __func__, streamType));
         }
         mOriginalStreamType = streamType;
+        mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
+        mAttributes.usage = AUDIO_USAGE_UNKNOWN;
+        mAttributes.flags = AUDIO_FLAG_NONE;
+        strlcpy(mAttributes.tags, "", AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
     } else {
         mOriginalStreamType = AUDIO_STREAM_DEFAULT;
     }
@@ -612,6 +659,8 @@ status_t AudioTrack::set(
                     StringPrintf("%s: received invalid client attribution source uid", __func__));
         }
         mClientAttributionSource.uid = clientAttributionSourceUid.value();
+    } else {
+        mClientAttributionSource.uid = attributionSource.uid;
     }
     if (pid.value() == (pid_t)-1 || (callingPid != myPid)) {
         auto clientAttributionSourcePid = legacy2aidl_uid_t_int32_t(callingPid);
@@ -621,6 +670,8 @@ status_t AudioTrack::set(
                     StringPrintf("%s: received invalid client attribution source pid", __func__));
         }
         mClientAttributionSource.pid = clientAttributionSourcePid.value();
+    } else {
+        mClientAttributionSource.pid = attributionSource.pid;
     }
     mAuxEffectId = 0;
     mCallback = callback;
@@ -1290,6 +1341,12 @@ status_t AudioTrack::setPlaybackRate(const AudioPlaybackRate &playbackRate)
                 AMEDIAMETRICS_PROP_PLAYBACK_PITCH, (double)playbackRateTemp.mPitch)
         .record();
 
+
+    if (mTrackOffloaded &&
+        !isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
+        ALOGD("invalidate track-offloaded track on setPlaybackRate");
+        android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
+    }
     return NO_ERROR;
 }
 
@@ -1822,6 +1879,12 @@ status_t AudioTrack::createTrack_l()
         if (mAudioTrackThread != 0 && !mThreadCanCallJava) {
             input.clientInfo.clientTid = mAudioTrackThread->getTid();
         }
+    }
+    // Set offload_info to defaults if track not already offloaded but can be offloaded
+    if (mOffloadInfo == NULL &&
+        audio_is_linear_pcm(mFormat) &&
+        isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
+        input.config.offload_info = AUDIO_INFO_INITIALIZER;
     }
     input.sharedBuffer = mSharedBuffer;
     input.notificationsPerBuffer = mNotificationsPerBufferReq;
@@ -2814,14 +2877,20 @@ status_t AudioTrack::restoreTrack_l(const char *from, bool forceRestore)
             __func__, mPortId, isOffloadedOrDirect_l() ? "Offloaded or Direct" : "PCM", from);
     ++mSequence;
 
-    if (!forceRestore &&
-        (isOffloadedOrDirect_l() || mDoNotReconnect)) {
+
+    if (!forceRestore && (isOffloadedOrDirect_l() || mDoNotReconnect ||
+        (mOrigFlags & AUDIO_OUTPUT_FLAG_DIRECT) != 0)) {
         // FIXME re-creation of offloaded and direct tracks is not yet implemented;
-        // Disabled since (1) timestamp correction is not implemented for non-PCM and
-        // (2) We pre-empt existing direct tracks on resource constraint, so these tracks
-        // shouldn't reconnect.
-        result = DEAD_OBJECT;
-        return result;
+        // reconsider enabling for linear PCM encodings when position can be preserved.
+
+        // Tear down sink only for non-internal invalidation.
+        // Since new track could again have invalidation on setPlayback rate causing
+        // continuous creation and tear down.
+        if (!mTrackOffloaded ||
+              isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
+            result = DEAD_OBJECT;
+            return result;
+        }
     }
 
     // Save so we can return count since creation.
@@ -3152,7 +3221,7 @@ status_t AudioTrack::getTimestamp_l(AudioTimestamp& timestamp)
     // To avoid a race, read the presented frames first.  This ensures that presented <= consumed.
 
     status_t status;
-    if (isAfTrackOffloadedOrDirect_l()) {
+    if (isAfTrackOffloadedOrDirect_l() || mTrackOffloaded) {
         // use Binder to get timestamp
         media::AudioTimestampInternal ts;
         mAudioTrack->getTimestamp(&ts, &status);
