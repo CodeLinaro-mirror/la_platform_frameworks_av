@@ -1444,34 +1444,42 @@ status_t AudioPolicyManager::getOutputForAttrInt(
         return BAD_VALUE;
     }
     if (usePrimaryOutputFromPolicyMixes) {
-        sp<DeviceDescriptor> policyMixDevice =
+
+        /* BUG 73287368: Support compress-offload playback with dynamic audio policy */
+        sp<DeviceDescriptor> deviceDesc =
                 mAvailableOutputDevices.getDevice(primaryMix->mDeviceType,
                                                   primaryMix->mDeviceAddress,
                                                   AUDIO_FORMAT_DEFAULT);
         sp<SwAudioOutputDescriptor> policyDesc = primaryMix->getOutput();
-        bool tryDirectForFlags = policyDesc == nullptr ||
-                (policyDesc->mFlags & AUDIO_OUTPUT_FLAG_DIRECT) ||
-                (*flags & (AUDIO_OUTPUT_FLAG_HW_AV_SYNC | AUDIO_OUTPUT_FLAG_MMAP_NOIRQ));
-        // if a direct output can be opened to deliver the track's multi-channel content to the
-        // output rather than being downmixed by the primary output, then use this direct
-        // output by by-passing the primary mix if possible, otherwise fall-through to primary
-        // mix.
-        bool tryDirectForChannelMask = policyDesc != nullptr
-                    && (audio_channel_count_from_out_mask(policyDesc->getConfig().channel_mask) <
-                        audio_channel_count_from_out_mask(config->channel_mask));
-        if (policyMixDevice != nullptr && (tryDirectForFlags || tryDirectForChannelMask)) {
-            audio_io_handle_t newOutput;
-            status = openDirectOutput(
-                    *stream, session, config,
-                    (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT),
-                    DeviceVector(policyMixDevice), &newOutput, *resultAttr);
-            if (status == NO_ERROR) {
-                policyDesc = mOutputs.valueFor(newOutput);
-                primaryMix->setOutput(policyDesc);
-            } else if (tryDirectForFlags) {
-                ALOGW("%s, failed open direct, status: %d", __func__, status);
-                policyDesc = nullptr;
-            } // otherwise use primary if available.
+        bool requestOffloadOrDirect =
+            (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) || (*flags & AUDIO_OUTPUT_FLAG_DIRECT);
+        sp<IOProfile> profile = getProfileForOutput(DeviceVector(deviceDesc),
+                                                config->sample_rate,
+                                                config->format,
+                                                config->channel_mask,
+                                                (audio_output_flags_t)*flags,
+                                                requestOffloadOrDirect);
+        ALOGD("%s() profile %sfound sample rate: %u, format: 0x%x, channel_mask: 0x%x, flags: 0x%x",
+            __FUNCTION__, profile != 0 ? "" : "NOT ",
+            config->sample_rate, config->format, config->channel_mask, *flags);
+        if ((deviceDesc->type() & AUDIO_DEVICE_OUT_BUS) && (*stream == AUDIO_STREAM_MUSIC) &&
+                (profile != 0) && (requestOffloadOrDirect)) {
+            ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
+                deviceDesc->type());
+            if (deviceDesc != nullptr
+                    && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
+                audio_io_handle_t newOutput;
+                status = openDirectOutput(
+                        *stream, session, config,
+                        (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT),
+                        DeviceVector(deviceDesc), &newOutput);
+                if (status != NO_ERROR) {
+                    policyDesc = nullptr;
+                } else {
+                    policyDesc = mOutputs.valueFor(newOutput);
+                    primaryMix->setOutput(policyDesc);
+                }
+            }
         }
         if (policyDesc != nullptr) {
             policyDesc->mPolicyMix = primaryMix;
