@@ -33,6 +33,11 @@ namespace android {
 AudioStreamOut::AudioStreamOut(AudioHwDevice *dev, audio_output_flags_t flags)
         : audioHwDev(dev)
         , flags(flags)
+        , mRenderPosition(0)
+        , mRateMultiplier(1)
+        , mHalFormatHasProportionalFrames(false)
+        , mHalFrameSize(0)
+        , mExpectRetrograde(false)
 {
 }
 
@@ -74,13 +79,9 @@ status_t AudioStreamOut::getPresentationPosition(uint64_t *frames, struct timesp
         return status;
     }
 
-    if (mHalFormatHasProportionalFrames &&
-            (flags & AUDIO_OUTPUT_FLAG_DIRECT) == AUDIO_OUTPUT_FLAG_DIRECT) {
-        // For DirectTrack reset position to 0 on standby.
-        const uint64_t adjustedPosition = (halPosition <= mFramesWrittenAtStandby) ?
-                0 : (halPosition - mFramesWrittenAtStandby);
-        // Scale from HAL sample rate to application rate.
-        *frames = adjustedPosition / mRateMultiplier;
+
+    if (mHalFormatHasProportionalFrames) {
+        *frames = halPosition / mRateMultiplier;
     } else {
         // For offloaded MP3 and other compressed formats, and linear PCM.
         *frames = halPosition;
@@ -173,10 +174,7 @@ void AudioStreamOut::presentationComplete() {
 ssize_t AudioStreamOut::write(const void *buffer, size_t numBytes)
 {
     size_t bytesWritten;
-    const status_t result = stream->write(buffer, numBytes, &bytesWritten);
-    if (result == OK && bytesWritten > 0 && mHalFrameSize > 0) {
-        mFramesWritten += bytesWritten / mHalFrameSize;
-    }
+    status_t result = stream->write(buffer, numBytes, &bytesWritten);
     return result == OK ? bytesWritten : result;
 }
 
