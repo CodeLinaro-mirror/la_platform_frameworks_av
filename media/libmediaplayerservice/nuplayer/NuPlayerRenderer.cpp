@@ -2004,7 +2004,7 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
             offloadOnly, offloadingAudio());
     bool audioSinkChanged = false;
 
-    int32_t numChannels;
+    int32_t numChannels, bitWidth;
     CHECK(format->findInt32("channel-count", &numChannels));
 
     // channel mask info as read from the audio format
@@ -2080,9 +2080,11 @@ status_t NuPlayer::Renderer::onOpenAudioSink(
             offloadInfo.sample_rate = sampleRate;
             offloadInfo.channel_mask = channelMask;
             offloadInfo.format = audioFormat;
+            offloadInfo.bit_width = bitWidth;
             offloadInfo.stream_type = AUDIO_STREAM_MUSIC;
             offloadInfo.bit_rate = avgBitRate;
             offloadInfo.has_video = hasVideo;
+            offloadInfo.offload_buffer_size = offloadBufferSize;
             offloadInfo.is_streaming = isStreaming;
 
             if (memcmp(&mCurrentOffloadInfo, &offloadInfo, sizeof(offloadInfo)) == 0) {
