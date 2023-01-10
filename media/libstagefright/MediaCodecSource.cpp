@@ -712,6 +712,9 @@ void MediaCodecSource::signalEOS(status_t err) {
             output->mBufferQueue.clear();
             output->mEncoderReachedEOS = true;
             output->mErrorCode = err;
+            if (err != ERROR_END_OF_STREAM) {
+                output->mErrorCode = ERROR_IO;
+            }
             if (!(mFlags & FLAG_USE_SURFACE_INPUT)) {
                 mStopping = true;
                 mPuller->stop();
@@ -809,7 +812,7 @@ status_t MediaCodecSource::feedEncoderInputBuffers() {
             if (err != OK || inbuf == NULL || inbuf->data() == NULL
                     || mbuf->data() == NULL || mbuf->size() == 0) {
                 mbuf->release();
-                signalEOS();
+                signalEOS(err);
                 break;
             }
 
@@ -999,8 +1002,9 @@ void MediaCodecSource::onMessageReceived(const sp<AMessage> &msg) {
 
             sp<MediaCodecBuffer> outbuf;
             status_t err = mEncoder->getOutputBuffer(index, &outbuf);
-            if (err != OK || outbuf == NULL || outbuf->data() == NULL) {
-                signalEOS();
+            if (err != OK || outbuf == NULL || outbuf->data() == NULL
+                || outbuf->size() == 0) {
+                signalEOS(err);
                 break;
             } else if (outbuf->size() == 0) {
                 // Zero length CSD buffers are not treated as an error
@@ -1087,7 +1091,7 @@ void MediaCodecSource::onMessageReceived(const sp<AMessage> &msg) {
                 mStopping = true;
                 mPuller->stop();
             }
-            signalEOS();
+            signalEOS(err);
        }
        // MediaCodec::CB_CRYPTO_ERROR is unexpected as we are not using crypto
        // MediaCodec::CB_LARGE_FRAME_OUTPUT_AVAILABLE is unexpected as we are not using large frames
