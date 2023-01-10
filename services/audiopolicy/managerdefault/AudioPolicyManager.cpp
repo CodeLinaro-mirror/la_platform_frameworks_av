@@ -1293,6 +1293,12 @@ sp<IOProfile> AudioPolicyManager::searchCompatibleProfileHwModules (
                 return curProfile;
              }
 
+	     // if several profiles are compatible, give priority to one with offload capability
+	     // exact match is also not skipped as it should be preferred over any existing selection
+             if (profile != 0 && 
+                 ((curProfile->getFlags() & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) == 0) && (curProfile->getFlags() != flags)) {
+                continue;
+             }
              profile = curProfile;
              if ((flags == AUDIO_OUTPUT_FLAG_DIRECT) &&
                  curProfile->getFlags() == AUDIO_OUTPUT_FLAG_DIRECT) {
@@ -4211,6 +4217,7 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
     while (output == AUDIO_IO_HANDLE_NONE) {
         audio_io_handle_t outputOffloaded = AUDIO_IO_HANDLE_NONE;
         audio_io_handle_t outputSpatializer = AUDIO_IO_HANDLE_NONE;
+	audio_io_handle_t outputDirect = AUDIO_IO_HANDLE_NONE;
         audio_io_handle_t outputDeepBuffer = AUDIO_IO_HANDLE_NONE;
         audio_io_handle_t outputPrimary = AUDIO_IO_HANDLE_NONE;
 
@@ -4240,6 +4247,8 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
             output = outputOffloaded;
         } else if (outputSpatializer != AUDIO_IO_HANDLE_NONE) {
             output = outputSpatializer;
+	} else if (outputDirect != AUDIO_IO_HANDLE_NONE){
+	    output = outputDirect;
         } else if (outputDeepBuffer != AUDIO_IO_HANDLE_NONE) {
             output = outputDeepBuffer;
         } else if (outputPrimary != AUDIO_IO_HANDLE_NONE) {
@@ -6573,7 +6582,8 @@ status_t AudioPolicyManager::setMasterMono(bool mono)
         std::vector<audio_io_handle_t> offloaded;
         for (size_t i = 0; i < mOutputs.size(); ++i) {
             sp<SwAudioOutputDescriptor> desc = mOutputs.valueAt(i);
-            if (desc->mFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) {
+            if (desc->mFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD ||
+		desc->mFlags == AUDIO_OUTPUT_FLAG_DIRECT) {
                 offloaded.push_back(desc->mIoHandle);
             }
         }
