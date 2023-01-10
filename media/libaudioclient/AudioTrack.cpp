@@ -1609,7 +1609,10 @@ status_t AudioTrack::getPosition(uint32_t *position)
     // for compressed/synced data; however, we use proxy position for pure linear pcm data
     // as we do not know the capability of the HAL for pcm position support and standby.
     // There may be some latency differences between the HAL position and the proxy position.
-    if (isOffloaded_l() || (isDirect_l() && !isPurePcmData_l())) {
+    if (isOffloadedOrDirect_l() && !isPurePcmData_l()) {
+        uint32_t dspFrames = 0;
+        status_t status;
+
         if (isOffloaded_l() && ((mState == STATE_PAUSED) || (mState == STATE_PAUSED_STOPPING))) {
             ALOGV("%s(%d): called in paused state, return cached position %u",
                 __func__, mPortId, mPausedPosition);
@@ -1620,10 +1623,10 @@ status_t AudioTrack::getPosition(uint32_t *position)
         uint32_t dspFrames = 0;
         if (mOutput != AUDIO_IO_HANDLE_NONE) {
             uint32_t halFrames; // actually unused
-            // FIXME: on getRenderPosition() error, we return OK with frame position 0.
-            if (AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames) != NO_ERROR) {
-                *position = 0;
-                return NO_ERROR;
+            status = AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames);
+            if (status != NO_ERROR) {
+                ALOGW("failed to getRenderPosition for offload session");
+                return INVALID_OPERATION;
             }
         }
         *position = dspFrames;
