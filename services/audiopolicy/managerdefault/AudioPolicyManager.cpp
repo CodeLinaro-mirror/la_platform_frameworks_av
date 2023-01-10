@@ -1269,23 +1269,23 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                                                   primaryMix->mDeviceAddress,
                                                   AUDIO_FORMAT_DEFAULT);
         sp<SwAudioOutputDescriptor> policyDesc = primaryMix->getOutput();
-        bool requestOffloadOrDirect =
-            (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) || (*flags & AUDIO_OUTPUT_FLAG_DIRECT);
-        sp<IOProfile> profile = getProfileForOutput(DeviceVector(deviceDesc),
-                                                config->sample_rate,
-                                                config->format,
-                                                config->channel_mask,
-                                                (audio_output_flags_t)*flags,
-                                                requestOffloadOrDirect);
-        ALOGD("%s() profile %sfound sample rate: %u, format: 0x%x, channel_mask: 0x%x, flags: 0x%x",
-            __FUNCTION__, profile != 0 ? "" : "NOT ",
-            config->sample_rate, config->format, config->channel_mask, *flags);
-        if ((deviceDesc->type() & AUDIO_DEVICE_OUT_BUS) && (*stream == AUDIO_STREAM_MUSIC) &&
-                (profile != 0) && (requestOffloadOrDirect)) {
-            ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
+
+        if (deviceDesc != nullptr) {
+            bool requestOffloadOrDirect =
+                (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) || (*flags & AUDIO_OUTPUT_FLAG_DIRECT);
+            sp<IOProfile> profile = getProfileForOutput(DeviceVector(deviceDesc),
+                                                    config->sample_rate,
+                                                    config->format,
+                                                    config->channel_mask,
+                                                    (audio_output_flags_t)*flags,
+                                                    requestOffloadOrDirect);
+            ALOGD("%s() profile %sfound sample rate: %u, format: 0x%x, channel_mask: 0x%x, flags: 0x%x",
+                __FUNCTION__, profile != 0 ? "" : "NOT ",
+                config->sample_rate, config->format, config->channel_mask, *flags);
+            if ((deviceDesc->type() & AUDIO_DEVICE_OUT_BUS) && (*stream == AUDIO_STREAM_MUSIC) &&
+                    (profile != 0) && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
+                ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
                 deviceDesc->type());
-            if (deviceDesc != nullptr
-                    && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
                 audio_io_handle_t newOutput;
                 status = openDirectOutput(
                         *stream, session, config,
@@ -4407,6 +4407,17 @@ bool AudioPolicyManager::isOffloadSupportedInternal(const audio_offload_info_t& 
             ALOGD("%s offload disabled for WMA_PRO/WMA_LOSSLESS bit rate exceeding", __func__);
             return false;
         }
+
+	if ((offloadInfo.format == AUDIO_FORMAT_MP3) ||
+	    ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC) ||
+	    ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_FLAC) ||
+	    ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_VORBIS) ||
+	    ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_DSD) ||
+	    ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC_ADTS)) {
+		ALOGD("Offload denied internal for MP3/AAC/VORBIS/FLAC format %0x",
+				offloadInfo.format & AUDIO_FORMAT_MAIN_MASK);
+		return false;
+	}
     }
     return true;
 }
@@ -4472,20 +4483,23 @@ bool AudioPolicyManager::isOffloadPossible(const audio_offload_info_t &offloadIn
         return false;
     }
 
-    //If duration is less than minimum value defined in property, return false
-    const int min_duration_secs = property_get_int32(
+    if (isOffloadSupportedInternal(offloadInfo)) {
+	    ALOGD("%s: offload is support internal, skip check duration", __func__);
+    } else {
+	    //If duration is less than minimum value defined in property, return false
+	    const int min_duration_secs = property_get_int32(
             "audio.offload.min.duration.secs", -1 /* default_value */);
     if (!durationIgnored) {
         if (min_duration_secs >= 0) {
             if (offloadInfo.duration_us < min_duration_secs * 1000000LL) {
                 ALOGV("%s: Offload denied by duration < audio.offload.min.duration.secs(=%d)",
                       __func__, min_duration_secs);
-                return false;
+                return AUDIO_OFFLOAD_NOT_SUPPORTED;
             }
         } else if (offloadInfo.duration_us < OFFLOAD_DEFAULT_MIN_DURATION_SECS * 1000000) {
             ALOGV("%s: Offload denied by duration < default min(=%u)",
                   __func__, OFFLOAD_DEFAULT_MIN_DURATION_SECS);
-            return false;
+            return AUDIO_OFFLOAD_NOT_SUPPORTED;
         }
     }
 
