@@ -34,14 +34,14 @@
 #include <media/stagefright/foundation/ADebug.h>
 #include <media/stagefright/foundation/AMessage.h>
 
-#include <nuplayer/NuPlayer.h>
-#include <nuplayer/NuPlayerDecoderBase.h>
-#include <nuplayer/NuPlayerDecoderPassThrough.h>
-#include <nuplayer/NuPlayerDecoder.h>
-#include <nuplayer/NuPlayerCCDecoder.h>
+#include <nuplayer/include/nuplayer/NuPlayer.h>
+#include <nuplayer/include/nuplayer/NuPlayerDecoderBase.h>
+#include <nuplayer/include/nuplayer/NuPlayerDecoderPassThrough.h>
+#include <nuplayer/include/nuplayer/NuPlayerDecoder.h>
+#include <nuplayer/include/nuplayer/NuPlayerCCDecoder.h>
 #include <gui/Surface.h>
-#include <nuplayer/NuPlayerSource.h>
-#include <nuplayer/NuPlayerRenderer.h>
+#include <nuplayer/include/nuplayer/NuPlayerSource.h>
+#include <nuplayer/include/nuplayer/NuPlayerRenderer.h>
 
 #include "common/ExtensionsLoader.hpp"
 #include "mediaplayerservice/AVNuExtensions.h"

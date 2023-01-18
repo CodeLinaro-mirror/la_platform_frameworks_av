@@ -1926,7 +1926,7 @@ status_t AudioTrack::createTrack_l()
         }
     }
     // Set offload_info to defaults if track not already offloaded but can be offloaded
-    if (mOffloadInfo == NULL &&
+    if (mOffloadInfoCopy == AUDIO_INFO_INITIALIZER &&
         audio_is_linear_pcm(mFormat) &&
         isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
         input.config.offload_info = AUDIO_INFO_INITIALIZER;
