@@ -86,6 +86,7 @@ cc_defaults {
         "libstagefright_rtsp_headers",
         "libstagefright_webm_headers",
         "media_plugin_headers",
+        "libstagefright_mpeg2support_headers",
     ],
 
     static_libs: [
