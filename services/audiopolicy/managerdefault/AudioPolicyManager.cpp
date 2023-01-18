@@ -1705,7 +1705,7 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
 
     status_t status = getOutputForAttrInt(&resultAttr, output, session, attr, stream, uid,
             &directConfig, flags, selectedDeviceId, &isRequestedDeviceForExclusiveUse,
-            secondaryOutputs != nullptr ? &secondaryMixes : nullptr, outputType);
+            secondaryOutputs != nullptr ? &secondaryMixes : nullptr, outputType, isSpatialized);
 //            isBitPerfect);
     if (status != NO_ERROR) {
         return status;
@@ -5308,6 +5308,7 @@ bool AudioPolicyManager::isOffloadPossible(const audio_offload_info_t &offloadIn
                   __func__, OFFLOAD_DEFAULT_MIN_DURATION_SECS);
             return false;
         }
+    }
     }
 
     // Do not allow offloading if one non offloadable effect is enabled. This prevents from

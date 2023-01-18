@@ -359,6 +359,7 @@ cc_library {
         "libstagefright_xmlparser_headers",
         "media_ndk_headers",
         "media_quality_headers",
+        "libstagefright_mpeg2support_headers",
     ],
 
     export_shared_lib_headers: [
