@@ -69,6 +69,7 @@ cc_library_static {
     header_libs: [
         "av-headers",
         "libmedia_headers",
+        "libstagefright_mpeg2support_headers",
     ],
 }
 

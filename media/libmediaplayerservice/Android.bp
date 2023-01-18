@@ -73,6 +73,7 @@ cc_library {
         "libmediautils_headers",
         "libstagefright_rtsp_headers",
         "libstagefright_webm_headers",
+        "libstagefright_mpeg2support_headers",
     ],
 
     static_libs: [
