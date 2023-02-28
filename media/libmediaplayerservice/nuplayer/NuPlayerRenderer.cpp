@@ -237,6 +237,11 @@ status_t NuPlayer::Renderer::onConfigPlayback(const AudioPlaybackRate &rate /* s
             return err;
         }
     }
+
+    if (!mHasAudio && mHasVideo) {
+       mNeedVideoClearAnchor = true;
+    }
+
     mPlaybackSettings = rate;
     mPlaybackRate = rate.mSpeed;
     mMediaClock->setPlaybackRate(mPlaybackRate);
@@ -1270,6 +1275,8 @@ void NuPlayer::Renderer::onNewAudioMediaTime(int64_t mediaTimeUs) {
         if (nowUs >= mNextAudioClockUpdateTimeUs) {
             int64_t nowMediaUs = mediaTimeUs - getPendingAudioPlayoutDurationUs(nowUs);
             mMediaClock->updateAnchor(nowMediaUs, nowUs, mediaTimeUs);
+            mAnchorTimeMediaUs = mediaTimeUs;
+            mAnchorNumFramesWritten = mNumFramesWritten;
             mUseVirtualAudioSink = false;
             mNextAudioClockUpdateTimeUs = nowUs + kMinimumAudioClockUpdatePeriodUs;
         }
@@ -1287,11 +1294,11 @@ void NuPlayer::Renderer::onNewAudioMediaTime(int64_t mediaTimeUs) {
             // and it's paced by system clock.
             ALOGW("AudioSink stuck. ARE YOU CONNECTED TO AUDIO OUT? Switching to system clock.");
             mMediaClock->updateAnchor(mAudioFirstAnchorTimeMediaUs, nowUs, mediaTimeUs);
+            mAnchorTimeMediaUs = mediaTimeUs;
+            mAnchorNumFramesWritten = mNumFramesWritten;
             mUseVirtualAudioSink = true;
         }
     }
-    mAnchorNumFramesWritten = mNumFramesWritten;
-    mAnchorTimeMediaUs = mediaTimeUs;
 }
 
 // Called without mLock acquired.
@@ -1342,8 +1349,13 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
 
     {
         Mutex::Autolock autoLock(mLock);
+        if (mNeedVideoClearAnchor && !mHasAudio) {
+            mNeedVideoClearAnchor = false;
+            clearAnchorTime();
+        }
         if (mAnchorTimeMediaUs < 0) {
-            mMediaClock->updateAnchor(mediaTimeUs, nowUs, mediaTimeUs);
+            mMediaClock->updateAnchor(mediaTimeUs, nowUs,
+               (mHasAudio ? -1 : mediaTimeUs + kDefaultVideoFrameIntervalUs));
             mAnchorTimeMediaUs = mediaTimeUs;
         }
     }
