@@ -130,6 +130,7 @@ StagefrightRecorder::StagefrightRecorder(const AttributionSourceState& client)
       mRTPCVOExtMap(-1),
       mRTPCVODegrees(0),
       mRTPSockDscp(0),
+      mRTPSockOptEcn(0),
       mRTPSockNetwork(0),
       mLastSeqNo(0),
       mStarted(false),
@@ -911,6 +912,13 @@ status_t StagefrightRecorder::setSocketNetwork(int64_t networkHandle) {
     return OK;
 }
 
+status_t StagefrightRecorder::setParamRtpEcn(int32_t ecn) {
+    ALOGV("setParamRtpEcn: %d", ecn);
+
+    mRTPSockOptEcn = ecn;
+    return OK;
+}
+
 status_t StagefrightRecorder::requestIDRFrame() {
     status_t ret = BAD_VALUE;
     if (mVideoEncoderSource != NULL) {
@@ -1092,6 +1100,11 @@ status_t StagefrightRecorder::setParameter(
         if (safe_strtoi32(value.string(), &dscp)) {
             return setParamRtpDscp(dscp);
         }
+    } else if (key == "rtp-param-set-socket-ecn") {
+        int32_t targetEcn;
+        if (safe_strtoi32(value.string(), &targetEcn)) {
+            return setParamRtpEcn(targetEcn);
+        }
     } else if (key == "rtp-param-set-socket-network") {
         int64_t networkHandle;
         if (safe_strtoi64(value.string(), &networkHandle)) {
@@ -1272,6 +1285,9 @@ status_t StagefrightRecorder::start() {
             }
             if (mRTPSockDscp > 0) {
                 meta->setInt32(kKeyRtpDscp, mRTPSockDscp);
+            }
+            if (mRTPSockOptEcn > 0) {
+                meta->setInt32(kKeyRtpEcn, mRTPSockOptEcn);
             }
 
             status = mWriter->start(meta.get());
