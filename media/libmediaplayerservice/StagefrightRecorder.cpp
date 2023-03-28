@@ -1597,7 +1597,7 @@ status_t StagefrightRecorder::setupMPEG2TSRecording() {
             return ERROR_UNSUPPORTED;
         }
 
-        status_t err = setupAudioEncoder(writer);
+        status_t err = setupAudioEncoder();
 
         if (err != OK) {
             return err;
@@ -2149,7 +2149,7 @@ status_t StagefrightRecorder::setupVideoEncoder(
     return OK;
 }
 
-status_t StagefrightRecorder::setupAudioEncoder(const sp<MediaWriter>& writer) {
+status_t StagefrightRecorder::setupAudioEncoder() {
     ATRACE_CALL();
     status_t status = BAD_VALUE;
     if (OK != (status = checkAudioEncoderCapabilities())) {
@@ -2175,7 +2175,6 @@ status_t StagefrightRecorder::setupAudioEncoder(const sp<MediaWriter>& writer) {
         return UNKNOWN_ERROR;
     }
 
-    writer->addSource(audioEncoder);
     mAudioEncoderSource = audioEncoder;
     return OK;
 }
@@ -2218,11 +2217,29 @@ status_t StagefrightRecorder::setupMPEG4orWEBMRecording() {
     // camcorder applications in the recorded files.
     // disable audio for time lapse recording
     const bool disableAudio = mCaptureFpsEnable && mCaptureFps < mFrameRate;
-    if (!disableAudio && mAudioSource != AUDIO_SOURCE_CNT) {
-        err = setupAudioEncoder(writer);
-        if (err != OK) return err;
-        mTotalBitRate += mAudioBitRate;
+
+    if (!disableAudio && mAudioSource != AUDIO_SOURCE_CNT &&
+        isCompressAudioRecordingSupported()) {
+        mAudioSourceNode = setCompressAudioRecording();
+        if (mAudioSourceNode == nullptr) {
+            ALOGE("%s: unable to create compress audio recording", __func__);
+        } else {
+            writer->addSource(mAudioSourceNode);
+            ALOGI("%s:  created compress audio recording", __func__);
+        }
     }
+
+    if (!disableAudio && mAudioSource != AUDIO_SOURCE_CNT &&
+        !mEnabledCompressAudioRecording) {
+        err = setupAudioEncoder();
+    }
+
+    if (!disableAudio && mAudioSource != AUDIO_SOURCE_CNT &&
+        !mEnabledCompressAudioRecording) {
+        if (err != OK) return err;
+        writer->addSource(mAudioEncoderSource);
+        mTotalBitRate += mAudioBitRate;
+   }
 
     if (mOutputFormat != OUTPUT_FORMAT_WEBM) {
         if (mCaptureFpsEnable) {
