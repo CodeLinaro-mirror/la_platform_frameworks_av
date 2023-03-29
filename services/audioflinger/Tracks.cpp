@@ -529,10 +529,7 @@ AudioFlinger::PlaybackThread::OpPlayAudioMonitor::createIfNeeded(
             id, attr.flags);
         return nullptr;
     }
-
-    AttributionSourceState checkedAttributionSource = AudioFlinger::checkAttributionSourcePackage(
-            attributionSource);
-    return new OpPlayAudioMonitor(checkedAttributionSource, attr.usage, id);
+    return new OpPlayAudioMonitor(attributionSource, attr.usage, id);
 }
 
 AudioFlinger::PlaybackThread::OpPlayAudioMonitor::OpPlayAudioMonitor(
@@ -2579,6 +2576,8 @@ void AudioFlinger::RecordThread::RecordTrack::updateTrackFrameInfo(
     // ALOGD("FrameTime: %lld %lld", (long long)ft.frames, (long long)ft.timeNs);
     mKernelFrameTime.store(ft);
     if (!audio_is_linear_pcm(mFormat)) {
+        // Stream is direct, return provided timestamp with no conversion
+        mServerProxy->setTimestamp(timestamp);
         return;
     }
 
