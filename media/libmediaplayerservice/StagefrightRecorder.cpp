@@ -145,7 +145,6 @@ StagefrightRecorder::StagefrightRecorder(const AttributionSourceState& client)
       mSelectedMicFieldDimension(MIC_FIELD_DIMENSION_NORMAL) {
 
     ALOGV("Constructor");
-
     mMetricsItem = NULL;
     mAnalyticsDirty = false;
     reset();
@@ -2229,7 +2228,20 @@ status_t StagefrightRecorder::setupMPEG4orWEBMRecording() {
     // camcorder applications in the recorded files.
     // disable audio for time lapse recording
     const bool disableAudio = mCaptureFpsEnable && mCaptureFps < mFrameRate;
-    if (!disableAudio && mAudioSource != AUDIO_SOURCE_CNT) {
+
+    if (!disableAudio && mAudioSource != AUDIO_SOURCE_CNT &&
+        isCompressAudioRecordingSupported()) {
+        mAudioSourceNode = setCompressAudioRecording();
+        if (mAudioSourceNode == nullptr) {
+            ALOGE("%s: unable to create compress audio recording", __func__);
+        } else {
+            writer->addSource(mAudioSourceNode);
+            ALOGI("%s:  created compress audio recording", __func__);
+        }
+    }
+
+    if (!disableAudio && mAudioSource != AUDIO_SOURCE_CNT &&
+        !mEnabledCompressAudioRecording) {
         err = setupAudioEncoder();
     }
     if (mVideoSource < VIDEO_SOURCE_LIST_END) {
@@ -2239,7 +2251,8 @@ status_t StagefrightRecorder::setupMPEG4orWEBMRecording() {
         mVideoEncoderSource = videoSource;
         mTotalBitRate += mVideoBitRate;
     }
-    if (!disableAudio && mAudioSource != AUDIO_SOURCE_CNT) {
+    if (!disableAudio && mAudioSource != AUDIO_SOURCE_CNT &&
+        !mEnabledCompressAudioRecording) {
         if (err != OK) return err;
         writer->addSource(mAudioEncoderSource);
         mTotalBitRate += mAudioBitRate;
@@ -2326,6 +2339,12 @@ status_t StagefrightRecorder::pause() {
     if (mAudioEncoderSource != NULL) {
         mAudioEncoderSource->pause();
     }
+
+    /* compress recording pause*/
+    if (mAudioSourceNode != NULL && mEnabledCompressAudioRecording) {
+        mAudioSourceNode->pause();
+    }
+
     if (mVideoEncoderSource != NULL) {
         mVideoEncoderSource->pause(meta.get());
     }
@@ -2348,6 +2367,18 @@ status_t StagefrightRecorder::resume() {
 
     int64_t bufferStartTimeUs = 0;
     bool allSourcesStarted = true;
+
+    /* compress recording resume*/
+    if (mAudioSourceNode != NULL && mEnabledCompressAudioRecording) {
+        int64_t timeUs = mAudioSourceNode->getFirstSampleSystemTimeUs();
+        if (timeUs < 0) {
+            allSourcesStarted = false;
+        }
+        if (bufferStartTimeUs < timeUs) {
+            bufferStartTimeUs = timeUs;
+        }
+    }
+
     for (const auto &source : { mAudioEncoderSource, mVideoEncoderSource }) {
         if (source == nullptr) {
             continue;
@@ -2383,6 +2414,10 @@ status_t StagefrightRecorder::resume() {
         source->start(meta.get());
     }
 
+     /* compress audio recording resume*/
+    if (mAudioSourceNode != NULL && mEnabledCompressAudioRecording) {
+        mAudioSourceNode->start(meta.get());
+    }
 
     // sum info on pause duration
     // (ignore the 30msec of overlap adjustment factored into mTotalPausedDurationUs)
@@ -2509,6 +2544,8 @@ status_t StagefrightRecorder::reset() {
     mAudioBitRate  = 12200;
     mInterleaveDurationUs = 0;
     mIFramesIntervalSec = 1;
+    mEnabledCompressAudioRecording = false;
+    mAudioSourceNode.clear();
     mAudioSourceNode = 0;
     mUse64BitFileOffset = false;
     mMovieTimeScale  = -1;
