@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #define LOG_TAG "APM::AudioPolicyEngine/Base"
@@ -37,11 +41,6 @@ void EngineBase::setObserver(AudioPolicyManagerObserver *observer)
 status_t EngineBase::initCheck()
 {
     return (mApmObserver != nullptr)? NO_ERROR : NO_INIT;
-}
-
-void EngineBase::setDpConnAndAllowedForVoice(bool connAndAllowed)
-{
-    mDpConnAndAllowedForVoice = connAndAllowed;
 }
 
 status_t EngineBase::setPhoneState(audio_mode_t state)

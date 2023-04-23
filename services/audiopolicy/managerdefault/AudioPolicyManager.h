@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #pragma once
@@ -907,7 +911,6 @@ protected:
         void releaseMsdOutputPatches(const DeviceVector& devices);
 private:
         void onNewAudioModulesAvailableInt(DeviceVector *newDevices);
-        void chkDpConnAndAllowedForVoice(audio_devices_t device, audio_policy_dev_state_t state);
 
         // Add or remove AC3 DTS encodings based on user preferences.
         void modifySurroundFormats(const sp<DeviceDescriptor>& devDesc, FormatVector *formatsPtr);

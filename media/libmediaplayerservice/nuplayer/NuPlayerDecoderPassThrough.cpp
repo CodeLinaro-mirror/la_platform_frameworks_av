@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 //#define LOG_NDEBUG 0
@@ -35,9 +39,6 @@
 
 namespace android {
 
-// TODO optimize buffer size for power consumption
-// The offload read buffer size is 32 KB but 24 KB uses less power.
-static const size_t kAggregateBufferSizeBytes = 24 * 1024;
 static const size_t kMaxCachedBytes = 200000;
 
 NuPlayer::DecoderPassThrough::DecoderPassThrough(
@@ -45,6 +46,7 @@ NuPlayer::DecoderPassThrough::DecoderPassThrough(
         const sp<Source> &source,
         const sp<Renderer> &renderer)
     : DecoderBase(notify),
+      mAggregateBufferSizeBytes(24 * 1024),
       mSource(source),
       mRenderer(renderer),
       mSkipRenderingUntilMediaTimeUs(-1LL),
@@ -168,9 +170,9 @@ sp<ABuffer> NuPlayer::DecoderPassThrough::aggregateBuffer(
     size_t smallSize = accessUnit->size();
     if ((mAggregateBuffer == NULL)
             // Don't bother if only room for a few small buffers.
-            && (smallSize < (kAggregateBufferSizeBytes / 3))) {
+            && (smallSize < (mAggregateBufferSizeBytes / 3))) {
         // Create a larger buffer for combining smaller buffers from the extractor.
-        mAggregateBuffer = new ABuffer(kAggregateBufferSizeBytes);
+        mAggregateBuffer = new ABuffer(mAggregateBufferSizeBytes);
         mAggregateBuffer->setRange(0, 0); // start empty
     }
 

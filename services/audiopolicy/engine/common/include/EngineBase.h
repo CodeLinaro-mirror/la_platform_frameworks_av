@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #pragma once
@@ -38,8 +42,6 @@ public:
     status_t setPhoneState(audio_mode_t mode) override;
 
     audio_mode_t getPhoneState() const override { return mPhoneState; }
-
-    virtual void setDpConnAndAllowedForVoice(bool connAndAllowed);
 
     status_t setForceUse(audio_policy_force_use_t usage, audio_policy_forced_cfg_t config) override
     {
@@ -182,10 +184,6 @@ private:
     VolumeGroupMap mVolumeGroups;
     LastRemovableMediaDevices mLastRemovableMediaDevices;
     audio_mode_t mPhoneState = AUDIO_MODE_NORMAL;  /**< current phone state. */
-
-    /* if display-port is connected and can be used for voip/voice */
-    bool mDpConnAndAllowedForVoice = false;
-
 
     /** current forced use configuration. */
     audio_policy_forced_cfg_t mForceUse[AUDIO_POLICY_FORCE_USE_CNT] = {};

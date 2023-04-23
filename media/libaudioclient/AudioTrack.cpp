@@ -13,6 +13,10 @@
 ** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ** See the License for the specific language governing permissions and
 ** limitations under the License.
+**
+** Changes from Qualcomm Innovation Center are provided under the following license:
+** Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+** SPDX-License-Identifier: BSD-3-Clause-Clear
 */
 
 //#define LOG_NDEBUG 0
@@ -39,6 +43,8 @@
 #include <media/AudioSystem.h>
 #include <media/MediaMetricsItem.h>
 #include <media/TypeConverter.h>
+#include <binder/MemoryDealer.h>
+#include "media/AVMediaExtensions.h"
 
 #define WAIT_PERIOD_MS                  10
 #define WAIT_STREAM_END_TIMEOUT_SEC     120
@@ -1838,6 +1844,7 @@ status_t AudioTrack::createTrack_l()
     }
     ALOG_ASSERT(output.audioTrack != 0);
 
+    mTrackOffloaded = AVMediaUtils::get()->AudioTrackIsTrackOffloaded(output.outputId);
     mFrameCount = output.frameCount;
     mNotificationFramesAct = (uint32_t)output.notificationFrameCount;
     mRoutedDeviceId = output.selectedDeviceId;

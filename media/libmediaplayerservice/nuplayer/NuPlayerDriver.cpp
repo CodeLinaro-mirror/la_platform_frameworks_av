@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 //#define LOG_NDEBUG 0
@@ -37,6 +41,8 @@
 
 static const int kDumpLockRetries = 50;
 static const int kDumpLockSleepUs = 20000;
+#include "mediaplayerservice/AVNuExtensions.h"
+#include "mediaplayerservice/AVMediaServiceExtensions.h"
 
 namespace android {
 
@@ -83,7 +89,7 @@ NuPlayerDriver::NuPlayerDriver(pid_t pid)
       mRebufferingAtExit(false),
       mLooper(new ALooper),
       mMediaClock(new MediaClock),
-      mPlayer(new NuPlayer(pid, mMediaClock)),
+      mPlayer(AVNuFactory::get()->createNuPlayer(pid, mMediaClock)),
       mPlayerFlags(0),
       mMetricsItem(NULL),
       mClientUid(-1),
@@ -177,6 +183,7 @@ status_t NuPlayerDriver::setDataSource(int fd, int64_t offset, int64_t length) {
         mCondition.wait(mLock);
     }
 
+    AVNuUtils::get()->printFileName(fd);
     return mAsyncResult;
 }
 

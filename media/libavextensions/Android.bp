@@ -65,7 +65,6 @@ cc_library_static {
         "libmediametrics_headers",
     ],
     include_dirs: [
-        "frameworks/av/media/libmediaextractor",
         "frameworks/av/media/libstagefright/mpeg2ts",
         "frameworks/av/media/libavextensions",
         "external/flac/include",
@@ -112,7 +111,6 @@ cc_library_static {
     include_dirs: [
         "frameworks/av/media/libstagefright/rtsp",
         "frameworks/av/media/libmediaplayerservice",
-        "frameworks/av/media/libmediaextractor",
         "frameworks/av/media/libavextensions",
         "external/flac/include",
     ],
