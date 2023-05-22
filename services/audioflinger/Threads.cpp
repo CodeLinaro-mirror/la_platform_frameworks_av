@@ -14,6 +14,11 @@
 ** See the License for the specific language governing permissions and
 ** limitations under the License.
 */
+/* Changes from Qualcomm Innovation Center are provided under the following license:
+**
+** Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+** SPDX-License-Identifier: BSD-3-Clause-Clear.
+*/
 
 
 #define LOG_TAG "AudioFlinger"
@@ -149,6 +154,8 @@ static const uint32_t kMaxNormalSinkBufferSizeMs = 24;
 // minimum capture buffer size in milliseconds to _not_ need a fast capture thread
 // FIXME This should be based on experimentally observed scheduling jitter
 static const uint32_t kMinNormalCaptureBufferSizeMs = 32;
+// For audio_input_flags_t flag None
+static const uint32_t kMinNormalCaptureBufferSizeMs_NonLL = 12;
 
 // Offloaded output thread standby delay: allows track transition without going to standby
 static const nsecs_t kOffloadStandbyDelayNs = seconds(1);
@@ -6965,7 +6972,8 @@ AudioFlinger::RecordThread::RecordThread(const sp<AudioFlinger>& audioFlinger,
         ALOGV("%p kUseFastCapture = Always, initFastCapture = true", this);
         break;
     case FastCapture_Static:
-        initFastCapture = (mFrameCount * 1000) / mSampleRate < kMinNormalCaptureBufferSizeMs;
+        initFastCapture = (mFrameCount * 1000) / mSampleRate < (mInput->flags == AUDIO_INPUT_FLAG_NONE ?
+                kMinNormalCaptureBufferSizeMs_NonLL : kMinNormalCaptureBufferSizeMs);
         ALOGV("%p kUseFastCapture = Static, (%lld * 1000) / %u vs %u, initFastCapture = %d",
                 this, (long long)mFrameCount, mSampleRate, kMinNormalCaptureBufferSizeMs,
                 initFastCapture);
