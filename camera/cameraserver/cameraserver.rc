@@ -5,3 +5,7 @@ service cameraserver /system/bin/cameraserver
     ioprio rt 4
     task_profiles CameraServiceCapacity HighPerformance
     rlimit rtprio 10 10
+    disabled
+
+on property:sys.boot_completed=1
+    start cameraserver
