@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #ifndef NUPLAYER_DECODER_H_
@@ -54,7 +58,6 @@ protected:
     virtual void onShutdown(bool notifyComplete);
     virtual bool doRequestBuffers();
 
-private:
     enum {
         kWhatCodecNotify         = 'cdcN',
         kWhatRenderBuffer        = 'rndr',
@@ -121,7 +124,7 @@ private:
             size_t size,
             int64_t timeUs,
             int32_t flags);
-    void handleOutputFormatChange(const sp<AMessage> &format);
+    virtual void handleOutputFormatChange(const sp<AMessage> &format);
 
     void releaseAndResetMediaBuffers();
     void requestCodecNotification();

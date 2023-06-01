@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 //#define LOG_NDEBUG 0
@@ -50,6 +54,11 @@
 // TODO : Remove the defines once mainline media is built against NDK >= 31.
 // The mp4 extractor is part of mainline and builds against NDK 29 as of
 // writing. These keys are available only from NDK 31:
+
+#ifndef __NO_AVEXTENSIONS__
+#include <stagefright/AVExtensions.h>
+#endif
+
 #define AMEDIAFORMAT_KEY_MPEGH_PROFILE_LEVEL_INDICATION \
   "mpegh-profile-level-indication"
 #define AMEDIAFORMAT_KEY_MPEGH_REFERENCE_CHANNEL_LAYOUT \
@@ -2126,8 +2135,11 @@ const struct mime_conv_t* p = &mimeLookup[0];
         }
         ++p;
     }
-
+#ifndef __NO_AVEXTENSIONS__
+    return AVUtils::get()->mapMimeToAudioFormat(format, mime);
+#else
     return BAD_VALUE;
+#endif
 }
 
 struct aac_format_conv_t {
@@ -2183,11 +2195,21 @@ status_t getAudioOffloadInfo(const sp<MetaData>& meta, bool hasVideo,
         ALOGV("Mime type \"%s\" mapped to audio_format %d", mime, info->format);
     }
 
+#ifndef __NO_AVEXTENSIONS__
+    info->format  = AVUtils::get()->updateAudioFormat(info->format, meta);
+#endif
+
     if (AUDIO_FORMAT_INVALID == info->format) {
         // can't offload if we don't know what the source format is
         ALOGE("mime type \"%s\" not a known audio format", mime);
         return BAD_VALUE;
     }
+
+#ifndef __NO_AVEXTENSIONS__
+    if (AVUtils::get()->canOffloadStream(meta) != true) {
+        return false;
+    }
+#endif
 
     // Redefine aac format according to its profile
     // Offloading depends on audio DSP capabilities.

@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #pragma once
@@ -228,6 +232,7 @@ public:
 
         status_t setAllowedCapturePolicy(uid_t uid, audio_flags_mask_t capturePolicy) override;
         virtual audio_offload_mode_t getOffloadSupport(const audio_offload_info_t& offloadInfo);
+        bool isOffloadSupportedInternal(const audio_offload_info_t& offloadInfo);
 
         virtual bool isDirectOutputSupported(const audio_config_base_t& config,
                                              const audio_attributes_t& attributes);
@@ -609,6 +614,8 @@ protected:
          * @param attr to be considered
          */
         void checkAudioSourceForAttributes(const audio_attributes_t &attr);
+
+        bool isInvalidationOfMusicStreamNeeded(const audio_attributes_t &attr);
 
         bool followsSameRouting(const audio_attributes_t &lAttr,
                                 const audio_attributes_t &rAttr) const;
@@ -994,6 +1001,12 @@ private:
 
         void checkVirtualizerClientRoutes();
 
+        // Internal method checking If direct pcm track's offloadInfo needs to be updated.
+        void checkAndUpdateOffloadInfoForDirectTracks(
+                const audio_attributes_t *attr,
+                audio_stream_type_t *stream,
+                audio_config_t *config,
+                audio_output_flags_t *flags);
         /**
          * @brief getInputForDevice selects an input handle for a given input device and
          * requester context

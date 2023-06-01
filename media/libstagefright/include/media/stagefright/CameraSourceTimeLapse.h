@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #ifndef CAMERA_SOURCE_TIME_LAPSE_H_
@@ -20,6 +24,7 @@
 
 #include <pthread.h>
 
+#include <media/stagefright/CameraSource.h>
 #include <utils/RefBase.h>
 #include <utils/threads.h>
 #include <utils/String16.h>

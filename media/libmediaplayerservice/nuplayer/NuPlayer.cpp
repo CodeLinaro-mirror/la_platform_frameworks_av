@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 //#define LOG_NDEBUG 0
@@ -62,6 +66,7 @@
 
 #include "ESDS.h"
 #include <media/stagefright/Utils.h>
+#include "mediaplayerservice/AVNuExtensions.h"
 
 namespace android {
 
@@ -873,8 +878,7 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
             if (mRenderer != NULL) {
                 // AudioSink allows only 1.f and 0.f for offload and direct modes.
                 // For other speeds, restart audio to fallback to supported paths
-                bool audioDirectOutput = (mAudioSink->getFlags() & AUDIO_OUTPUT_FLAG_DIRECT) != 0;
-                if ((mOffloadAudio || audioDirectOutput) &&
+                if ((mOffloadAudio || (mAudioSink->getFlags() & AUDIO_OUTPUT_FLAG_DIRECT)) &&
                         ((rate.mSpeed != 0.f && rate.mSpeed != 1.f) || rate.mPitch != 1.f)) {
 
                     int64_t currentPositionUs;
@@ -1352,6 +1356,9 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
                         FLUSH_CMD_SHUTDOWN /* video */));
 
             mDeferredActions.push_back(
+                    new SimpleAction(&NuPlayer::closeAudioSink));
+
+            mDeferredActions.push_back(
                     new SimpleAction(&NuPlayer::performReset));
 
             processDeferredActions();
@@ -1597,7 +1604,7 @@ void NuPlayer::onStart(int64_t startPositionUs, MediaPlayerSeekMode mode) {
     sp<AMessage> notify = new AMessage(kWhatRendererNotify, this);
     ++mRendererGeneration;
     notify->setInt32("generation", mRendererGeneration);
-    mRenderer = new Renderer(mAudioSink, mMediaClock, notify, flags);
+    mRenderer = AVNuFactory::get()->createRenderer(mAudioSink, mMediaClock, notify, flags);
     mRendererLooper = new ALooper;
     mRendererLooper->setName("NuPlayerRenderer");
     mRendererLooper->start(false, false, ANDROID_PRIORITY_AUDIO);
@@ -1979,12 +1986,13 @@ status_t NuPlayer::instantiateDecoder(
 
             const bool hasVideo = (mSource->getFormat(false /*audio */) != NULL);
             format->setInt32("has-video", hasVideo);
-            *decoder = new DecoderPassThrough(notify, mSource, mRenderer);
-            ALOGV("instantiateDecoder audio DecoderPassThrough  hasVideo: %d", hasVideo);
+            *decoder = AVNuFactory::get()->createPassThruDecoder(notify, mSource, mRenderer);
+            ALOGV("instantiateDecoder audio DecoderPassThrough hasVideo: %d", hasVideo);
         } else {
+            AVNuUtils::get()->setCodecOutputFormat(format);
             mSource->setOffloadAudio(false /* offload */);
 
-            *decoder = new Decoder(notify, mSource, mPID, mUID, mRenderer);
+            *decoder = AVNuFactory::get()->createDecoder(notify, mSource, mPID, mUID, mRenderer);
             ALOGV("instantiateDecoder audio Decoder");
         }
         mAudioDecoderError = false;

@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 //#define LOG_NDEBUG 0
@@ -39,6 +43,8 @@
 #include <media/stagefright/MediaCodec.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/MediaErrors.h>
+#include <stagefright/AVExtensions.h>
+#include "mediaplayerservice/AVNuExtensions.h"
 #include <media/stagefright/SurfaceUtils.h>
 #include <gui/Surface.h>
 
@@ -300,9 +306,11 @@ void NuPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
     mComponentName = mime;
     mComponentName.append(" decoder");
     ALOGV("[%s] onConfigure (surface=%p)", mComponentName.c_str(), mSurface.get());
-
-    mCodec = MediaCodec::CreateByType(
-            mCodecLooper, mime.c_str(), false /* encoder */, NULL /* err */, mPid, mUid, format);
+    mCodec = AVUtils::get()->createCustomComponentByName(mCodecLooper, mime.c_str(), false /* encoder */, format);
+    if (mCodec == NULL) {
+        mCodec = MediaCodec::CreateByType(
+           mCodecLooper, mime.c_str(), false /* encoder */, NULL /* err */, mPid, mUid);
+    }
     int32_t secure = 0;
     if (format->findInt32("secure", &secure) && secure != 0) {
         if (mCodec != NULL) {
@@ -906,6 +914,7 @@ status_t NuPlayer::Decoder::fetchInputData(sp<AMessage> &reply) {
                     // treat seamless format change separately
                     formatChange = !seamlessFormatChange;
                 }
+                AVNuUtils::get()->checkFormatChange(&formatChange, accessUnit);
 
                 // For format or time change, return EOS to queue EOS input,
                 // then wait for EOS on output.

@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #ifndef NUPLAYER_DECODER_PASS_THROUGH_H_
@@ -42,8 +46,9 @@ protected:
     virtual void onFlush();
     virtual void onShutdown(bool notifyComplete);
     virtual bool doRequestBuffers();
+    virtual sp<ABuffer> aggregateBuffer(const sp<ABuffer> &accessUnit);
 
-private:
+    size_t mAggregateBufferSizeBytes;
     enum {
         kWhatBufferConsumed     = 'bufC',
     };
@@ -60,6 +65,7 @@ private:
     status_t    mPendingAudioErr;
     sp<ABuffer> mAggregateBuffer;
 
+private:
     // mPendingBuffersToDrain are only for debugging. It can be removed
     // when the power investigation is done.
     size_t  mPendingBuffersToDrain;
@@ -70,7 +76,6 @@ private:
     bool isDoneFetching() const;
 
     status_t dequeueAccessUnit(sp<ABuffer> *accessUnit);
-    sp<ABuffer> aggregateBuffer(const sp<ABuffer> &accessUnit);
     status_t fetchInputData(sp<AMessage> &reply);
     void doFlush(bool notifyComplete);
 
