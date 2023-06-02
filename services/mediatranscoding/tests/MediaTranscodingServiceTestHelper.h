@@ -51,6 +51,7 @@ using aidl::android::media::ITranscodingClientCallback;
 using aidl::android::media::TranscodingRequestParcel;
 using aidl::android::media::TranscodingSessionParcel;
 using aidl::android::media::TranscodingSessionPriority;
+using aidl::android::media::TranscodingTestConfig;
 using aidl::android::media::TranscodingVideoTrackFormat;
 
 constexpr int32_t kClientUseCallingPid = IMediaTranscodingService::USE_CALLING_PID;
@@ -176,17 +177,19 @@ struct EventTracker {
         std::unique_lock lock(mLock);
 
         auto startTime = std::chrono::system_clock::now();
+        int64_t remainingUs = timeoutUs;
 
         std::list<Event>::iterator it;
         while (((it = std::find(mEventQueue.begin(), mEventQueue.end(), target)) ==
                 mEventQueue.end()) &&
-               timeoutUs > 0) {
-            std::cv_status status = mCondition.wait_for(lock, std::chrono::microseconds(timeoutUs));
+               remainingUs > 0) {
+            std::cv_status status =
+                    mCondition.wait_for(lock, std::chrono::microseconds(remainingUs));
             if (status == std::cv_status::timeout) {
                 break;
             }
             std::chrono::microseconds elapsedTime = std::chrono::system_clock::now() - startTime;
-            timeoutUs -= elapsedTime.count();
+            remainingUs = timeoutUs - elapsedTime.count();
         }
 
         if (it == mEventQueue.end()) {
@@ -205,7 +208,9 @@ struct EventTracker {
         std::unique_lock lock(mLock);
 
         mEventQueue.push_back(event);
-        mLastErr = err;
+        if (err != TranscodingErrorCode::kNoError) {
+            mLastErrQueue.push_back(err);
+        }
         mCondition.notify_one();
     }
 
@@ -223,7 +228,12 @@ struct EventTracker {
 
     TranscodingErrorCode getLastError() {
         std::unique_lock lock(mLock);
-        return mLastErr;
+        if (mLastErrQueue.empty()) {
+            return TranscodingErrorCode::kNoError;
+        }
+        TranscodingErrorCode err = mLastErrQueue.front();
+        mLastErrQueue.pop_front();
+        return err;
     }
 
 private:
@@ -231,7 +241,7 @@ private:
     std::condition_variable mCondition;
     Event mPoppedEvent;
     std::list<Event> mEventQueue;
-    TranscodingErrorCode mLastErr;
+    std::list<TranscodingErrorCode> mLastErrQueue;
     int mUpdateCount = 0;
     int mLastProgress = -1;
 };
@@ -357,7 +367,8 @@ struct TestClientCallback : public BnTranscodingClientCallback,
     template <bool expectation = success>
     bool submit(int32_t sessionId, const char* sourceFilePath, const char* destinationFilePath,
                 TranscodingSessionPriority priority = TranscodingSessionPriority::kNormal,
-                int bitrateBps = -1, int overridePid = -1, int overrideUid = -1) {
+                int bitrateBps = -1, int overridePid = -1, int overrideUid = -1,
+                int sessionDurationMs = -1) {
         constexpr bool shouldSucceed = (expectation == success);
         bool result;
         TranscodingRequestParcel request;
@@ -372,6 +383,11 @@ struct TestClientCallback : public BnTranscodingClientCallback,
         if (bitrateBps > 0) {
             request.requestedVideoTrackFormat.emplace(TranscodingVideoTrackFormat());
             request.requestedVideoTrackFormat->bitrateBps = bitrateBps;
+        }
+        if (sessionDurationMs > 0) {
+            request.isForTesting = true;
+            request.testConfig.emplace(TranscodingTestConfig());
+            request.testConfig->processingTotalTimeMs = sessionDurationMs;
         }
         Status status = mClient->submitRequest(request, &session, &result);
 
@@ -418,6 +434,34 @@ struct TestClientCallback : public BnTranscodingClientCallback,
                                    session.request.destinationFilePath == destinationFilePath));
     }
 
+    template <bool expectation = success>
+    bool addClientUid(int32_t sessionId, uid_t clientUid) {
+        constexpr bool shouldSucceed = (expectation == success);
+        bool result;
+        Status status = mClient->addClientUid(sessionId, clientUid, &result);
+
+        EXPECT_TRUE(status.isOk());
+        EXPECT_EQ(result, shouldSucceed);
+
+        return status.isOk() && (result == shouldSucceed);
+    }
+
+    template <bool expectation = success>
+    bool getClientUids(int32_t sessionId, std::vector<int32_t>* clientUids) {
+        constexpr bool shouldSucceed = (expectation == success);
+        std::optional<std::vector<int32_t>> aidl_return;
+        Status status = mClient->getClientUids(sessionId, &aidl_return);
+
+        EXPECT_TRUE(status.isOk());
+        bool success = (aidl_return != std::nullopt);
+        if (success) {
+            *clientUids = *aidl_return;
+        }
+        EXPECT_EQ(success, shouldSucceed);
+
+        return status.isOk() && (success == shouldSucceed);
+    }
+
     int32_t mClientId;
     pid_t mClientPid;
     uid_t mClientUid;
@@ -437,7 +481,7 @@ public:
         // Need thread pool to receive callbacks, otherwise oneway callbacks are
         // silently ignored.
         ABinderProcess_startThreadPool();
-        ::ndk::SpAIBinder binder(AServiceManager_getService("media.transcoding"));
+        ::ndk::SpAIBinder binder(AServiceManager_waitForService("media.transcoding"));
         mService = IMediaTranscodingService::fromBinder(binder);
         if (mService == nullptr) {
             ALOGE("Failed to connect to the media.trascoding service.");
@@ -484,7 +528,23 @@ public:
         EXPECT_TRUE(mClient3->unregisterClient().isOk());
     }
 
+    const char* prepareOutputFile(const char* path) {
+        deleteFile(path);
+        return path;
+    }
+
     void deleteFile(const char* path) { unlink(path); }
+
+    void dismissKeyguard() {
+        EXPECT_TRUE(ShellHelper::RunCmd("input keyevent KEYCODE_WAKEUP"));
+        EXPECT_TRUE(ShellHelper::RunCmd("wm dismiss-keyguard"));
+    }
+
+    void stopAppPackages() {
+        EXPECT_TRUE(ShellHelper::Stop(kClientPackageA));
+        EXPECT_TRUE(ShellHelper::Stop(kClientPackageB));
+        EXPECT_TRUE(ShellHelper::Stop(kClientPackageC));
+    }
 
     std::shared_ptr<IMediaTranscodingService> mService;
     std::shared_ptr<TestClientCallback> mClient1;

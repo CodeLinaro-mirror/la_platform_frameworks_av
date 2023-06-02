@@ -23,13 +23,17 @@
 
 #include <aaudio/AAudio.h>
 #include <system/audio.h>
-#include "utility/AudioClock.h"
+
+#include "core/AudioGlobal.h"
 #include "legacy/AudioStreamLegacy.h"
 #include "legacy/AudioStreamTrack.h"
+#include "utility/AudioClock.h"
 #include "utility/FixedBlockReader.h"
 
 using namespace android;
 using namespace aaudio;
+
+using android::content::AttributionSourceState;
 
 // Arbitrary and somewhat generous number of bursts.
 #define DEFAULT_BURSTS_PER_BUFFER_CAPACITY     8
@@ -62,13 +66,8 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
     const aaudio_session_id_t requestedSessionId = builder.getSessionId();
     const audio_session_t sessionId = AAudioConvert_aaudioToAndroidSessionId(requestedSessionId);
 
-    // Try to create an AudioTrack
-    // Use stereo if unspecified.
-    int32_t samplesPerFrame = (getSamplesPerFrame() == AAUDIO_UNSPECIFIED)
-                              ? 2 : getSamplesPerFrame();
-    audio_channel_mask_t channelMask = samplesPerFrame <= 2 ?
-                            audio_channel_out_mask_from_count(samplesPerFrame) :
-                            audio_channel_mask_for_index_assignment_from_count(samplesPerFrame);
+    audio_channel_mask_t channelMask =
+            AAudio_getChannelMaskForOpen(getChannelMask(), getSamplesPerFrame(), false /*isInput*/);
 
     audio_output_flags_t flags;
     aaudio_performance_mode_t perfMode = getPerformanceMode();
@@ -136,7 +135,9 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
     const audio_usage_t usage =
             AAudioConvert_usageToInternal(builder.getUsage());
     const audio_flags_mask_t attributesFlags =
-        AAudioConvert_allowCapturePolicyToAudioFlagsMask(builder.getAllowedCapturePolicy());
+        AAudioConvert_allowCapturePolicyToAudioFlagsMask(builder.getAllowedCapturePolicy(),
+                                                         builder.getSpatializationBehavior(),
+                                                         builder.isContentSpatialized());
 
     const audio_attributes_t attributes = {
             .content_type = contentType,
@@ -147,6 +148,7 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
     };
 
     mAudioTrack = new AudioTrack();
+    // TODO b/182392769: use attribution source util
     mAudioTrack->set(
             AUDIO_STREAM_DEFAULT,  // ignored because we pass attributes below
             getSampleRate(),
@@ -162,8 +164,7 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
             sessionId,
             streamTransferType,
             NULL,    // DEFAULT audio_offload_info_t
-            AUDIO_UID_INVALID, // DEFAULT uid
-            -1,      // DEFAULT pid
+            AttributionSourceState(), // DEFAULT uid and pid
             &attributes,
             // WARNING - If doNotReconnect set true then audio stops after plugging and unplugging
             // headphones a few times.
@@ -185,11 +186,19 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
 
     mMetricsId = std::string(AMEDIAMETRICS_KEY_PREFIX_AUDIO_TRACK)
             + std::to_string(mAudioTrack->getPortId());
+    android::mediametrics::LogItem(mMetricsId)
+            .set(AMEDIAMETRICS_PROP_PERFORMANCEMODE,
+                 AudioGlobal_convertPerformanceModeToText(builder.getPerformanceMode()))
+            .set(AMEDIAMETRICS_PROP_SHARINGMODE,
+                 AudioGlobal_convertSharingModeToText(builder.getSharingMode()))
+            .set(AMEDIAMETRICS_PROP_ENCODINGCLIENT, toString(getFormat()).c_str()).record();
 
     doSetVolume();
 
     // Get the actual values from the AudioTrack.
-    setSamplesPerFrame(mAudioTrack->channelCount());
+    setChannelMask(AAudioConvert_androidToAAudioChannelMask(
+        mAudioTrack->channelMask(), false /*isInput*/,
+        AAudio_isChannelIndexMask(getChannelMask())));
     setFormat(mAudioTrack->format());
     setDeviceFormat(mAudioTrack->format());
     setSampleRate(mAudioTrack->getSampleRate());
@@ -257,12 +266,18 @@ aaudio_result_t AudioStreamTrack::release_l() {
 }
 
 void AudioStreamTrack::close_l() {
-    // Stop callbacks before deleting mFixedBlockReader memory.
+    // The callbacks are normally joined in the AudioTrack destructor.
+    // But if another object has a reference to the AudioTrack then
+    // it will not get deleted here.
+    // So we should join callbacks explicitly before returning.
+    // Unlock around the join to avoid deadlocks if the callback tries to lock.
+    // This can happen if the callback returns AAUDIO_CALLBACK_RESULT_STOP
+    mStreamLock.unlock();
+    mAudioTrack->stopAndJoinCallbacks();
+    mStreamLock.lock();
     mAudioTrack.clear();
-    // Do not close mFixedBlockReader because a data callback
-    // thread might still be running if someone else has a reference
-    // to mAudioRecord.
-    // It has a unique_ptr to its buffer so it will clean up by itself.
+    // Do not close mFixedBlockReader. It has a unique_ptr to its buffer
+    // so it will clean up by itself.
     AudioStream::close_l();
 }
 
@@ -558,7 +573,7 @@ binder::Status AudioStreamTrack::applyVolumeShaper(
         if (status < 0) { // a non-negative value is the volume shaper id.
             ALOGE("applyVolumeShaper() failed with status %d", status);
         }
-        return binder::Status::fromStatusT(status);
+        return aidl_utils::binderStatusFromStatusT(status);
     } else {
         ALOGD("applyVolumeShaper()"
                       " no AudioTrack for volume control from IPlayer");

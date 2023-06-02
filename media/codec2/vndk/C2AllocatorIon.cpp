@@ -30,10 +30,16 @@
 #include <C2ErrnoUtils.h>
 #include <C2HandleIonInternal.h>
 
+#include <android-base/properties.h>
+#include <media/stagefright/foundation/Mutexed.h>
+
 namespace android {
 
 namespace {
     constexpr size_t USAGE_LRU_CACHE_SIZE = 1024;
+
+    // max padding after ion/dmabuf allocations in bytes
+    constexpr uint32_t MAX_PADDING = 0x8000; // 32KB
 }
 
 /* size_t <=> int(lo), int(hi) conversions */
@@ -175,7 +181,7 @@ public:
     c2_status_t map(size_t offset, size_t size, C2MemoryUsage usage, C2Fence *fence, void **addr) {
         (void)fence; // TODO: wait for fence
         *addr = nullptr;
-        if (!mMappings.empty()) {
+        if (!mMappings.lock()->empty()) {
             ALOGV("multiple map");
             // TODO: technically we should return DUPLICATE here, but our block views don't
             // actually unmap, so we end up remapping an ion buffer multiple times.
@@ -202,17 +208,18 @@ public:
 
         c2_status_t err = mapInternal(mapSize, mapOffset, alignmentBytes, prot, flags, &(map.addr), addr);
         if (map.addr) {
-            mMappings.push_back(map);
+            mMappings.lock()->push_back(map);
         }
         return err;
     }
 
     c2_status_t unmap(void *addr, size_t size, C2Fence *fence) {
-        if (mMappings.empty()) {
+        Mutexed<std::list<Mapping>>::Locked mappings(mMappings);
+        if (mappings->empty()) {
             ALOGD("tried to unmap unmapped buffer");
             return C2_NOT_FOUND;
         }
-        for (auto it = mMappings.begin(); it != mMappings.end(); ++it) {
+        for (auto it = mappings->begin(); it != mappings->end(); ++it) {
             if (addr != (uint8_t *)it->addr + it->alignmentBytes ||
                     size + it->alignmentBytes != it->size) {
                 continue;
@@ -225,8 +232,9 @@ public:
             if (fence) {
                 *fence = C2Fence(); // not using fences
             }
-            (void)mMappings.erase(it);
-            ALOGV("successfully unmapped: addr=%p size=%zu fd=%d", addr, size, mHandle.bufferFd());
+            (void)mappings->erase(it);
+            ALOGV("successfully unmapped: addr=%p size=%zu fd=%d", addr, size,
+                      mHandle.bufferFd());
             return C2_OK;
         }
         ALOGD("unmap failed to find specified map");
@@ -234,9 +242,10 @@ public:
     }
 
     virtual ~Impl() {
-        if (!mMappings.empty()) {
+        Mutexed<std::list<Mapping>>::Locked mappings(mMappings);
+        if (!mappings->empty()) {
             ALOGD("Dangling mappings!");
-            for (const Mapping &map : mMappings) {
+            for (const Mapping &map : *mappings) {
                 (void)munmap(map.addr, map.size);
             }
         }
@@ -314,7 +323,7 @@ protected:
         size_t alignmentBytes;
         size_t size;
     };
-    std::list<Mapping> mMappings;
+    Mutexed<std::list<Mapping>> mMappings;
 };
 
 class C2AllocationIon::ImplV2 : public C2AllocationIon::Impl {
@@ -376,14 +385,34 @@ C2AllocationIon::Impl *C2AllocationIon::Impl::Alloc(int ionFd, size_t size, size
         unsigned heapMask, unsigned flags, C2Allocator::id_t id) {
     int bufferFd = -1;
     ion_user_handle_t buffer = -1;
-    size_t alignedSize = align == 0 ? size : (size + align - 1) & ~(align - 1);
+    // NOTE: read this property directly from the property as this code has to run on
+    // Android Q, but the sysprop was only introduced in Android S.
+    static size_t sPadding =
+        base::GetUintProperty("media.c2.dmabuf.padding", (uint32_t)0, MAX_PADDING);
+    if (sPadding > SIZE_MAX - size) {
+        ALOGD("ion_alloc: size %#zx cannot accommodate padding %#zx", size, sPadding);
+        // use ImplV2 as there is no allocation anyways
+        return new ImplV2(ionFd, size, -1, id, -ENOMEM);
+    }
+
+    size_t allocSize = size + sPadding;
+    if (align) {
+        if (align - 1 > SIZE_MAX - allocSize) {
+            ALOGD("ion_alloc: size %#zx cannot accommodate padding %#zx and alignment %#zx",
+                  size, sPadding, align);
+            // use ImplV2 as there is no allocation anyways
+            return new ImplV2(ionFd, size, -1, id, -ENOMEM);
+        }
+        allocSize += align - 1;
+        allocSize &= ~(align - 1);
+    }
     int ret;
 
     if (ion_is_legacy(ionFd)) {
-        ret = ion_alloc(ionFd, alignedSize, align, heapMask, flags, &buffer);
+        ret = ion_alloc(ionFd, allocSize, align, heapMask, flags, &buffer);
         ALOGV("ion_alloc(ionFd = %d, size = %zu, align = %zu, prot = %d, flags = %d) "
               "returned (%d) ; buffer = %d",
-              ionFd, alignedSize, align, heapMask, flags, ret, buffer);
+              ionFd, allocSize, align, heapMask, flags, ret, buffer);
         if (ret == 0) {
             // get buffer fd for native handle constructor
             ret = ion_share(ionFd, buffer, &bufferFd);
@@ -392,15 +421,16 @@ C2AllocationIon::Impl *C2AllocationIon::Impl::Alloc(int ionFd, size_t size, size
                 buffer = -1;
             }
         }
-        return new Impl(ionFd, alignedSize, bufferFd, buffer, id, ret);
-
+        // the padding is not usable so deduct it from the advertised capacity
+        return new Impl(ionFd, allocSize - sPadding, bufferFd, buffer, id, ret);
     } else {
-        ret = ion_alloc_fd(ionFd, alignedSize, align, heapMask, flags, &bufferFd);
+        ret = ion_alloc_fd(ionFd, allocSize, align, heapMask, flags, &bufferFd);
         ALOGV("ion_alloc_fd(ionFd = %d, size = %zu, align = %zu, prot = %d, flags = %d) "
               "returned (%d) ; bufferFd = %d",
-              ionFd, alignedSize, align, heapMask, flags, ret, bufferFd);
+              ionFd, allocSize, align, heapMask, flags, ret, bufferFd);
 
-        return new ImplV2(ionFd, alignedSize, bufferFd, id, ret);
+        // the padding is not usable so deduct it from the advertised capacity
+        return new ImplV2(ionFd, allocSize - sPadding, bufferFd, id, ret);
     }
 }
 

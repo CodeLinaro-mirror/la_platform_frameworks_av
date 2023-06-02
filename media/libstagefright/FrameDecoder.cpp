@@ -44,7 +44,7 @@
 namespace android {
 
 static const int64_t kBufferTimeOutUs = 10000LL; // 10 msec
-static const size_t kRetryCount = 50; // must be >0
+static const size_t kRetryCount = 100; // must be >0
 static const int64_t kDefaultSampleDurationUs = 33333LL; // 33ms
 
 sp<IMemory> allocVideoFrame(const sp<MetaData>& trackMeta,
@@ -67,6 +67,12 @@ sp<IMemory> allocVideoFrame(const sp<MetaData>& trackMeta,
     if (trackMeta->findInt32(kKeySARWidth, &sarWidth)
             && trackMeta->findInt32(kKeySARHeight, &sarHeight)
             && sarHeight != 0) {
+        int32_t multVal;
+        if (width < 0 || sarWidth < 0 ||
+            __builtin_mul_overflow(width, sarWidth, &multVal)) {
+            ALOGE("displayWidth overflow %dx%d", width, sarWidth);
+            return NULL;
+        }
         displayWidth = (width * sarWidth) / sarHeight;
         displayHeight = height;
     } else if (trackMeta->findInt32(kKeyDisplayWidth, &displayWidth)
@@ -87,6 +93,16 @@ sp<IMemory> allocVideoFrame(const sp<MetaData>& trackMeta,
         rotationAngle = 0;
     }
 
+    if (!metaOnly) {
+        int32_t multVal;
+        if (width < 0 || height < 0 || dstBpp < 0 ||
+            __builtin_mul_overflow(dstBpp, width, &multVal) ||
+            __builtin_mul_overflow(multVal, height, &multVal)) {
+            ALOGE("Frame size overflow %dx%d bpp %d", width, height, dstBpp);
+            return NULL;
+        }
+    }
+
     VideoFrame frame(width, height, displayWidth, displayHeight,
             tileWidth, tileHeight, rotationAngle, dstBpp, !metaOnly, iccSize);
 
@@ -97,7 +113,7 @@ sp<IMemory> allocVideoFrame(const sp<MetaData>& trackMeta,
         return NULL;
     }
     sp<IMemory> frameMem = new MemoryBase(heap, 0, size);
-    if (frameMem == NULL) {
+    if (frameMem == NULL || frameMem->unsecurePointer() == NULL) {
         ALOGE("not enough memory for VideoFrame size=%zu", size);
         return NULL;
     }
@@ -628,6 +644,10 @@ status_t VideoFrameDecoder::onOutputReceived(
                 0,
                 dstBpp(),
                 mCaptureLayer != nullptr /*allocRotated*/);
+        if (frameMem == nullptr) {
+            return NO_MEMORY;
+        }
+
         mFrame = static_cast<VideoFrame*>(frameMem->unsecurePointer());
 
         setFrame(frameMem);
@@ -724,7 +744,7 @@ status_t VideoFrameDecoder::captureSurface() {
 
 ////////////////////////////////////////////////////////////////////////
 
-ImageDecoder::ImageDecoder(
+MediaImageDecoder::MediaImageDecoder(
         const AString &componentName,
         const sp<MetaData> &trackMeta,
         const sp<IMediaSource> &source)
@@ -740,7 +760,7 @@ ImageDecoder::ImageDecoder(
       mTargetTiles(0) {
 }
 
-sp<AMessage> ImageDecoder::onGetFormatAndSeekOptions(
+sp<AMessage> MediaImageDecoder::onGetFormatAndSeekOptions(
         int64_t frameTimeUs, int /*seekMode*/,
         MediaSource::ReadOptions *options, sp<Surface> * /*window*/) {
     sp<MetaData> overrideMeta;
@@ -776,8 +796,16 @@ sp<AMessage> ImageDecoder::onGetFormatAndSeekOptions(
     if (overrideMeta == NULL) {
         // check if we're dealing with a tiled heif
         int32_t tileWidth, tileHeight, gridRows, gridCols;
+        int32_t widthColsProduct = 0;
+        int32_t heightRowsProduct = 0;
         if (findGridInfo(trackMeta(), &tileWidth, &tileHeight, &gridRows, &gridCols)) {
-            if (mWidth <= tileWidth * gridCols && mHeight <= tileHeight * gridRows) {
+            if (__builtin_mul_overflow(tileWidth, gridCols, &widthColsProduct) ||
+                    __builtin_mul_overflow(tileHeight, gridRows, &heightRowsProduct)) {
+                ALOGE("Multiplication overflowed Grid size: %dx%d, Picture size: %dx%d",
+                        gridCols, gridRows, tileWidth, tileHeight);
+                return nullptr;
+            }
+            if (mWidth <= widthColsProduct && mHeight <= heightRowsProduct) {
                 ALOGV("grid: %dx%d, tile size: %dx%d, picture size: %dx%d",
                         gridCols, gridRows, tileWidth, tileHeight, mWidth, mHeight);
 
@@ -816,7 +844,7 @@ sp<AMessage> ImageDecoder::onGetFormatAndSeekOptions(
     return videoFormat;
 }
 
-status_t ImageDecoder::onExtractRect(FrameRect *rect) {
+status_t MediaImageDecoder::onExtractRect(FrameRect *rect) {
     // TODO:
     // This callback is for verifying whether we can decode the rect,
     // and if so, set up the internal variables for decoding.
@@ -855,7 +883,7 @@ status_t ImageDecoder::onExtractRect(FrameRect *rect) {
     return OK;
 }
 
-status_t ImageDecoder::onOutputReceived(
+status_t MediaImageDecoder::onOutputReceived(
         const sp<MediaCodecBuffer> &videoFrameBuffer,
         const sp<AMessage> &outputFormat, int64_t /*timeUs*/, bool *done) {
     if (outputFormat == NULL) {
@@ -863,13 +891,27 @@ status_t ImageDecoder::onOutputReceived(
     }
 
     int32_t width, height, stride;
-    CHECK(outputFormat->findInt32("width", &width));
-    CHECK(outputFormat->findInt32("height", &height));
-    CHECK(outputFormat->findInt32("stride", &stride));
+    if (outputFormat->findInt32("width", &width) == false) {
+        ALOGE("MediaImageDecoder::onOutputReceived:width is missing in outputFormat");
+        return ERROR_MALFORMED;
+    }
+    if (outputFormat->findInt32("height", &height) == false) {
+        ALOGE("MediaImageDecoder::onOutputReceived:height is missing in outputFormat");
+        return ERROR_MALFORMED;
+    }
+    if (outputFormat->findInt32("stride", &stride) == false) {
+        ALOGE("MediaImageDecoder::onOutputReceived:stride is missing in outputFormat");
+        return ERROR_MALFORMED;
+    }
 
     if (mFrame == NULL) {
         sp<IMemory> frameMem = allocVideoFrame(
                 trackMeta(), mWidth, mHeight, mTileWidth, mTileHeight, dstBpp());
+
+        if (frameMem == nullptr) {
+            return NO_MEMORY;
+        }
+
         mFrame = static_cast<VideoFrame*>(frameMem->unsecurePointer());
 
         setFrame(frameMem);

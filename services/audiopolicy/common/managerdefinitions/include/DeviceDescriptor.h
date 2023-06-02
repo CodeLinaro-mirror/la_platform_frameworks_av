@@ -88,6 +88,7 @@ public:
 
     // AudioPort
     virtual void toAudioPort(struct audio_port *port) const;
+    virtual void toAudioPort(struct audio_port_v7 *port) const;
 
     void importAudioPortAndPickAudioProfile(const sp<PolicyAudioPort>& policyPort,
                                             bool force = false);
@@ -97,6 +98,13 @@ public:
     void dump(String8 *dst, int spaces, int index, bool verbose = true) const;
 
 private:
+    template <typename T, std::enable_if_t<std::is_same<T, struct audio_port>::value
+                                        || std::is_same<T, struct audio_port_v7>::value, int> = 0>
+    void toAudioPortInternal(T* port) const {
+        DeviceDescriptorBase::toAudioPort(port);
+        port->ext.device.hw_module = getModuleHandle();
+    }
+
     std::string mTagName; // Unique human readable identifier for a device port found in conf file.
     FormatVector        mEncodedFormats;
     audio_format_t      mCurrentEncodedFormat;
@@ -160,6 +168,10 @@ public:
     DeviceVector getDevicesFromDeviceTypeAddrVec(
             const AudioDeviceTypeAddrVector& deviceTypeAddrVector) const;
 
+    // Return the device vector that contains device descriptor whose AudioDeviceTypeAddr appears
+    // in the given AudioDeviceTypeAddrVector
+    AudioDeviceTypeAddrVector toTypeAddrVector() const;
+
     // If there are devices with the given type and the devices to add is not empty,
     // remove all the devices with the given type and add all the devices to add.
     void replaceDevicesByType(audio_devices_t typeToRemove, const DeviceVector &devicesToAdd);
@@ -218,7 +230,9 @@ public:
             add(devices);
             return size();
         }
-        return SortedVector::merge(devices);
+        ssize_t ret = SortedVector::merge(devices);
+        refreshTypes();
+        return ret;
     }
 
     /**
@@ -262,15 +276,21 @@ public:
         return String8("");
     }
 
+    const AudioProfileVector& getSupportedProfiles() { return mSupportedProfiles; }
+
     // Return a string to describe the DeviceVector. The sensitive information will only be
     // added to the string if `includeSensitiveInfo` is true.
     std::string toString(bool includeSensitiveInfo = false) const;
 
     void dump(String8 *dst, const String8 &tag, int spaces = 0, bool verbose = true) const;
 
+protected:
+    int     do_compare(const void* lhs, const void* rhs) const;
 private:
     void refreshTypes();
+    void refreshAudioProfiles();
     DeviceTypeSet mDeviceTypes;
+    AudioProfileVector mSupportedProfiles;
 };
 
 } // namespace android

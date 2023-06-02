@@ -117,8 +117,9 @@ bool operator==(const AMediaCodecBufferInfo& lhs, const AMediaCodecBufferInfo& r
 }
 
 bool operator==(const TestMuxer::Event& lhs, const TestMuxer::Event& rhs) {
-    return lhs.type == rhs.type && lhs.format == rhs.format && lhs.trackIndex == rhs.trackIndex &&
-           lhs.data == rhs.data && lhs.info == rhs.info;
+    // Don't test format pointer equality since the writer can make a copy.
+    return lhs.type == rhs.type /*&& lhs.format == rhs.format*/ &&
+           lhs.trackIndex == rhs.trackIndex && lhs.data == rhs.data && lhs.info == rhs.info;
 }
 
 /** Represents a media source file. */
@@ -179,8 +180,6 @@ public:
 
 class TestCallbacks : public MediaSampleWriter::CallbackInterface {
 public:
-    TestCallbacks(bool expectSuccess = true) : mExpectSuccess(expectSuccess) {}
-
     bool hasFinished() {
         std::unique_lock<std::mutex> lock(mMutex);
         return mFinished;
@@ -191,12 +190,15 @@ public:
                             media_status_t status) override {
         std::unique_lock<std::mutex> lock(mMutex);
         EXPECT_FALSE(mFinished);
-        if (mExpectSuccess) {
-            EXPECT_EQ(status, AMEDIA_OK);
-        } else {
-            EXPECT_NE(status, AMEDIA_OK);
-        }
         mFinished = true;
+        mStatus = status;
+        mCondition.notify_all();
+    }
+
+    virtual void onStopped(const MediaSampleWriter* writer __unused) {
+        std::unique_lock<std::mutex> lock(mMutex);
+        EXPECT_FALSE(mFinished);
+        mStopped = true;
         mCondition.notify_all();
     }
 
@@ -209,22 +211,26 @@ public:
         mLastProgress = progress;
         mProgressUpdateCount++;
     }
+
+    virtual void onHeartBeat(const MediaSampleWriter* writer __unused) override {}
     // ~MediaSampleWriter::CallbackInterface
 
     void waitForWritingFinished() {
         std::unique_lock<std::mutex> lock(mMutex);
-        while (!mFinished) {
+        while (!mFinished && !mStopped) {
             mCondition.wait(lock);
         }
     }
 
     uint32_t getProgressUpdateCount() const { return mProgressUpdateCount; }
+    bool wasStopped() const { return mStopped; }
 
 private:
     std::mutex mMutex;
     std::condition_variable mCondition;
     bool mFinished = false;
-    bool mExpectSuccess;
+    bool mStopped = false;
+    media_status_t mStatus = AMEDIA_OK;
     int32_t mLastProgress = -1;
     uint32_t mProgressUpdateCount = 0;
 };
@@ -316,8 +322,7 @@ TEST_F(MediaSampleWriterTests, TestAddInvalidTrack) {
 TEST_F(MediaSampleWriterTests, TestDoubleStartStop) {
     std::shared_ptr<MediaSampleWriter> writer = MediaSampleWriter::Create();
 
-    std::shared_ptr<TestCallbacks> callbacks =
-            std::make_shared<TestCallbacks>(false /* expectSuccess */);
+    std::shared_ptr<TestCallbacks> callbacks = std::make_shared<TestCallbacks>();
     EXPECT_TRUE(writer->init(mTestMuxer, callbacks));
 
     const TestMediaSource& mediaSource = getMediaSource();
@@ -327,9 +332,10 @@ TEST_F(MediaSampleWriterTests, TestDoubleStartStop) {
     ASSERT_TRUE(writer->start());
     EXPECT_FALSE(writer->start());
 
-    EXPECT_TRUE(writer->stop());
-    EXPECT_TRUE(callbacks->hasFinished());
-    EXPECT_FALSE(writer->stop());
+    writer->stop();
+    writer->stop();
+    callbacks->waitForWritingFinished();
+    EXPECT_TRUE(callbacks->wasStopped());
 }
 
 TEST_F(MediaSampleWriterTests, TestStopWithoutStart) {
@@ -340,7 +346,7 @@ TEST_F(MediaSampleWriterTests, TestStopWithoutStart) {
     EXPECT_NE(writer->addTrack(mediaSource.mTrackFormats[0]), nullptr);
     EXPECT_EQ(mTestMuxer->popEvent(), TestMuxer::AddTrack(mediaSource.mTrackFormats[0].get()));
 
-    EXPECT_FALSE(writer->stop());
+    writer->stop();
     EXPECT_EQ(mTestMuxer->popEvent(), TestMuxer::NoEvent);
 }
 
@@ -468,7 +474,6 @@ TEST_F(MediaSampleWriterTests, TestInterleaving) {
     }
 
     EXPECT_EQ(mTestMuxer->popEvent(), TestMuxer::Stop());
-    EXPECT_TRUE(writer->stop());
     EXPECT_TRUE(mTestCallbacks->hasFinished());
 }
 
@@ -541,7 +546,6 @@ TEST_F(MediaSampleWriterTests, TestDefaultMuxer) {
 
     // Wait for writer.
     mTestCallbacks->waitForWritingFinished();
-    EXPECT_TRUE(writer->stop());
 
     // Compare output file with source.
     mediaSource.reset();

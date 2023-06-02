@@ -33,7 +33,7 @@
 /**
  * Allows to set RenderEngine backend to GLES (default) or Vulkan (NOT yet supported).
  */
-#define PROPERTY_DEBUG_RENDERENGINE_BACKEND "debug.renderengine.backend"
+#define PROPERTY_DEBUG_RENDERENGINE_BACKEND "debug.stagefright.renderengine.backend"
 
 struct ANativeWindowBuffer;
 
@@ -206,6 +206,7 @@ struct RenderEngineCreationArgs {
     bool supportsBackgroundBlur;
     RenderEngine::ContextPriority contextPriority;
     RenderEngine::RenderEngineType renderEngineType;
+    bool realtime;
 
     struct Builder;
 
@@ -215,7 +216,8 @@ private:
                              bool _enableProtectedContext, bool _precacheToneMapperShaderOnly,
                              bool _supportsBackgroundBlur,
                              RenderEngine::ContextPriority _contextPriority,
-                             RenderEngine::RenderEngineType _renderEngineType)
+                             RenderEngine::RenderEngineType _renderEngineType,
+                             bool _realtime)
           : pixelFormat(_pixelFormat),
             imageCacheSize(_imageCacheSize),
             useColorManagement(_useColorManagement),
@@ -223,7 +225,8 @@ private:
             precacheToneMapperShaderOnly(_precacheToneMapperShaderOnly),
             supportsBackgroundBlur(_supportsBackgroundBlur),
             contextPriority(_contextPriority),
-            renderEngineType(_renderEngineType) {}
+            renderEngineType(_renderEngineType),
+            realtime(_realtime) {}
     RenderEngineCreationArgs() = delete;
 };
 
@@ -262,10 +265,15 @@ struct RenderEngineCreationArgs::Builder {
         this->renderEngineType = renderEngineType;
         return *this;
     }
+    Builder& setRealtime(bool realtime) {
+        this->realtime = realtime;
+        return *this;
+    }
     RenderEngineCreationArgs build() const {
         return RenderEngineCreationArgs(pixelFormat, imageCacheSize, useColorManagement,
                                         enableProtectedContext, precacheToneMapperShaderOnly,
-                                        supportsBackgroundBlur, contextPriority, renderEngineType);
+                                        supportsBackgroundBlur, contextPriority, renderEngineType,
+                                        realtime);
     }
 
 private:
@@ -278,6 +286,7 @@ private:
     bool supportsBackgroundBlur = false;
     RenderEngine::ContextPriority contextPriority = RenderEngine::ContextPriority::MEDIUM;
     RenderEngine::RenderEngineType renderEngineType = RenderEngine::RenderEngineType::GLES;
+    bool realtime = true;
 };
 
 class BindNativeBufferAsFramebuffer {
@@ -300,6 +309,20 @@ private:
     RenderEngine& mEngine;
     Framebuffer* mFramebuffer;
     status_t mStatus;
+};
+
+class SyncFeatures {
+public:
+    static SyncFeatures &GetInstance();
+    bool useNativeFenceSync() const;
+    bool useFenceSync() const;
+    bool useWaitSync() const;
+
+private:
+    SyncFeatures();
+    bool mHasNativeFenceSync;
+    bool mHasFenceSync;
+    bool mHasWaitSync;
 };
 
 namespace impl {

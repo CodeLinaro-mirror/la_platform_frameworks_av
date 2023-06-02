@@ -25,7 +25,6 @@
 #include "LVM_Private.h"
 #include "LVM_Tables.h"
 #include "VectorArithmetic.h"
-#include "InstAlloc.h"
 
 /****************************************************************************************/
 /*                                                                                      */
@@ -93,10 +92,7 @@ LVM_ReturnStatus_en LVM_GetInstanceHandle(LVM_Handle_t* phInstance, LVM_InstPara
     /*
      * Create the instance handle
      */
-    *phInstance = (LVM_Handle_t)calloc(1, sizeof(*pInstance));
-    if (*phInstance == LVM_NULL) {
-        return LVM_NULLADDRESS;
-    }
+    *phInstance = new LVM_Instance_t{};
     pInstance = (LVM_Instance_t*)*phInstance;
 
     pInstance->InstParams = *pInstParams;
@@ -141,9 +137,9 @@ LVM_ReturnStatus_en LVM_GetInstanceHandle(LVM_Handle_t* phInstance, LVM_InstPara
 
         pInstance->pBufferManagement->pScratch = (LVM_FLOAT*)pInstance->pScratch;
 
-        LoadConst_Float(0, /* Clear the input delay buffer */
-                        (LVM_FLOAT*)&pInstance->pBufferManagement->InDelayBuffer,
-                        (LVM_INT16)(LVM_MAX_CHANNELS * MIN_INTERNAL_BLOCKSIZE));
+        memset(pInstance->pBufferManagement->InDelayBuffer, 0,
+                LVM_MAX_CHANNELS * MIN_INTERNAL_BLOCKSIZE *
+                sizeof(pInstance->pBufferManagement->InDelayBuffer[0]));
         pInstance->pBufferManagement->InDelaySamples =
                 MIN_INTERNAL_BLOCKSIZE;                    /* Set the number of delay samples */
         pInstance->pBufferManagement->OutDelaySamples = 0; /* No samples in the output buffer */
@@ -174,14 +170,6 @@ LVM_ReturnStatus_en LVM_GetInstanceHandle(LVM_Handle_t* phInstance, LVM_InstPara
     /*
      * Treble Enhancement
      */
-    pInstance->pTE_Taps = (LVM_TE_Data_t*)calloc(1, sizeof(*(pInstance->pTE_Taps)));
-    if (pInstance->pTE_Taps == LVM_NULL) {
-        return LVM_NULLADDRESS;
-    }
-    pInstance->pTE_State = (LVM_TE_Coefs_t*)calloc(1, sizeof(*(pInstance->pTE_State)));
-    if (pInstance->pTE_State == LVM_NULL) {
-        return LVM_NULLADDRESS;
-    }
     pInstance->Params.TE_OperatingMode = LVM_TE_OFF;
     pInstance->Params.TE_EffectLevel = 0;
     pInstance->TE_Active = LVM_FALSE;
@@ -494,14 +482,6 @@ void LVM_DelInstanceHandle(LVM_Handle_t* phInstance) {
     /*
      * Treble Enhancement
      */
-    if (pInstance->pTE_Taps != LVM_NULL) {
-        free(pInstance->pTE_Taps);
-        pInstance->pTE_Taps = LVM_NULL;
-    }
-    if (pInstance->pTE_State != LVM_NULL) {
-        free(pInstance->pTE_State);
-        pInstance->pTE_State = LVM_NULL;
-    }
 
     /*
      * Free the default EQNB pre-gain and pointer to the band definitions
@@ -559,7 +539,7 @@ void LVM_DelInstanceHandle(LVM_Handle_t* phInstance) {
         pInstance->pPSAInput = LVM_NULL;
     }
 
-    free(*phInstance);
+    delete pInstance;
     return;
 }
 

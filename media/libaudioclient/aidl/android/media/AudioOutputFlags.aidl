@@ -15,6 +15,9 @@
  */
 package android.media;
 
+/**
+ * {@hide}
+ */
 @Backing(type="int")
 enum AudioOutputFlags {
     DIRECT           = 0,
@@ -32,4 +35,5 @@ enum AudioOutputFlags {
     MMAP_NOIRQ       = 12,
     VOIP_RX          = 13,
     INCALL_MUSIC     = 14,
+    GAPLESS_OFFLOAD  = 15,
 }

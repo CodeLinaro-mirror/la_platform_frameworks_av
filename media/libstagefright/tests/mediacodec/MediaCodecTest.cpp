@@ -285,17 +285,20 @@ TEST(MediaCodecTest, ErrorWhileStopping) {
     // 1) Client thread calls stop(); MediaCodec looper thread calls
     //    initiateShutdown(); shutdown is being handled at the component thread.
     // 2) Error occurred, but the shutdown operation is still being done.
-    // 3) MediaCodec looper thread handles the error.
-    // 4) Component thread completes shutdown and posts onStopCompleted()
+    // 3) Another error occurred during the shutdown operation.
+    // 4) MediaCodec looper thread handles the error.
+    // 5) Client releases the codec upon the error; previous shutdown is still
+    //    going on.
+    // 6) Component thread completes shutdown and posts onStopCompleted();
+    //    Shutdown from release also completes.
 
     static const AString kCodecName{"test.codec"};
     static const AString kCodecOwner{"nobody"};
     static const AString kMediaType{"video/x-test"};
 
-    std::promise<void> errorOccurred;
     sp<MockCodec> mockCodec;
     std::function<sp<CodecBase>(const AString &name, const char *owner)> getCodecBase =
-        [&mockCodec, &errorOccurred](const AString &, const char *) {
+        [&mockCodec](const AString &, const char *) {
             mockCodec = new MockCodec([](const std::shared_ptr<MockBufferChannel> &) {
                 // No mock setup, as we don't expect any buffer operations
                 // in this scenario.
@@ -314,13 +317,17 @@ TEST(MediaCodecTest, ErrorWhileStopping) {
                     mockCodec->callback()->onStartCompleted();
                 });
             ON_CALL(*mockCodec, initiateShutdown(true))
-                .WillByDefault([mockCodec, &errorOccurred](bool) {
+                .WillByDefault([mockCodec](bool) {
+                    // 2)
                     mockCodec->callback()->onError(UNKNOWN_ERROR, ACTION_CODE_FATAL);
-                    // Mark that 1) and 2) are complete.
-                    errorOccurred.set_value();
+                    // 3)
+                    mockCodec->callback()->onError(UNKNOWN_ERROR, ACTION_CODE_FATAL);
                 });
             ON_CALL(*mockCodec, initiateShutdown(false))
                 .WillByDefault([mockCodec](bool) {
+                    // Previous stop finished now.
+                    mockCodec->callback()->onStopCompleted();
+                    // Release also finished.
                     mockCodec->callback()->onReleaseCompleted();
                 });
             return mockCodec;
@@ -332,19 +339,57 @@ TEST(MediaCodecTest, ErrorWhileStopping) {
     ASSERT_NE(nullptr, codec) << "Codec must not be null";
     ASSERT_NE(nullptr, mockCodec) << "MockCodec must not be null";
 
-    std::thread([mockCodec, &errorOccurred]{
-        // Simulate component thread that handles stop()
-        errorOccurred.get_future().wait();
-        // Error occurred but shutdown request still got processed.
-        mockCodec->callback()->onStopCompleted();
-    }).detach();
-
     codec->configure(new AMessage, nullptr, nullptr, 0);
     codec->start();
-    codec->stop();
-    // Sleep here to give time for the MediaCodec looper thread
-    // to process the messages.
+    // stop() will fail because of the error
+    EXPECT_NE(OK, codec->stop());
+    // sleep here so that the looper thread can handle all the errors.
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // upon receiving the error, client tries to release the codec.
     codec->release();
+    looper->stop();
+}
+
+TEST(MediaCodecTest, DeadWhileAsyncReleasing) {
+    // Test scenario:
+    //
+    // 1) Client thread calls release(); MediaCodec looper thread calls
+    //    initiateShutdown(); shutdown is being handled at the component thread.
+    // 2) Codec service died during the shutdown operation.
+    // 3) MediaCodec looper thread handles the death.
+
+    static const AString kCodecName{"test.codec"};
+    static const AString kCodecOwner{"nobody"};
+    static const AString kMediaType{"video/x-test"};
+
+    sp<MockCodec> mockCodec;
+    std::function<sp<CodecBase>(const AString &name, const char *owner)> getCodecBase =
+        [&mockCodec](const AString &, const char *) {
+            mockCodec = new MockCodec([](const std::shared_ptr<MockBufferChannel> &) {
+                // No mock setup, as we don't expect any buffer operations
+                // in this scenario.
+            });
+            ON_CALL(*mockCodec, initiateAllocateComponent(_))
+                .WillByDefault([mockCodec](const sp<AMessage> &) {
+                    mockCodec->callback()->onComponentAllocated(kCodecName.c_str());
+                });
+            ON_CALL(*mockCodec, initiateShutdown(_))
+                .WillByDefault([mockCodec](bool) {
+                    // 2)
+                    mockCodec->callback()->onError(DEAD_OBJECT, ACTION_CODE_FATAL);
+                    // Codec service has died, no callback.
+                });
+            return mockCodec;
+        };
+
+    sp<ALooper> looper{new ALooper};
+    sp<MediaCodec> codec = SetupMediaCodec(
+            kCodecOwner, kCodecName, kMediaType, looper, getCodecBase);
+    ASSERT_NE(nullptr, codec) << "Codec must not be null";
+    ASSERT_NE(nullptr, mockCodec) << "MockCodec must not be null";
+
+    codec->releaseAsync(new AMessage);
+    // sleep here so that the looper thread can handle the error
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     looper->stop();
 }

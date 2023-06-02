@@ -302,7 +302,7 @@ void NuPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
     ALOGV("[%s] onConfigure (surface=%p)", mComponentName.c_str(), mSurface.get());
 
     mCodec = MediaCodec::CreateByType(
-            mCodecLooper, mime.c_str(), false /* encoder */, NULL /* err */, mPid, mUid);
+            mCodecLooper, mime.c_str(), false /* encoder */, NULL /* err */, mPid, mUid, format);
     int32_t secure = 0;
     if (format->findInt32("secure", &secure) && secure != 0) {
         if (mCodec != NULL) {
@@ -746,9 +746,15 @@ bool NuPlayer::Decoder::handleAnOutputBuffer(
 
     mOutputBuffers.editItemAt(index) = buffer;
 
+    int64_t frameIndex;
+    bool frameIndexFound = buffer->meta()->findInt64("frameIndex", &frameIndex);
+
     buffer->setRange(offset, size);
     buffer->meta()->clear();
     buffer->meta()->setInt64("timeUs", timeUs);
+    if (frameIndexFound) {
+        buffer->meta()->setInt64("frameIndex", frameIndex);
+    }
 
     bool eos = flags & MediaCodec::BUFFER_FLAG_EOS;
     // we do not expect CODECCONFIG or SYNCFRAME for decoder

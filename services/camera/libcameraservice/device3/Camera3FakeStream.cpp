@@ -29,9 +29,9 @@ namespace camera3 {
 const String8 Camera3FakeStream::FAKE_ID;
 
 Camera3FakeStream::Camera3FakeStream(int id) :
-        Camera3IOStreamBase(id, CAMERA3_STREAM_OUTPUT, FAKE_WIDTH, FAKE_HEIGHT,
+        Camera3IOStreamBase(id, CAMERA_STREAM_OUTPUT, FAKE_WIDTH, FAKE_HEIGHT,
                 /*maxSize*/0, FAKE_FORMAT, FAKE_DATASPACE, FAKE_ROTATION,
-                FAKE_ID) {
+                FAKE_ID, std::unordered_set<int32_t>{ANDROID_SENSOR_PIXEL_MODE_DEFAULT}) {
 
 }
 
@@ -39,7 +39,7 @@ Camera3FakeStream::~Camera3FakeStream() {
 
 }
 
-status_t Camera3FakeStream::getBufferLocked(camera3_stream_buffer *,
+status_t Camera3FakeStream::getBufferLocked(camera_stream_buffer *,
         const std::vector<size_t>&) {
     ATRACE_CALL();
     ALOGE("%s: Stream %d: Fake stream cannot produce buffers!", __FUNCTION__, mId);
@@ -47,17 +47,18 @@ status_t Camera3FakeStream::getBufferLocked(camera3_stream_buffer *,
 }
 
 status_t Camera3FakeStream::returnBufferLocked(
-        const camera3_stream_buffer &,
-        nsecs_t, const std::vector<size_t>&) {
+        const camera_stream_buffer &,
+        nsecs_t, int32_t, const std::vector<size_t>&) {
     ATRACE_CALL();
     ALOGE("%s: Stream %d: Fake stream cannot return buffers!", __FUNCTION__, mId);
     return INVALID_OPERATION;
 }
 
 status_t Camera3FakeStream::returnBufferCheckedLocked(
-            const camera3_stream_buffer &,
+            const camera_stream_buffer &,
             nsecs_t,
             bool,
+            int32_t,
             const std::vector<size_t>&,
             /*out*/
             sp<Fence>*) {
@@ -130,6 +131,11 @@ status_t Camera3FakeStream::updateStream(const std::vector<sp<Surface>> &/*outpu
             const std::vector<OutputStreamInfo> &/*outputInfo*/,
             const std::vector<size_t> &/*removedSurfaceIds*/,
             KeyedVector<sp<Surface>, size_t> * /*outputMap*/) {
+    ALOGE("%s: this method is not supported!", __FUNCTION__);
+    return INVALID_OPERATION;
+}
+
+status_t Camera3FakeStream::setBatchSize(size_t /*batchSize*/) {
     ALOGE("%s: this method is not supported!", __FUNCTION__);
     return INVALID_OPERATION;
 }

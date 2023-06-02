@@ -27,7 +27,7 @@
 #include <media/VideoTrackTranscoder.h>
 #include <utils/Timers.h>
 
-#include "TrackTranscoderTestUtils.h"
+#include "TranscoderTestUtils.h"
 
 namespace android {
 
@@ -86,6 +86,10 @@ public:
 
     ~VideoTrackTranscoderTests() { LOG(DEBUG) << "VideoTrackTranscoderTests destroyed"; }
 
+    static int32_t getConfiguredBitrate(const std::shared_ptr<VideoTrackTranscoder>& transcoder) {
+        return transcoder->mConfiguredBitrate;
+    }
+
     std::shared_ptr<MediaSampleReader> mMediaSampleReader;
     int mTrackIndex;
     std::shared_ptr<AMediaFormat> mSourceFormat;
@@ -94,7 +98,7 @@ public:
 
 TEST_F(VideoTrackTranscoderTests, SampleSoundness) {
     LOG(DEBUG) << "Testing SampleSoundness";
-    std::shared_ptr<TestCallback> callback = std::make_shared<TestCallback>();
+    auto callback = std::make_shared<TestTrackTranscoderCallback>();
     auto transcoder = VideoTrackTranscoder::create(callback);
 
     EXPECT_EQ(mMediaSampleReader->selectTrack(mTrackIndex), AMEDIA_OK);
@@ -135,13 +139,12 @@ TEST_F(VideoTrackTranscoderTests, SampleSoundness) {
     });
 
     EXPECT_EQ(callback->waitUntilFinished(), AMEDIA_OK);
-    EXPECT_TRUE(transcoder->stop());
 }
 
 TEST_F(VideoTrackTranscoderTests, PreserveBitrate) {
     LOG(DEBUG) << "Testing PreserveBitrate";
-    std::shared_ptr<TestCallback> callback = std::make_shared<TestCallback>();
-    std::shared_ptr<MediaTrackTranscoder> transcoder = VideoTrackTranscoder::create(callback);
+    auto callback = std::make_shared<TestTrackTranscoderCallback>();
+    auto transcoder = VideoTrackTranscoder::create(callback);
 
     auto destFormat = TrackTranscoderTestUtils::getDefaultVideoDestinationFormat(
             mSourceFormat.get(), false /* includeBitrate*/);
@@ -156,14 +159,11 @@ TEST_F(VideoTrackTranscoderTests, PreserveBitrate) {
     ASSERT_TRUE(transcoder->start());
 
     callback->waitUntilTrackFormatAvailable();
+    transcoder->stop();
+    EXPECT_EQ(callback->waitUntilFinished(), AMEDIA_OK);
 
-    auto outputFormat = transcoder->getOutputFormat();
-    ASSERT_NE(outputFormat, nullptr);
-
-    ASSERT_TRUE(transcoder->stop());
-
-    int32_t outBitrate;
-    EXPECT_TRUE(AMediaFormat_getInt32(outputFormat.get(), AMEDIAFORMAT_KEY_BIT_RATE, &outBitrate));
+    int32_t outBitrate = getConfiguredBitrate(transcoder);
+    ASSERT_GT(outBitrate, 0);
 
     EXPECT_EQ(srcBitrate, outBitrate);
 }
@@ -171,7 +171,7 @@ TEST_F(VideoTrackTranscoderTests, PreserveBitrate) {
 // VideoTrackTranscoder needs a valid destination format.
 TEST_F(VideoTrackTranscoderTests, NullDestinationFormat) {
     LOG(DEBUG) << "Testing NullDestinationFormat";
-    std::shared_ptr<TestCallback> callback = std::make_shared<TestCallback>();
+    auto callback = std::make_shared<TestTrackTranscoderCallback>();
     std::shared_ptr<AMediaFormat> nullFormat;
 
     auto transcoder = VideoTrackTranscoder::create(callback);
@@ -181,7 +181,7 @@ TEST_F(VideoTrackTranscoderTests, NullDestinationFormat) {
 
 TEST_F(VideoTrackTranscoderTests, LingeringEncoder) {
     OneShotSemaphore semaphore;
-    auto callback = std::make_shared<TestCallback>();
+    auto callback = std::make_shared<TestTrackTranscoderCallback>();
     auto transcoder = VideoTrackTranscoder::create(callback);
 
     EXPECT_EQ(mMediaSampleReader->selectTrack(mTrackIndex), AMEDIA_OK);
@@ -205,7 +205,8 @@ TEST_F(VideoTrackTranscoderTests, LingeringEncoder) {
     // Wait for the encoder to output samples before stopping and releasing the transcoder.
     semaphore.wait();
 
-    EXPECT_TRUE(transcoder->stop());
+    transcoder->stop();
+    EXPECT_EQ(callback->waitUntilFinished(), AMEDIA_OK);
     transcoder.reset();
 
     // Return buffers to the codec so that it can resume processing, but keep one buffer to avoid

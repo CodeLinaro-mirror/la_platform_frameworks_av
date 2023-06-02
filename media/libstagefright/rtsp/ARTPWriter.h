@@ -53,6 +53,7 @@ struct ARTPWriter : public MediaWriter {
     void updateSocketDscp(int32_t dscp);
     void updateSocketNetwork(int64_t socketNetwork);
     uint32_t getSequenceNum();
+    virtual uint64_t getAccumulativeBytes() override;
 
     virtual void onMessageReceived(const sp<AMessage> &msg);
     virtual void setTMMBNInfo(uint32_t opponentID, uint32_t bitrate);
@@ -107,18 +108,18 @@ private:
     MediaBufferBase *mSPSBuf;
     MediaBufferBase *mPPSBuf;
 
+    uint32_t mClockRate;
     uint32_t mSourceID;
     uint32_t mPayloadType;
     uint32_t mSeqNo;
     uint32_t mRTPTimeBase;
     uint32_t mNumRTPSent;
     uint32_t mNumRTPOctetsSent;
-    uint32_t mLastRTPTime;
-    uint64_t mLastNTPTime;
 
     uint32_t mOpponentID;
     uint32_t mBitrate;
-    sp<TrafficRecorder<uint32_t, size_t> > mTrafficRec;
+    typedef uint64_t Bytes;
+    sp<TrafficRecorder<uint32_t /* Time */, Bytes> > mTrafficRec;
 
     int32_t mNumSRsSent;
     int32_t mRTPCVOExtMap;
@@ -134,7 +135,9 @@ private:
     } mMode;
 
     static uint64_t GetNowNTP();
+    uint32_t getRtpTime(int64_t timeUs);
 
+    void initState();
     void onRead(const sp<AMessage> &msg);
     void onSendSR(const sp<AMessage> &msg);
 

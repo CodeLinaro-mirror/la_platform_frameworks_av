@@ -1,3 +1,12 @@
+package {
+    // See: http://go/android-license-faq
+    // A large-scale-change added 'default_applicable_licenses' to import
+    // all of the 'license_kinds' from "frameworks_av_license"
+    // to get the below license kinds:
+    //   SPDX-license-identifier-Apache-2.0
+    default_applicable_licenses: ["frameworks_av_license"],
+}
+
 filegroup {
     name: "resourcemanager_aidl",
     srcs: [
@@ -35,11 +44,28 @@ aidl_interface {
 
 aidl_interface {
     name: "resourceobserver_aidl_interface",
-    unstable: true,
     local_include_dir: "aidl",
     srcs: [
         ":resourceobserver_aidl",
     ],
+    backend: {
+        java: {
+            enabled: false,
+        },
+        cpp: {
+            enabled: false,
+        },
+        ndk: {
+            apex_available: [
+                "//apex_available:platform",
+                "com.android.media",
+                "test_com.android.media",
+            ],
+            min_sdk_version: "29",
+            enabled: true,
+        },
+    },
+    versions: ["1"],
 }
 
 cc_library {
@@ -49,6 +75,9 @@ cc_library {
         "ResourceManagerService.cpp",
         "ResourceObserverService.cpp",
         "ServiceLog.cpp",
+
+        // TODO: convert to AIDL?
+        "IMediaResourceMonitor.cpp",
     ],
 
     shared_libs: [
@@ -61,7 +90,7 @@ cc_library {
     ],
 
     static_libs: [
-        "resourceobserver_aidl_interface-ndk_platform",
+        "resourceobserver_aidl_interface-V1-ndk_platform",
     ],
 
     include_dirs: ["frameworks/av/include"],

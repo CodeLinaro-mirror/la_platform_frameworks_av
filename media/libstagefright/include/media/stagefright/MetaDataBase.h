@@ -127,6 +127,8 @@ enum {
     kKeyTrackTimeStatus   = 'tktm',  // int64_t
 
     kKeyRealTimeRecording = 'rtrc',  // bool (int32_t)
+    kKeyBackgroundMode = 'bkmd',  // bool (int32_t)
+
     kKeyNumBuffers        = 'nbbf',  // int32_t
 
     // Ogg files can be tagged to be automatically looping...
@@ -152,6 +154,10 @@ enum {
 
     kKeyIsADTS            = 'adts',  // bool (int32_t)
     kKeyAACAOT            = 'aaot',  // int32_t
+
+    kKeyMpeghProfileLevelIndication = 'hpli', // int32_t
+    kKeyMpeghReferenceChannelLayout = 'hrcl', // int32_t
+    kKeyMpeghCompatibleSets         = 'hcos', // raw data
 
     // If a MediaBuffer's data represents (at least partially) encrypted
     // data, the following fields aid in decryption.
@@ -225,6 +231,8 @@ enum {
     kKeyExifSize         = 'exsz', // int64_t, Exif data size
     kKeyExifTiffOffset   = 'thdr', // int32_t, if > 0, buffer contains exif data block with
                                    // tiff hdr at specified offset
+    kKeyXmpOffset        = 'xmof', // int64_t, XMP data offset
+    kKeyXmpSize          = 'xmsz', // int64_t, XMP data size
     kKeyPcmBigEndian     = 'pcmb', // bool (int32_t)
 
     // Key for ALAC Magic Cookie
@@ -262,6 +270,11 @@ enum {
     // Slow-motion markers
     kKeySlowMotionMarkers = 'slmo', // raw data, byte array following spec for
                                     // MediaFormat#KEY_SLOW_MOTION_MARKERS
+
+    kKeySampleFileOffset = 'sfof', // int64_t, sample's offset in a media file.
+    kKeyLastSampleIndexInChunk = 'lsic',  //int64_t, index of last sample in a chunk.
+    kKeySampleTimeBeforeAppend = 'lsba', // int64_t, timestamp of last sample of a track.
+
 };
 
 enum {
@@ -271,6 +284,7 @@ enum {
     kTypeAV1C        = 'av1c',
     kTypeDVCC        = 'dvcc',
     kTypeD263        = 'd263',
+    kTypeHCOS        = 'hcos',
 };
 
 enum {

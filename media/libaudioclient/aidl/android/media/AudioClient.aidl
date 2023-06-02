@@ -16,15 +16,13 @@
 
 package android.media;
 
+import android.content.AttributionSourceState;
+
 /**
  * {@hide}
  */
 parcelable AudioClient {
-    /** Interpreted as uid_t. */
-    int clientUid;
-    /** Interpreted as pid_t. */
-    int clientPid;
     /** Interpreted as pid_t. */
     int clientTid;
-    @utf8InCpp String packageName;
+    AttributionSourceState attributionSource;
 }

@@ -17,11 +17,11 @@
 package aaudio;
 
 import aaudio.StreamParameters;
+import android.content.AttributionSourceState;
 
 parcelable StreamRequest {
-    StreamParameters    params;
-    int                 userId; // = (uid_t) -1;
-    int                 processId; // = (pid_t) -1;
-    boolean             sharingModeMatchRequired; // = false;
-    boolean             inService; // = false; // Stream opened by AAudioservice
+    StreamParameters       params;
+    AttributionSourceState attributionSource;
+    boolean                sharingModeMatchRequired; // = false;
+    boolean                inService; // = false; // Stream opened by AAudioservice
 }

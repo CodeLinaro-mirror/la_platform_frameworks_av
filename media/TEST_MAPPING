@@ -1,6 +1,6 @@
 // for frameworks/av/media
 {
-    "presubmit": [
+    "presubmit-large": [
         // runs whenever we change something in this tree
         {
             "name": "CtsMediaTestCases",
@@ -17,7 +17,9 @@
                     "include-filter": "android.media.cts.DecodeEditEncodeTest"
                 }
             ]
-        },
+        }
+    ],
+    "presubmit": [
         {
             "name": "GtsMediaTestCases",
             "options" : [
@@ -28,7 +30,7 @@
                     "include-filter": "com.google.android.media.gts.WidevineGenericOpsTests"
                 },
                 {
-                    "include-filter": "com.google.android.media.gts.WidevineYouTubePerformanceTests"
+                    "include-filter": "com.google.android.media.gts.WidevineH264PlaybackTests"
                 }
             ]
         }

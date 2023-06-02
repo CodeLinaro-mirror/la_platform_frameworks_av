@@ -23,8 +23,11 @@
 #include <aaudio/StreamRequest.h>
 
 #include "binding/AAudioStreamConfiguration.h"
+#include <android/content/AttributionSourceState.h>
 
 namespace aaudio {
+
+using android::content::AttributionSourceState;
 
 class AAudioStreamRequest {
 public:
@@ -33,20 +36,12 @@ public:
     // Construct based on a parcelable representation.
     explicit AAudioStreamRequest(const StreamRequest& parcelable);
 
-    uid_t getUserId() const {
-        return mUserId;
+    const AttributionSourceState &getAttributionSource() const {
+        return mAttributionSource;
     }
 
-    void setUserId(uid_t userId) {
-        mUserId = userId;
-    }
-
-    pid_t getProcessId() const {
-        return mProcessId;
-    }
-
-    void setProcessId(pid_t processId) {
-        mProcessId = processId;
+    void setAttributionSource(const AttributionSourceState &attributionSource) {
+        mAttributionSource = attributionSource;
     }
 
     bool isSharingModeMatchRequired() const {
@@ -82,8 +77,7 @@ public:
 
 private:
     AAudioStreamConfiguration  mConfiguration;
-    uid_t                      mUserId = (uid_t) -1;
-    pid_t                      mProcessId = (pid_t) -1;
+    AttributionSourceState mAttributionSource;
     bool                       mSharingModeMatchRequired = false;
     bool                       mInService = false; // Stream opened by AAudioservice
 };

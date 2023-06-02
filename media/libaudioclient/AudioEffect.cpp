@@ -23,15 +23,25 @@
 #include <sys/types.h>
 #include <limits.h>
 
+#include <android/media/IAudioPolicyService.h>
 #include <binder/IPCThreadState.h>
+#include <media/AidlConversion.h>
 #include <media/AudioEffect.h>
+#include <media/PolicyAidlConversion.h>
 #include <media/ShmemCompat.h>
 #include <private/media/AudioEffectShared.h>
 #include <utils/Log.h>
 
-namespace android {
+#define RETURN_STATUS_IF_ERROR(x)    \
+    {                                \
+        auto _tmp = (x);             \
+        if (_tmp != OK) return _tmp; \
+    }
 
+namespace android {
+using aidl_utils::statusTFromBinderStatus;
 using binder::Status;
+using media::IAudioPolicyService;
 
 namespace {
 
@@ -47,8 +57,8 @@ void appendToBuffer(const void* data,
 
 // ---------------------------------------------------------------------------
 
-AudioEffect::AudioEffect(const String16& opPackageName)
-    : mOpPackageName(opPackageName)
+AudioEffect::AudioEffect(const android::content::AttributionSourceState& attributionSource)
+    : mClientAttributionSource(attributionSource)
 {
 }
 
@@ -60,7 +70,8 @@ status_t AudioEffect::set(const effect_uuid_t *type,
                 audio_session_t sessionId,
                 audio_io_handle_t io,
                 const AudioDeviceTypeAddr& device,
-                bool probe)
+                bool probe,
+                bool notifyFramesProcessed)
 {
     sp<media::IEffect> iEffect;
     sp<IMemory> cblk;
@@ -97,13 +108,36 @@ status_t AudioEffect::set(const effect_uuid_t *type,
     mDescriptor.type = *(type != NULL ? type : EFFECT_UUID_NULL);
     mDescriptor.uuid = *(uuid != NULL ? uuid : EFFECT_UUID_NULL);
 
+    // TODO b/182392769: use attribution source util
     mIEffectClient = new EffectClient(this);
-    mClientPid = IPCThreadState::self()->getCallingPid();
-    mClientUid = IPCThreadState::self()->getCallingUid();
+    pid_t pid = IPCThreadState::self()->getCallingPid();
+    mClientAttributionSource.pid = VALUE_OR_RETURN_STATUS(legacy2aidl_pid_t_int32_t(pid));
+    pid_t uid = IPCThreadState::self()->getCallingUid();
+    mClientAttributionSource.uid = VALUE_OR_RETURN_STATUS(legacy2aidl_uid_t_int32_t(uid));
 
-    iEffect = audioFlinger->createEffect((effect_descriptor_t *)&mDescriptor,
-            mIEffectClient, priority, io, mSessionId, device, mOpPackageName, mClientPid,
-            probe, &mStatus, &mId, &enabled);
+    media::CreateEffectRequest request;
+    request.desc = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_effect_descriptor_t_EffectDescriptor(mDescriptor));
+    request.client = mIEffectClient;
+    request.priority = priority;
+    request.output = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_io_handle_t_int32_t(io));
+    request.sessionId = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_session_t_int32_t(mSessionId));
+    request.device = VALUE_OR_RETURN_STATUS(legacy2aidl_AudioDeviceTypeAddress(device));
+    request.attributionSource = mClientAttributionSource;
+    request.probe = probe;
+    request.notifyFramesProcessed = notifyFramesProcessed;
+
+    media::CreateEffectResponse response;
+
+    mStatus = audioFlinger->createEffect(request, &response);
+
+    if (mStatus == OK) {
+        mId = response.id;
+        enabled = response.enabled;
+        iEffect = response.effect;
+        mDescriptor = VALUE_OR_RETURN_STATUS(
+                aidl2legacy_EffectDescriptor_effect_descriptor_t(response.desc));
+    }
 
     // In probe mode, we stop here and return the status: the IEffect interface to
     // audio flinger will not be retained. initCheck() will return the creation status
@@ -145,10 +179,10 @@ status_t AudioEffect::set(const effect_uuid_t *type,
 
     IInterface::asBinder(iEffect)->linkToDeath(mIEffectClient);
     ALOGV("set() %p OK effect: %s id: %d status %d enabled %d pid %d", this, mDescriptor.name, mId,
-            mStatus, mEnabled, mClientPid);
+            mStatus, mEnabled, mClientAttributionSource.pid);
 
     if (!audio_is_global_session(mSessionId)) {
-        AudioSystem::acquireAudioSessionId(mSessionId, mClientPid, mClientUid);
+        AudioSystem::acquireAudioSessionId(mSessionId, pid, uid);
     }
 
     return mStatus;
@@ -162,7 +196,8 @@ status_t AudioEffect::set(const char *typeStr,
                 audio_session_t sessionId,
                 audio_io_handle_t io,
                 const AudioDeviceTypeAddr& device,
-                bool probe)
+                bool probe,
+                bool notifyFramesProcessed)
 {
     effect_uuid_t type;
     effect_uuid_t *pType = nullptr;
@@ -179,7 +214,8 @@ status_t AudioEffect::set(const char *typeStr,
         pUuid = &uuid;
     }
 
-    return set(pType, pUuid, priority, cbf, user, sessionId, io, device, probe);
+    return set(pType, pUuid, priority, cbf, user, sessionId, io,
+               device, probe, notifyFramesProcessed);
 }
 
 
@@ -189,7 +225,8 @@ AudioEffect::~AudioEffect()
 
     if (!mProbe && (mStatus == NO_ERROR || mStatus == ALREADY_EXISTS)) {
         if (!audio_is_global_session(mSessionId)) {
-            AudioSystem::releaseAudioSessionId(mSessionId, mClientPid);
+            AudioSystem::releaseAudioSessionId(mSessionId,
+                VALUE_OR_FATAL(aidl2legacy_int32_t_pid_t(mClientAttributionSource.pid)));
         }
         if (mIEffect != NULL) {
             mIEffect->disconnect();
@@ -242,7 +279,7 @@ status_t AudioEffect::setEnabled(bool enabled)
             bs = mIEffect->disable(&status);
         }
         if (!bs.isOk()) {
-            status = bs.transactionError();
+            status = statusTFromBinderStatus(bs);
         }
         if (status == NO_ERROR) {
             mEnabled = enabled;
@@ -283,7 +320,7 @@ status_t AudioEffect::command(uint32_t cmdCode,
 
     Status bs = mIEffect->command(cmdCode, data, *replySize, &response, &status);
     if (!bs.isOk()) {
-        status = bs.transactionError();
+        status = statusTFromBinderStatus(bs);
     }
     if (status == NO_ERROR) {
         memcpy(replyData, response.data(), response.size());
@@ -331,7 +368,7 @@ status_t AudioEffect::setParameter(effect_param_t *param)
                                   &response,
                                   &status);
     if (!bs.isOk()) {
-        status = bs.transactionError();
+        status = statusTFromBinderStatus(bs);
         return status;
     }
     assert(response.size() == sizeof(int));
@@ -390,7 +427,7 @@ status_t AudioEffect::setParameterCommit()
                                   &response,
                                   &status);
     if (!bs.isOk()) {
-        status = bs.transactionError();
+        status = statusTFromBinderStatus(bs);
     }
     return status;
 }
@@ -421,7 +458,7 @@ status_t AudioEffect::getParameter(effect_param_t *param)
 
     Status bs = mIEffect->command(EFFECT_CMD_GET_PARAM, cmd, psize, &response, &status);
     if (!bs.isOk()) {
-        status = bs.transactionError();
+        status = statusTFromBinderStatus(bs);
         return status;
     }
     memcpy(param, response.data(), response.size());
@@ -489,6 +526,13 @@ void AudioEffect::commandExecuted(int32_t cmdCode,
     }
 }
 
+void AudioEffect::framesProcessed(int32_t frames)
+{
+    if (mCbf != NULL) {
+        mCbf(EVENT_FRAMES_PROCESSED, mUserData, &frames);
+    }
+}
+
 // -------------------------------------------------------------------------
 
 status_t AudioEffect::queryNumberEffects(uint32_t *numEffects)
@@ -519,9 +563,23 @@ status_t AudioEffect::queryDefaultPreProcessing(audio_session_t audioSession,
                                           effect_descriptor_t *descriptors,
                                           uint32_t *count)
 {
+    if (descriptors == nullptr || count == nullptr) {
+        return BAD_VALUE;
+    }
     const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
     if (aps == 0) return PERMISSION_DENIED;
-    return aps->queryDefaultPreProcessing(audioSession, descriptors, count);
+
+    int32_t audioSessionAidl = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_audio_session_t_int32_t(audioSession));
+    media::Int countAidl;
+    countAidl.value = VALUE_OR_RETURN_STATUS(convertIntegral<int32_t>(*count));
+    std::vector<media::EffectDescriptor> retAidl;
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
+            aps->queryDefaultPreProcessing(audioSessionAidl, &countAidl, &retAidl)));
+    *count = VALUE_OR_RETURN_STATUS(convertIntegral<uint32_t>(countAidl.value));
+    RETURN_STATUS_IF_ERROR(convertRange(retAidl.begin(), retAidl.end(), descriptors,
+                                        aidl2legacy_EffectDescriptor_effect_descriptor_t));
+    return OK;
 }
 
 status_t AudioEffect::newEffectUniqueId(audio_unique_id_t* id)
@@ -561,7 +619,18 @@ status_t AudioEffect::addSourceDefaultEffect(const char *typeStr,
         uuid = *EFFECT_UUID_NULL;
     }
 
-    return aps->addSourceDefaultEffect(&type, opPackageName, &uuid, priority, source, id);
+    media::AudioUuid typeAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_uuid_t_AudioUuid(type));
+    media::AudioUuid uuidAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_uuid_t_AudioUuid(uuid));
+    std::string opPackageNameAidl = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_String16_string(opPackageName));
+    media::AudioSourceType sourceAidl = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_audio_source_t_AudioSourceType(source));
+    int32_t retAidl;
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
+            aps->addSourceDefaultEffect(typeAidl, opPackageNameAidl, uuidAidl, priority, sourceAidl,
+                                        &retAidl)));
+    *id = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_unique_id_t(retAidl));
+    return OK;
 }
 
 status_t AudioEffect::addStreamDefaultEffect(const char *typeStr,
@@ -593,7 +662,18 @@ status_t AudioEffect::addStreamDefaultEffect(const char *typeStr,
         uuid = *EFFECT_UUID_NULL;
     }
 
-    return aps->addStreamDefaultEffect(&type, opPackageName, &uuid, priority, usage, id);
+    media::AudioUuid typeAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_uuid_t_AudioUuid(type));
+    media::AudioUuid uuidAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_uuid_t_AudioUuid(uuid));
+    std::string opPackageNameAidl = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_String16_string(opPackageName));
+    media::AudioUsage usageAidl = VALUE_OR_RETURN_STATUS(
+            legacy2aidl_audio_usage_t_AudioUsage(usage));
+    int32_t retAidl;
+    RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(
+            aps->addStreamDefaultEffect(typeAidl, opPackageNameAidl, uuidAidl, priority, usageAidl,
+                                        &retAidl)));
+    *id = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_unique_id_t(retAidl));
+    return OK;
 }
 
 status_t AudioEffect::removeSourceDefaultEffect(audio_unique_id_t id)
@@ -601,7 +681,8 @@ status_t AudioEffect::removeSourceDefaultEffect(audio_unique_id_t id)
     const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
     if (aps == 0) return PERMISSION_DENIED;
 
-    return aps->removeSourceDefaultEffect(id);
+    int32_t idAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_unique_id_t_int32_t(id));
+    return statusTFromBinderStatus(aps->removeSourceDefaultEffect(idAidl));
 }
 
 status_t AudioEffect::removeStreamDefaultEffect(audio_unique_id_t id)
@@ -609,7 +690,8 @@ status_t AudioEffect::removeStreamDefaultEffect(audio_unique_id_t id)
     const sp<IAudioPolicyService>& aps = AudioSystem::get_audio_policy_service();
     if (aps == 0) return PERMISSION_DENIED;
 
-    return aps->removeStreamDefaultEffect(id);
+    int32_t idAidl = VALUE_OR_RETURN_STATUS(legacy2aidl_audio_unique_id_t_int32_t(id));
+    return statusTFromBinderStatus(aps->removeStreamDefaultEffect(idAidl));
 }
 
 // -------------------------------------------------------------------------

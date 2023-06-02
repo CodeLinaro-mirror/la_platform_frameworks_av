@@ -23,6 +23,7 @@
 #include <system/audio.h>
 
 #include "LVM_Private.h"
+#include "ScalarArithmetic.h"
 #include "VectorArithmetic.h"
 #include "LVM_Coeffs.h"
 
@@ -111,19 +112,6 @@ LVM_ReturnStatus_en LVM_Process(LVM_Handle_t hInstance, const LVM_FLOAT* pInData
     }
 
     /*
-     * Convert from Mono if necessary
-     */
-    if (pInstance->Params.SourceFormat == LVM_MONO) {
-        MonoTo2I_Float(pInData,                /* Source */
-                       pOutData,               /* Destination */
-                       (LVM_INT16)NumSamples); /* Number of input samples */
-        pInput = pOutData;
-        pToProcess = pOutData;
-        NrChannels = 2;
-        ChMask = AUDIO_CHANNEL_OUT_STEREO;
-    }
-
-    /*
      * Process the data with managed buffers
      */
     while (SampleCount != 0) {
@@ -190,9 +178,10 @@ LVM_ReturnStatus_en LVM_Process(LVM_Handle_t hInstance, const LVM_FLOAT* pInData
                 /*
                  * Apply the filter
                  */
-                FO_Mc_D16F32C15_LShx_TRC_WRA_01(&pInstance->pTE_State->TrebleBoost_State,
-                                                pProcessed, pProcessed, (LVM_INT16)NrFrames,
-                                                (LVM_INT16)NrChannels);
+                pInstance->pTEBiquad->process(pProcessed, pProcessed, NrFrames);
+                for (auto i = 0; i < NrChannels * NrFrames; i++) {
+                    pProcessed[i] = LVM_Clamp(pProcessed[i]);
+                }
             }
             /*
              * Volume balance

@@ -62,10 +62,7 @@ LVEQNB_ReturnStatus_en LVEQNB_Process(
         LVEQNB_Handle_t hInstance, const LVM_FLOAT* pInData, LVM_FLOAT* pOutData,
         const LVM_UINT16 NrFrames) {  // updated to use samples = frames * channels.
     LVEQNB_Instance_t* pInstance = (LVEQNB_Instance_t*)hInstance;
-
-    // Mono passed in as stereo
-    const LVM_INT32 NrChannels =
-            pInstance->Params.NrChannels == 1 ? 2 : pInstance->Params.NrChannels;
+    const LVM_INT32 NrChannels = pInstance->Params.NrChannels;
     const LVM_INT32 NrSamples = NrChannels * NrFrames;
 
     /* Check for NULL pointers */
@@ -105,18 +102,16 @@ LVEQNB_ReturnStatus_en LVEQNB_Process(
                  */
                 if (pInstance->pBandDefinitions[i].Gain != 0) {
                     /*
-                     * Get the address of the biquad instance
-                     */
-                    Biquad_FLOAT_Instance_t* pBiquad = &pInstance->pEQNB_FilterState_Float[i];
-
-                    /*
                      * Select single or double precision as required
                      */
                     switch (pInstance->pBiquadType[i]) {
                         case LVEQNB_SinglePrecision_Float: {
-                            PK_Mc_D32F32C14G11_TRC_WRA_01(pBiquad, pScratch, pScratch,
-                                                          (LVM_INT16)NrFrames,
-                                                          (LVM_INT16)NrChannels);
+                            LVM_FLOAT* pTemp = pScratch + NrSamples;
+                            pInstance->eqBiquad[i].process(pTemp, pScratch, NrFrames);
+                            const auto gain = pInstance->gain[i];
+                            for (unsigned j = 0; j < NrSamples; ++j) {
+                                pScratch[j] += pTemp[j] * gain;
+                            }
                             break;
                         }
                         default:

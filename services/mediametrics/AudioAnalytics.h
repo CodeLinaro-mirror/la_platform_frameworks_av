@@ -17,10 +17,11 @@
 #pragma once
 
 #include <android-base/thread_annotations.h>
-#include <audio_utils/SimpleLog.h>
 #include "AnalyticsActions.h"
 #include "AnalyticsState.h"
 #include "AudioPowerUsage.h"
+#include "HeatMap.h"
+#include "StatsdLog.h"
 #include "TimedAction.h"
 #include "Wrap.h"
 
@@ -32,7 +33,7 @@ class AudioAnalytics
     friend AudioPowerUsage;
 
 public:
-    AudioAnalytics();
+    explicit AudioAnalytics(const std::shared_ptr<StatsdLog>& statsdLog);
     ~AudioAnalytics();
 
     /**
@@ -73,10 +74,22 @@ public:
     std::pair<std::string, int32_t> dump(
             int32_t lines = INT32_MAX, int64_t sinceNs = 0, const char *prefix = nullptr) const;
 
+    /**
+     * Returns a pair consisting of the dump string and the number of lines in the string.
+     *
+     * HeatMap dump.
+     */
+    std::pair<std::string, int32_t> dumpHeatMap(int32_t lines = INT32_MAX) const {
+        return mHeatMap.dump(lines);
+    }
+
     void clear() {
         // underlying state is locked.
         mPreviousAnalyticsState->clear();
         mAnalyticsState->clear();
+
+        // Clears the status map
+        mHeatMap.clear();
 
         // Clear power usage state.
         mAudioPowerUsage.clear();
@@ -96,11 +109,18 @@ private:
      */
 
     /**
-     * Checks for any pending actions for a particular item.
+     * Processes any pending actions for a particular item.
      *
      * \param item to check against the current AnalyticsActions.
      */
-    void checkActions(const std::shared_ptr<const mediametrics::Item>& item);
+    void processActions(const std::shared_ptr<const mediametrics::Item>& item);
+
+    /**
+     * Processes status information contained in the item.
+     *
+     * \param item to check against for status handling
+     */
+    void processStatus(const std::shared_ptr<const mediametrics::Item>& item);
 
     // HELPER METHODS
     /**
@@ -122,8 +142,10 @@ private:
     SharedPtrWrap<AnalyticsState> mPreviousAnalyticsState;
 
     TimedAction mTimedAction; // locked internally
+    const std::shared_ptr<StatsdLog> mStatsdLog; // locked internally, ok for multiple threads.
 
-    SimpleLog mStatsdLog{16 /* log lines */}; // locked internally
+    static constexpr size_t kHeatEntries = 100;
+    HeatMap mHeatMap{kHeatEntries}; // locked internally, ok for multiple threads.
 
     // DeviceUse is a nested class which handles audio device usage accounting.
     // We define this class at the end to ensure prior variables all properly constructed.
@@ -189,7 +211,30 @@ private:
         int32_t mA2dpConnectionUnknowns GUARDED_BY(mLock) = 0;
     } mDeviceConnection{*this};
 
-    AudioPowerUsage mAudioPowerUsage{this};
+    // AAudioStreamInfo is a nested class which collect aaudio stream info from both client and
+    // server side.
+    class AAudioStreamInfo {
+    public:
+        // All the enum here must be kept the same as the ones defined in atoms.proto
+        enum CallerPath {
+            CALLER_PATH_UNKNOWN = 0,
+            CALLER_PATH_LEGACY = 1,
+            CALLER_PATH_MMAP = 2,
+        };
+
+        explicit AAudioStreamInfo(AudioAnalytics &audioAnalytics)
+            : mAudioAnalytics(audioAnalytics) {}
+
+        void endAAudioStream(
+                const std::shared_ptr<const android::mediametrics::Item> &item,
+                CallerPath path) const;
+
+    private:
+
+        AudioAnalytics &mAudioAnalytics;
+    } mAAudioStreamInfo{*this};
+
+    AudioPowerUsage mAudioPowerUsage;
 };
 
 } // namespace android::mediametrics

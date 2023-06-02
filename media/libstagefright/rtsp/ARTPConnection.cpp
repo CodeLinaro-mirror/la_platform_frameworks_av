@@ -18,9 +18,7 @@
 #define LOG_TAG "ARTPConnection"
 #include <utils/Log.h>
 
-#include "ARTPAssembler.h"
 #include "ARTPConnection.h"
-
 #include "ARTPSource.h"
 #include "ASessionDescription.h"
 
@@ -70,6 +68,8 @@ struct ARTPConnection::StreamInfo {
 
     bool mIsInjected;
 
+    // A place to save time when it polls
+    int64_t mLastPollTimeUs;
     // RTCP Extension for CVO
     int mCVOExtMap; // will be set to 0 if cvo is not negotiated in sdp
 };
@@ -80,7 +80,7 @@ ARTPConnection::ARTPConnection(uint32_t flags)
       mLastReceiverReportTimeUs(-1),
       mLastBitrateReportTimeUs(-1),
       mTargetBitrate(-1),
-      mJbTimeMs(300) {
+      mStaticJitterTimeMs(kStaticJitterTimeMs) {
 }
 
 ARTPConnection::~ARTPConnection() {
@@ -99,6 +99,11 @@ void ARTPConnection::addStream(
     msg->setSize("index", index);
     msg->setMessage("notify", notify);
     msg->setInt32("injected", injected);
+    msg->post();
+}
+
+void ARTPConnection::seekStream() {
+    sp<AMessage> msg = new AMessage(kWhatSeekStream, this);
     msg->post();
 }
 
@@ -131,7 +136,7 @@ void ARTPConnection::MakePortPair(
     unsigned start = (unsigned)((rand()* 1000LL)/RAND_MAX) + 15550;
     start &= ~1;
 
-    for (unsigned port = start; port < 65536; port += 2) {
+    for (unsigned port = start; port < 65535; port += 2) {
         struct sockaddr_in addr;
         memset(addr.sin_zero, 0, sizeof(addr.sin_zero));
         addr.sin_family = AF_INET;
@@ -149,6 +154,13 @@ void ARTPConnection::MakePortPair(
                  (const struct sockaddr *)&addr, sizeof(addr)) == 0) {
             *rtpPort = port;
             return;
+        } else {
+            // we should recreate a RTP socket to avoid bind other port in same RTP socket
+            close(*rtpSocket);
+
+            *rtpSocket = socket(AF_INET, SOCK_DGRAM, 0);
+            CHECK_GE(*rtpSocket, 0);
+            bumpSocketBufferSize(*rtpSocket);
         }
     }
 
@@ -274,6 +286,12 @@ void ARTPConnection::onMessageReceived(const sp<AMessage> &msg) {
             break;
         }
 
+        case kWhatSeekStream:
+        {
+            onSeekStream(msg);
+            break;
+        }
+
         case kWhatRemoveStream:
         {
             onRemoveStream(msg);
@@ -283,6 +301,12 @@ void ARTPConnection::onMessageReceived(const sp<AMessage> &msg) {
         case kWhatPollStreams:
         {
             onPollStreams();
+            break;
+        }
+
+        case kWhatAlarmStream:
+        {
+            onAlarmStream(msg);
             break;
         }
 
@@ -341,6 +365,18 @@ void ARTPConnection::onAddStream(const sp<AMessage> &msg) {
 
     if (!injected) {
         postPollEvent();
+    }
+}
+
+void ARTPConnection::onSeekStream(const sp<AMessage> &msg) {
+    (void)msg; // unused param as of now.
+    List<StreamInfo>::iterator it = mStreams.begin();
+    while (it != mStreams.end()) {
+        for (size_t i = 0; i < it->mSources.size(); ++i) {
+            sp<ARTPSource> source = it->mSources.valueAt(i);
+            source->timeReset();
+        }
+        ++it;
     }
 }
 
@@ -409,6 +445,7 @@ void ARTPConnection::onPollStreams() {
         return;
     }
 
+    int64_t nowUs = ALooper::GetNowUs();
     int res = select(maxSocket + 1, &rs, NULL, NULL, &tv);
 
     if (res > 0) {
@@ -418,6 +455,7 @@ void ARTPConnection::onPollStreams() {
                 ++it;
                 continue;
             }
+            it->mLastPollTimeUs = nowUs;
 
             status_t err = OK;
             if (FD_ISSET(it->mRTPSocket, &rs)) {
@@ -429,14 +467,16 @@ void ARTPConnection::onPollStreams() {
 
             if (err == -ECONNRESET) {
                 // socket failure, this stream is dead, Jim.
-                sp<AMessage> notify = it->mNotifyMsg->dup();
-                notify->setInt32("rtcp-event", 1);
-                notify->setInt32("payload-type", 400);
-                notify->setInt32("feedback-type", 1);
-                notify->setInt32("sender", it->mSources.valueAt(0)->getSelfID());
-                notify->post();
+                for (size_t i = 0; i < it->mSources.size(); ++i) {
+                    sp<AMessage> notify = it->mNotifyMsg->dup();
+                    notify->setInt32("rtcp-event", 1);
+                    notify->setInt32("payload-type", 400);
+                    notify->setInt32("feedback-type", 1);
+                    notify->setInt32("sender", it->mSources.valueAt(i)->getSelfID());
+                    notify->post();
 
-                ALOGW("failed to receive RTP/RTCP datagram.");
+                    ALOGW("failed to receive RTP/RTCP datagram.");
+                }
                 it = mStreams.erase(it);
                 continue;
             }
@@ -457,13 +497,26 @@ void ARTPConnection::onPollStreams() {
                     ALOGD("Send FIR immediately for lost Packets");
                     send(&*it, buffer);
                 }
+
+                buffer->setRange(0, 0);
+                it->mSources.valueAt(i)->addTMMBR(buffer, mTargetBitrate);
+                mTargetBitrate = -1;
+                if (buffer->size() > 0) {
+                    ALOGV("Sending TMMBR...");
+                    ssize_t n = send(&*it, buffer);
+
+                    if (n != (ssize_t)buffer->size()) {
+                        ALOGW("failed to send RTCP TMMBR (%s).",
+                                n >= 0 ? "connection gone" : strerror(errno));
+                        continue;
+                    }
+                }
             }
 
             ++it;
         }
     }
 
-    int64_t nowUs = ALooper::GetNowUs();
     checkRxBitrate(nowUs);
 
     if (mLastReceiverReportTimeUs <= 0
@@ -502,15 +555,12 @@ void ARTPConnection::onPollStreams() {
 
                 ssize_t n = send(s, buffer);
 
-                if (n <= 0) {
+                if (n != (ssize_t)buffer->size()) {
                     ALOGW("failed to send RTCP receiver report (%s).",
-                         n == 0 ? "connection gone" : strerror(errno));
-
-                    it = mStreams.erase(it);
+                            n >= 0 ? "connection gone" : strerror(errno));
+                    ++it;
                     continue;
                 }
-
-                CHECK_EQ(n, (ssize_t)buffer->size());
 
                 mLastReceiverReportTimeUs = nowUs;
             }
@@ -521,6 +571,13 @@ void ARTPConnection::onPollStreams() {
 
     if (!mStreams.empty()) {
         postPollEvent();
+    }
+}
+
+void ARTPConnection::onAlarmStream(const sp<AMessage> msg) {
+    sp<ARTPSource> source = nullptr;
+    if (msg->findObject("source", (sp<android::RefBase>*)&source)) {
+        source->processRTPPacket();
     }
 }
 
@@ -561,7 +618,14 @@ status_t ARTPConnection::receive(StreamInfo *s, bool receiveRTP) {
     } while (nbytes < 0 && errno == EINTR);
 
     if (nbytes <= 0) {
-        return -ECONNRESET;
+        ALOGW("failed to recv rtp packet. cause=%s", strerror(errno));
+        // ECONNREFUSED may happen in next recvfrom() calling if one of
+        // outgoing packet can not be delivered to remote by using sendto()
+        if (errno == ECONNREFUSED) {
+            return -ECONNREFUSED;
+        } else {
+            return -ECONNRESET;
+        }
     }
 
     buffer->setRange(0, nbytes);
@@ -605,16 +669,14 @@ ssize_t ARTPConnection::send(const StreamInfo *info, const sp<ABuffer> buffer) {
                     pRemoteRTCPAddr, sizeSockSt);
         } while (n < 0 && errno == EINTR);
 
+        if (n < 0) {
+            ALOGW("failed to send rtcp packet. cause=%s", strerror(errno));
+        }
+
         return n;
 }
 
 status_t ARTPConnection::parseRTP(StreamInfo *s, const sp<ABuffer> &buffer) {
-    if (s->mNumRTPPacketsReceived++ == 0) {
-        sp<AMessage> notify = s->mNotifyMsg->dup();
-        notify->setInt32("first-rtp", true);
-        notify->post();
-    }
-
     size_t size = buffer->size();
 
     if (size < 12) {
@@ -671,14 +733,14 @@ status_t ARTPConnection::parseRTP(StreamInfo *s, const sp<ABuffer> &buffer) {
         const uint8_t *extensionData = &data[payloadOffset];
 
         size_t extensionLength =
-            4 * (extensionData[2] << 8 | extensionData[3]);
+            (4 * (extensionData[2] << 8 | extensionData[3])) + 4;
 
-        if (size < payloadOffset + 4 + extensionLength) {
+        if (size < payloadOffset + extensionLength) {
             return -1;
         }
 
         parseRTPExt(s, (const uint8_t *)extensionData, extensionLength, &cvoDegrees);
-        payloadOffset += 4 + extensionLength;
+        payloadOffset += extensionLength;
     }
 
     uint32_t srcId = u32at(&data[8]);
@@ -692,11 +754,26 @@ status_t ARTPConnection::parseRTP(StreamInfo *s, const sp<ABuffer> &buffer) {
     meta->setInt32("rtp-time", rtpTime);
     meta->setInt32("PT", data[1] & 0x7f);
     meta->setInt32("M", data[1] >> 7);
-    if (cvoDegrees >= 0)
+    if (cvoDegrees >= 0) {
         meta->setInt32("cvo", cvoDegrees);
+    }
 
-    buffer->setInt32Data(u16at(&data[2]));
+    int32_t seq = u16at(&data[2]);
+    buffer->setInt32Data(seq);
     buffer->setRange(payloadOffset, size - payloadOffset);
+
+    if (s->mNumRTPPacketsReceived++ == 0) {
+        sp<AMessage> notify = s->mNotifyMsg->dup();
+        notify->setInt32("first-rtp", true);
+        notify->setInt32("rtcp-event", 1);
+        notify->setInt32("payload-type", ARTPSource::RTP_FIRST_PACKET);
+        notify->setInt32("rtp-time", (int32_t)rtpTime);
+        notify->setInt32("rtp-seq-num", seq);
+        notify->setInt64("recv-time-us", ALooper::GetNowUs());
+        notify->post();
+
+        ALOGD("send first-rtp event to upper layer");
+    }
 
     source->processRTPPacket(buffer);
 
@@ -754,14 +831,12 @@ status_t ARTPConnection::parseRTCP(StreamInfo *s, const sp<ABuffer> &buffer) {
     if (s->mNumRTCPPacketsReceived++ == 0) {
         sp<AMessage> notify = s->mNotifyMsg->dup();
         notify->setInt32("first-rtcp", true);
+        notify->setInt32("rtcp-event", 1);
+        notify->setInt32("payload-type", ARTPSource::RTCP_FIRST_PACKET);
+        notify->setInt64("recv-time-us", ALooper::GetNowUs());
         notify->post();
 
-        ALOGI("send first-rtcp event to upper layer as ImsRxNotice");
-        sp<AMessage> imsNotify = s->mNotifyMsg->dup();
-        imsNotify->setInt32("rtcp-event", 1);
-        imsNotify->setInt32("payload-type", 101);
-        imsNotify->setInt32("feedback-type", 0);
-        imsNotify->post();
+        ALOGD("send first-rtcp event to upper layer");
     }
 
     const uint8_t *data = buffer->data();
@@ -853,6 +928,12 @@ status_t ARTPConnection::parseBYE(
     uint32_t id = u32at(&data[4]);
 
     sp<ARTPSource> source = findSource(s, id);
+
+    // Report a final stastics to be used for rtp data usage.
+    int64_t nowUs = ALooper::GetNowUs();
+    int32_t timeDiff = (nowUs - mLastBitrateReportTimeUs) / 1000000ll;
+    int32_t bitrate = mCumulativeBytes * 8 / timeDiff;
+    source->notifyPktInfo(bitrate, nowUs, true /* isRegular */);
 
     source->byeReceived();
 
@@ -1034,11 +1115,14 @@ sp<ARTPSource> ARTPConnection::findSource(StreamInfo *info, uint32_t srcId) {
                 srcId, info->mSessionDesc, info->mIndex, info->mNotifyMsg);
 
         if (mFlags & kViLTEConnection) {
+            setStaticJitterTimeMs(50);
             source->setPeriodicFIR(false);
         }
 
         source->setSelfID(mSelfID);
-        source->setJbTime(mJbTimeMs > 0 ? mJbTimeMs : 300);
+        source->setStaticJitterTimeMs(mStaticJitterTimeMs);
+        sp<AMessage> timer = new AMessage(kWhatAlarmStream, this);
+        source->setJbTimer(timer);
         info->mSources.add(srcId, source);
     } else {
         source = info->mSources.valueAt(index);
@@ -1058,8 +1142,8 @@ void ARTPConnection::setSelfID(const uint32_t selfID) {
     mSelfID = selfID;
 }
 
-void ARTPConnection::setJbTime(const uint32_t jbTimeMs) {
-    mJbTimeMs = jbTimeMs;
+void ARTPConnection::setStaticJitterTimeMs(const uint32_t jbTimeMs) {
+    mStaticJitterTimeMs = jbTimeMs;
 }
 
 void ARTPConnection::setTargetBitrate(int32_t targetBitrate) {
@@ -1070,6 +1154,28 @@ void ARTPConnection::checkRxBitrate(int64_t nowUs) {
     if (mLastBitrateReportTimeUs <= 0) {
         mCumulativeBytes = 0;
         mLastBitrateReportTimeUs = nowUs;
+    }
+    else if (mLastEarlyNotifyTimeUs + 100000ll <= nowUs) {
+        int32_t timeDiff = (nowUs - mLastBitrateReportTimeUs) / 1000000ll;
+        int32_t bitrate = mCumulativeBytes * 8 / timeDiff;
+        mLastEarlyNotifyTimeUs = nowUs;
+
+        List<StreamInfo>::iterator it = mStreams.begin();
+        while (it != mStreams.end()) {
+            StreamInfo *s = &*it;
+            if (s->mIsInjected) {
+                ++it;
+                continue;
+            }
+            for (size_t i = 0; i < s->mSources.size(); ++i) {
+                sp<ARTPSource> source = s->mSources.valueAt(i);
+                if (source->isNeedToEarlyNotify()) {
+                    source->notifyPktInfo(bitrate, nowUs, false /* isRegular */);
+                    mLastEarlyNotifyTimeUs = nowUs + (1000000ll * 3600 * 24); // after 1 day
+                }
+            }
+            ++it;
+        }
     }
     else if (mLastBitrateReportTimeUs + 1000000ll <= nowUs) {
         int32_t timeDiff = (nowUs - mLastBitrateReportTimeUs) / 1000000ll;
@@ -1093,31 +1199,15 @@ void ARTPConnection::checkRxBitrate(int64_t nowUs) {
             }
 
             buffer->setRange(0, 0);
-
             for (size_t i = 0; i < s->mSources.size(); ++i) {
                 sp<ARTPSource> source = s->mSources.valueAt(i);
-                source->notifyPktInfo(bitrate, nowUs);
-                source->addTMMBR(buffer, mTargetBitrate);
-            }
-            if (buffer->size() > 0) {
-                ALOGV("Sending TMMBR...");
-
-                ssize_t n = send(s, buffer);
-
-                if (n <= 0) {
-                    ALOGW("failed to send RTCP TMMBR (%s).",
-                         n == 0 ? "connection gone" : strerror(errno));
-
-                    it = mStreams.erase(it);
-                    continue;
-                }
-
-                CHECK_EQ(n, (ssize_t)buffer->size());
+                source->notifyPktInfo(bitrate, nowUs, true /* isRegular */);
             }
             ++it;
         }
         mCumulativeBytes = 0;
         mLastBitrateReportTimeUs = nowUs;
+        mLastEarlyNotifyTimeUs = nowUs;
     }
 }
 void ARTPConnection::onInjectPacket(const sp<AMessage> &msg) {

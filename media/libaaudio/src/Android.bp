@@ -1,3 +1,12 @@
+package {
+    // See: http://go/android-license-faq
+    // A large-scale-change added 'default_applicable_licenses' to import
+    // all of the 'license_kinds' from "frameworks_av_license"
+    // to get the below license kinds:
+    //   SPDX-license-identifier-Apache-2.0
+    default_applicable_licenses: ["frameworks_av_license"],
+}
+
 cc_library {
     name: "libaaudio",
 
@@ -43,6 +52,7 @@ cc_library {
         "libcutils",
         "libutils",
         "libbinder",
+        "libpermission",
     ],
 
     sanitize: {
@@ -76,6 +86,10 @@ cc_library {
     ],
     export_header_lib_headers: ["libaaudio_headers"],
 
+    export_shared_lib_headers: [
+        "framework-permission-aidl-cpp",
+    ],
+
     shared_libs: [
         "libaudioclient",
         "libaudioutils",
@@ -86,7 +100,9 @@ cc_library {
         "libcutils",
         "libutils",
         "libbinder",
+        "framework-permission-aidl-cpp",
         "aaudio-aidl-cpp",
+        "libaudioclient_aidl_conversion",
     ],
 
     cflags: [
@@ -130,9 +146,11 @@ cc_library {
         "flowgraph/SinkFloat.cpp",
         "flowgraph/SinkI16.cpp",
         "flowgraph/SinkI24.cpp",
+        "flowgraph/SinkI32.cpp",
         "flowgraph/SourceFloat.cpp",
         "flowgraph/SourceI16.cpp",
         "flowgraph/SourceI24.cpp",
+        "flowgraph/SourceI32.cpp",
     ],
     sanitize: {
         integer_overflow: true,
@@ -156,6 +174,7 @@ aidl_interface {
     imports: [
         "audio_common-aidl",
         "shared-file-region-aidl",
+        "framework-permission-aidl"
     ],
     backend:
     {

@@ -107,6 +107,9 @@ class DeviceHalHidl : public DeviceHalInterface, public ConversionHelperHidl
     // Fills the list of supported attributes for a given audio port.
     virtual status_t getAudioPort(struct audio_port *port);
 
+    // Fills the list of supported attributes for a given audio port.
+    virtual status_t getAudioPort(struct audio_port_v7 *port);
+
     // Set audio port configuration.
     virtual status_t setAudioPortConfig(const struct audio_port_config *config);
 
@@ -116,7 +119,7 @@ class DeviceHalHidl : public DeviceHalInterface, public ConversionHelperHidl
     status_t addDeviceEffect(audio_port_handle_t device, sp<EffectHalInterface> effect) override;
     status_t removeDeviceEffect(audio_port_handle_t device, sp<EffectHalInterface> effect) override;
 
-    virtual status_t dump(int fd);
+    status_t dump(int fd, const Vector<String16>& args) override;
 
   private:
     friend class DevicesFactoryHalHidl;
@@ -128,6 +131,8 @@ class DeviceHalHidl : public DeviceHalInterface, public ConversionHelperHidl
 
     // The destructor automatically closes the device.
     virtual ~DeviceHalHidl();
+
+    template <typename HalPort> status_t getAudioPortImpl(HalPort *port);
 };
 
 } // namespace CPP_VERSION

@@ -1,8 +1,11 @@
 // Unit tests for libmediatranscoder.
-
-filegroup {
-    name: "test_assets",
-    srcs: ["assets/*"],
+package {
+    // See: http://go/android-license-faq
+    // A large-scale-change added 'default_applicable_licenses' to import
+    // all of the 'license_kinds' from "frameworks_av_license"
+    // to get the below license kinds:
+    //   SPDX-license-identifier-Apache-2.0
+    default_applicable_licenses: ["frameworks_av_license"],
 }
 
 cc_defaults {
@@ -13,11 +16,16 @@ cc_defaults {
         "libmedia_headers",
     ],
 
+    static_libs: [
+        "libmediatranscoder",
+    ],
     shared_libs: [
         "libbase",
+        "libbinder_ndk",
+        "libcrypto",
         "libcutils",
         "libmediandk",
-        "libmediatranscoder_asan",
+        "libnativewindow",
         "libutils",
     ],
 
@@ -32,7 +40,6 @@ cc_defaults {
             "signed-integer-overflow",
         ],
         cfi: true,
-        address: true,
     },
 
     data: [":test_assets"],
@@ -59,7 +66,6 @@ cc_test {
     name: "MediaTrackTranscoderTests",
     defaults: ["testdefaults"],
     srcs: ["MediaTrackTranscoderTests.cpp"],
-    shared_libs: ["libbinder_ndk"],
 }
 
 // VideoTrackTranscoder unit test
@@ -74,7 +80,6 @@ cc_test {
     name: "PassthroughTrackTranscoderTests",
     defaults: ["testdefaults"],
     srcs: ["PassthroughTrackTranscoderTests.cpp"],
-    shared_libs: ["libcrypto"],
 }
 
 // MediaSampleWriter unit test
@@ -84,10 +89,16 @@ cc_test {
     srcs: ["MediaSampleWriterTests.cpp"],
 }
 
+// HDR Transcode unit test
+cc_test {
+    name: "HdrTranscodeTests",
+    defaults: ["testdefaults"],
+    srcs: ["HdrTranscodeTests.cpp"],
+}
+
 // MediaTranscoder unit test
 cc_test {
     name: "MediaTranscoderTests",
     defaults: ["testdefaults"],
     srcs: ["MediaTranscoderTests.cpp"],
-    shared_libs: ["libbinder_ndk"],
 }

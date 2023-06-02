@@ -25,14 +25,6 @@
 #include "ResourceObserverService.h"
 #include "ResourceManagerServiceTestUtils.h"
 
-namespace aidl {
-namespace android {
-namespace media {
-bool operator==(const MediaObservableParcel& lhs, const MediaObservableParcel& rhs) {
-    return lhs.type == rhs.type && lhs.value == rhs.value;
-}
-}}} // namespace ::aidl::android::media
-
 namespace android {
 
 using ::aidl::android::media::BnResourceObserver;
@@ -189,6 +181,11 @@ protected:
 TEST_F(ResourceObserverServiceTest, testRegisterObserver) {
     std::vector<MediaObservableFilter> filters1;
     Status status;
+
+    // Register with null observer should fail.
+    status = mObserverService->registerObserver(nullptr, filters1);
+    EXPECT_FALSE(status.isOk());
+    EXPECT_EQ(status.getServiceSpecificError(), BAD_VALUE);
 
     // Register with empty observables should fail.
     status = mObserverService->registerObserver(mTestObserver1, filters1);

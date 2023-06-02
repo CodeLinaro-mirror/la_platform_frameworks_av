@@ -22,6 +22,7 @@
 #include <gtest/gtest.h>
 
 #include <media/AudioSystem.h>
+#include <media/TypeConverter.h>
 #include <system/audio.h>
 #include <utils/Log.h>
 
@@ -34,7 +35,7 @@ TEST(AudioHealthTest, AttachedDeviceFound) {
     unsigned int numPorts;
     unsigned int generation1;
     unsigned int generation;
-    struct audio_port *audioPorts = NULL;
+    struct audio_port_v7 *audioPorts = nullptr;
     int attempts = 10;
     do {
         if (attempts-- < 0) {
@@ -43,13 +44,14 @@ TEST(AudioHealthTest, AttachedDeviceFound) {
         }
         numPorts = 0;
         ASSERT_EQ(NO_ERROR, AudioSystem::listAudioPorts(
-                AUDIO_PORT_ROLE_NONE, AUDIO_PORT_TYPE_DEVICE, &numPorts, NULL, &generation1));
+                AUDIO_PORT_ROLE_NONE, AUDIO_PORT_TYPE_DEVICE, &numPorts, nullptr, &generation1));
         if (numPorts == 0) {
             free(audioPorts);
             GTEST_FAIL() << "Number of audio ports should not be zero";
         }
 
-        audioPorts = (struct audio_port *)realloc(audioPorts, numPorts * sizeof(struct audio_port));
+        audioPorts = (struct audio_port_v7 *)realloc(
+                audioPorts, numPorts * sizeof(struct audio_port_v7));
         status_t status = AudioSystem::listAudioPorts(
                 AUDIO_PORT_ROLE_NONE, AUDIO_PORT_TYPE_DEVICE, &numPorts, audioPorts, &generation);
         if (status != NO_ERROR) {
@@ -69,10 +71,18 @@ TEST(AudioHealthTest, AttachedDeviceFound) {
     ASSERT_NE("AudioPolicyConfig::setDefault", manager.getConfig().getSource());
 
     for (auto desc : manager.getConfig().getInputDevices()) {
-        ASSERT_NE(attachedDevices.end(), attachedDevices.find(desc->type()));
+        if (attachedDevices.find(desc->type()) == attachedDevices.end()) {
+            std::string deviceType;
+            (void)DeviceConverter::toString(desc->type(), deviceType);
+            ADD_FAILURE() << "Input device \"" << deviceType << "\" not found";
+        }
     }
     for (auto desc : manager.getConfig().getOutputDevices()) {
-        ASSERT_NE(attachedDevices.end(), attachedDevices.find(desc->type()));
+        if (attachedDevices.find(desc->type()) == attachedDevices.end()) {
+            std::string deviceType;
+            (void)DeviceConverter::toString(desc->type(), deviceType);
+            ADD_FAILURE() << "Output device \"" << deviceType << "\" not found";
+        }
     }
 }
 

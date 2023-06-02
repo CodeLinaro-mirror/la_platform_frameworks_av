@@ -36,8 +36,8 @@ public:
      * Returns true on success and false on failure. This call will fail is a session identified
      * by <clientId, sessionId> already exists.
      */
-    virtual bool submit(ClientIdType clientId, SessionIdType sessionId, uid_t uid,
-                        const TranscodingRequestParcel& request,
+    virtual bool submit(ClientIdType clientId, SessionIdType sessionId, uid_t callingUid,
+                        uid_t clientUid, const TranscodingRequestParcel& request,
                         const std::weak_ptr<ITranscodingClientCallback>& clientCallback) = 0;
 
     /**
@@ -59,6 +59,29 @@ public:
      */
     virtual bool getSession(ClientIdType clientId, SessionIdType sessionId,
                             TranscodingRequestParcel* request) = 0;
+
+    /**
+     * Add an additional client uid requesting the session identified by <clientId, sessionId>.
+     *
+     * Returns false if the session doesn't exist, or the client is already requesting the
+     * session. Returns true otherwise.
+     */
+    virtual bool addClientUid(ClientIdType clientId, SessionIdType sessionId, uid_t clientUid);
+
+    /**
+     * Retrieves the (unsorted) list of all clients requesting the session identified by
+     * <clientId, sessionId>.
+     *
+     * Note that if a session was submitted with offline priority (
+     * TranscodingSessionPriority::kUnspecified), it initially will not be considered requested
+     * by any particular client, because the client could go away any time after the submission.
+     * However, additional uids could be added via addClientUid() after the submission, which
+     * essentially make the request a real-time request instead of an offline request.
+     *
+     * Returns false if the session doesn't exist. Returns true otherwise.
+     */
+    virtual bool getClientUids(ClientIdType clientId, SessionIdType sessionId,
+                               std::vector<int32_t>* out_clientUids);
 
 protected:
     virtual ~ControllerClientInterface() = default;

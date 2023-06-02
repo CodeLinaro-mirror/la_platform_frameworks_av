@@ -28,7 +28,8 @@ public:
     explicit TrackPlayerBase();
     virtual ~TrackPlayerBase();
 
-            void init(AudioTrack* pat, player_type_t playerType, audio_usage_t usage);
+            void init(AudioTrack* pat, player_type_t playerType, audio_usage_t usage,
+                    audio_session_t sessionId);
     virtual void destroy();
 
     //IPlayer implementation
@@ -53,8 +54,20 @@ private:
             void doDestroy();
             status_t doSetVolume();
 
+            class SelfAudioDeviceCallback : public AudioSystem::AudioDeviceCallback {
+            public:
+                SelfAudioDeviceCallback(PlayerBase& self);
+                virtual void onAudioDeviceUpdate(audio_io_handle_t audioIo,
+                                                         audio_port_handle_t deviceId);
+            private:
+                virtual ~SelfAudioDeviceCallback();
+                PlayerBase& mSelf;
+            };
+
     // volume coming from the player volume API
     float mPlayerVolumeL, mPlayerVolumeR;
+
+   sp<SelfAudioDeviceCallback> mSelfAudioDeviceCallback;
 };
 
 } // namespace android

@@ -1,5 +1,14 @@
 // Build the unit tests for libaudioprocessing
 
+package {
+    // See: http://go/android-license-faq
+    // A large-scale-change added 'default_applicable_licenses' to import
+    // all of the 'license_kinds' from "frameworks_av_license"
+    // to get the below license kinds:
+    //   SPDX-license-identifier-Apache-2.0
+    default_applicable_licenses: ["frameworks_av_license"],
+}
+
 cc_defaults {
     name: "libaudioprocessing_test_defaults",
 
@@ -67,6 +76,7 @@ cc_binary {
 //
 cc_binary {
     name: "mixerops_objdump",
+    header_libs: ["libaudioutils_headers"],
     srcs: ["mixerops_objdump.cpp"],
 }
 
@@ -75,6 +85,16 @@ cc_binary {
 //
 cc_benchmark {
     name: "mixerops_benchmark",
+    header_libs: ["libaudioutils_headers"],
     srcs: ["mixerops_benchmark.cpp"],
     static_libs: ["libgoogle-benchmark"],
+}
+
+//
+// mixerops unit test
+//
+cc_test {
+    name: "mixerops_tests",
+    defaults: ["libaudioprocessing_test_defaults"],
+    srcs: ["mixerops_tests.cpp"],
 }

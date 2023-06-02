@@ -19,7 +19,7 @@
 
 #include <android/native_window.h>
 #include <media/MediaTrackTranscoder.h>
-#include <media/NdkMediaCodec.h>
+#include <media/NdkMediaCodecPlatform.h>
 #include <media/NdkMediaFormat.h>
 
 #include <condition_variable>
@@ -38,12 +38,14 @@ class VideoTrackTranscoder : public std::enable_shared_from_this<VideoTrackTrans
                              public MediaTrackTranscoder {
 public:
     static std::shared_ptr<VideoTrackTranscoder> create(
-            const std::weak_ptr<MediaTrackTranscoderCallback>& transcoderCallback);
+            const std::weak_ptr<MediaTrackTranscoderCallback>& transcoderCallback,
+            pid_t pid = AMEDIACODEC_CALLING_PID, uid_t uid = AMEDIACODEC_CALLING_UID);
 
     virtual ~VideoTrackTranscoder() override;
 
 private:
     friend struct AsyncCodecCallbackDispatch;
+    friend class VideoTrackTranscoderTests;
 
     // Minimal blocking queue used as a message queue by VideoTrackTranscoder.
     template <typename T>
@@ -61,11 +63,12 @@ private:
     };
     class CodecWrapper;
 
-    VideoTrackTranscoder(const std::weak_ptr<MediaTrackTranscoderCallback>& transcoderCallback)
-          : MediaTrackTranscoder(transcoderCallback){};
+    VideoTrackTranscoder(const std::weak_ptr<MediaTrackTranscoderCallback>& transcoderCallback,
+                         pid_t pid, uid_t uid)
+          : MediaTrackTranscoder(transcoderCallback), mPid(pid), mUid(uid){};
 
     // MediaTrackTranscoder
-    media_status_t runTranscodeLoop() override;
+    media_status_t runTranscodeLoop(bool* stopped) override;
     void abortTranscodeLoop() override;
     media_status_t configureDestinationFormat(
             const std::shared_ptr<AMediaFormat>& destinationFormat) override;
@@ -81,20 +84,25 @@ private:
     // Dequeues an encoded buffer from the encoder and adds it to the output queue.
     void dequeueOutputSample(int32_t bufferIndex, AMediaCodecBufferInfo bufferInfo);
 
-    // Updates the video track's actual format based on encoder output format.
-    void updateTrackFormat(AMediaFormat* outputFormat);
+    // Updates the video track's actual format based on encoder and decoder output format.
+    void updateTrackFormat(AMediaFormat* outputFormat, bool fromDecoder);
 
     AMediaCodec* mDecoder = nullptr;
     std::shared_ptr<CodecWrapper> mEncoder;
     ANativeWindow* mSurface = nullptr;
     bool mEosFromSource = false;
     bool mEosFromEncoder = false;
-    bool mStopRequested = false;
+    bool mLastSampleWasSync = false;
     media_status_t mStatus = AMEDIA_OK;
     MediaSampleInfo mSampleInfo;
     BlockingQueue<std::function<void()>> mCodecMessageQueue;
     std::shared_ptr<AMediaFormat> mDestinationFormat;
     std::shared_ptr<AMediaFormat> mActualOutputFormat;
+    pid_t mPid;
+    uid_t mUid;
+    uint64_t mInputFrameCount = 0;
+    uint64_t mOutputFrameCount = 0;
+    int32_t mConfiguredBitrate = 0;
 };
 
 }  // namespace android

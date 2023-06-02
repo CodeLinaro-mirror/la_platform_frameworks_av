@@ -100,6 +100,9 @@ class DeviceHalLocal : public DeviceHalInterface
     // Fills the list of supported attributes for a given audio port.
     virtual status_t getAudioPort(struct audio_port *port);
 
+    // Fills the list of supported attributes for a given audio port.
+    virtual status_t getAudioPort(struct audio_port_v7 *port);
+
     // Set audio port configuration.
     virtual status_t setAudioPortConfig(const struct audio_port_config *config);
 
@@ -109,10 +112,12 @@ class DeviceHalLocal : public DeviceHalInterface
     status_t addDeviceEffect(audio_port_handle_t device, sp<EffectHalInterface> effect) override;
     status_t removeDeviceEffect(audio_port_handle_t device, sp<EffectHalInterface> effect) override;
 
-    virtual status_t dump(int fd);
+    status_t dump(int fd, const Vector<String16>& args) override;
 
     void closeOutputStream(struct audio_stream_out *stream_out);
     void closeInputStream(struct audio_stream_in *stream_in);
+
+    uint32_t version() const { return mDev->common.version; }
 
   private:
     audio_hw_device_t *mDev;
@@ -124,8 +129,6 @@ class DeviceHalLocal : public DeviceHalInterface
 
     // The destructor automatically closes the device.
     virtual ~DeviceHalLocal();
-
-    uint32_t version() const { return mDev->common.version; }
 };
 
 } // namespace CPP_VERSION

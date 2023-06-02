@@ -22,6 +22,7 @@
 
 #include <utils/List.h>
 #include <utils/RefBase.h>
+#include <utils/String8.h>
 
 namespace android {
 
@@ -47,11 +48,17 @@ private:
     uint32_t mNextExpectedSeqNo;
     bool mAccessUnitDamaged;
     bool mFirstIFrameProvided;
+    int32_t mLastCvo;
     uint64_t mLastIFrameProvidedAtMs;
+    int64_t mLastRtpTimeJitterDataUs;
+    int32_t mWidth;
+    int32_t mHeight;
     List<sp<ABuffer> > mNALUnits;
 
     int32_t addNack(const sp<ARTPSource> &source);
+    void checkSpsUpdated(const sp<ABuffer> &buffer);
     void checkIFrameProvided(const sp<ABuffer> &buffer);
+    bool dropFramesUntilIframe(const sp<ABuffer> &buffer);
     AssemblyStatus addNALUnit(const sp<ARTPSource> &source);
     void addSingleNALUnit(const sp<ABuffer> &buffer);
     AssemblyStatus addFragmentedNALUnit(List<sp<ABuffer> > *queue);
@@ -59,12 +66,8 @@ private:
 
     void submitAccessUnit();
 
-    int32_t pickProperSeq(const Queue *q, uint32_t jit, int64_t play);
-    bool recycleUnit(uint32_t start, uint32_t end, uint32_t connected,
-            size_t avail, float goodRatio);
+    int32_t pickStartSeq(const Queue *q, uint32_t first, int64_t play, int64_t jit);
     int32_t deleteUnitUnderSeq(Queue *q, uint32_t seq);
-    void printNowTimeUs(int64_t start, int64_t now, int64_t play);
-    void printRTPTime(uint32_t rtp, int64_t play, uint32_t exp, bool isExp);
 
     DISALLOW_EVIL_CONSTRUCTORS(AAVCAssembler);
 };

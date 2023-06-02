@@ -22,13 +22,17 @@
 
 #include <aaudio/AAudio.h>
 #include <audio_utils/primitives.h>
+#include <media/AidlConversion.h>
 #include <media/AudioRecord.h>
 #include <utils/String16.h>
 
+#include "core/AudioGlobal.h"
 #include "legacy/AudioStreamLegacy.h"
 #include "legacy/AudioStreamRecord.h"
 #include "utility/AudioClock.h"
 #include "utility/FixedBlockWriter.h"
+
+using android::content::AttributionSourceState;
 
 using namespace android;
 using namespace aaudio;
@@ -61,11 +65,8 @@ aaudio_result_t AudioStreamRecord::open(const AudioStreamBuilder& builder)
     const audio_session_t sessionId = AAudioConvert_aaudioToAndroidSessionId(requestedSessionId);
 
     // TODO Support UNSPECIFIED in AudioRecord. For now, use stereo if unspecified.
-    int32_t samplesPerFrame = (getSamplesPerFrame() == AAUDIO_UNSPECIFIED)
-                              ? 2 : getSamplesPerFrame();
-    audio_channel_mask_t channelMask = samplesPerFrame <= 2 ?
-                               audio_channel_in_mask_from_count(samplesPerFrame) :
-                               audio_channel_mask_for_index_assignment_from_count(samplesPerFrame);
+    audio_channel_mask_t channelMask =
+            AAudio_getChannelMaskForOpen(getChannelMask(), getSamplesPerFrame(), true /*isInput*/);
 
     size_t frameCount = (builder.getBufferCapacity() == AAUDIO_UNSPECIFIED) ? 0
                         : builder.getBufferCapacity();
@@ -89,8 +90,9 @@ aaudio_result_t AudioStreamRecord::open(const AudioStreamBuilder& builder)
             break;
     }
 
+    const audio_format_t requestedFormat = getFormat();
     // Preserve behavior of API 26
-    if (getFormat() == AUDIO_FORMAT_DEFAULT) {
+    if (requestedFormat == AUDIO_FORMAT_DEFAULT) {
         setFormat(AUDIO_FORMAT_PCM_FLOAT);
     }
 
@@ -110,7 +112,7 @@ aaudio_result_t AudioStreamRecord::open(const AudioStreamBuilder& builder)
     constexpr int32_t kMostLikelySampleRateForFast = 48000;
     if (getFormat() == AUDIO_FORMAT_PCM_FLOAT
             && perfMode == AAUDIO_PERFORMANCE_MODE_LOW_LATENCY
-            && (samplesPerFrame <= 2) // FAST only for mono and stereo
+            && (audio_channel_count_from_in_mask(channelMask) <= 2) // FAST only for mono and stereo
             && (getSampleRate() == kMostLikelySampleRateForFast
                 || getSampleRate() == AAUDIO_UNSPECIFIED)) {
         setDeviceFormat(AUDIO_FORMAT_PCM_16_BIT);
@@ -152,13 +154,21 @@ aaudio_result_t AudioStreamRecord::open(const AudioStreamBuilder& builder)
             .tags = ""
     };
 
+    // TODO b/182392769: use attribution source util
+    AttributionSourceState attributionSource;
+    attributionSource.uid = VALUE_OR_FATAL(legacy2aidl_uid_t_int32_t(getuid()));
+    attributionSource.pid = VALUE_OR_FATAL(legacy2aidl_pid_t_int32_t(getpid()));
+    attributionSource.packageName = builder.getOpPackageName();
+    attributionSource.attributionTag = builder.getAttributionTag();
+    attributionSource.token = sp<BBinder>::make();
+
     // ----------- open the AudioRecord ---------------------
     // Might retry, but never more than once.
     for (int i = 0; i < 2; i ++) {
         const audio_format_t requestedInternalFormat = getDeviceFormat();
 
         mAudioRecord = new AudioRecord(
-                mOpPackageName // const String16& opPackageName TODO does not compile
+                attributionSource
         );
         mAudioRecord->set(
                 AUDIO_SOURCE_DEFAULT, // ignored because we pass attributes below
@@ -207,9 +217,17 @@ aaudio_result_t AudioStreamRecord::open(const AudioStreamBuilder& builder)
 
     mMetricsId = std::string(AMEDIAMETRICS_KEY_PREFIX_AUDIO_RECORD)
             + std::to_string(mAudioRecord->getPortId());
+    android::mediametrics::LogItem(mMetricsId)
+            .set(AMEDIAMETRICS_PROP_PERFORMANCEMODE,
+                 AudioGlobal_convertPerformanceModeToText(builder.getPerformanceMode()))
+            .set(AMEDIAMETRICS_PROP_SHARINGMODE,
+                 AudioGlobal_convertSharingModeToText(builder.getSharingMode()))
+            .set(AMEDIAMETRICS_PROP_ENCODINGCLIENT, toString(requestedFormat).c_str()).record();
 
     // Get the actual values from the AudioRecord.
-    setSamplesPerFrame(mAudioRecord->channelCount());
+    setChannelMask(AAudioConvert_androidToAAudioChannelMask(
+            mAudioRecord->channelMask(), true /*isInput*/,
+            AAudio_isChannelIndexMask(getChannelMask())));
     setSampleRate(mAudioRecord->getSampleRate());
     setBufferCapacity(getBufferCapacityFromDevice());
     setFramesPerBurst(getFramesPerBurstFromDevice());
@@ -298,11 +316,19 @@ aaudio_result_t AudioStreamRecord::release_l() {
 }
 
 void AudioStreamRecord::close_l() {
+    // The callbacks are normally joined in the AudioRecord destructor.
+    // But if another object has a reference to the AudioRecord then
+    // it will not get deleted here.
+    // So we should join callbacks explicitly before returning.
+    // Unlock around the join to avoid deadlocks if the callback tries to lock.
+    // This can happen if the callback returns AAUDIO_CALLBACK_RESULT_STOP
+    mStreamLock.unlock();
+    mAudioRecord->stopAndJoinCallbacks();
+    mStreamLock.lock();
+
     mAudioRecord.clear();
-    // Do not close mFixedBlockWriter because a data callback
-    // thread might still be running if someone else has a reference
-    // to mAudioRecord.
-    // It has a unique_ptr to its buffer so it will clean up by itself.
+    // Do not close mFixedBlockReader. It has a unique_ptr to its buffer
+    // so it will clean up by itself.
     AudioStream::close_l();
 }
 

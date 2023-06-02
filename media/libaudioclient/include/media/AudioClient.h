@@ -19,19 +19,17 @@
 #define ANDROID_AUDIO_CLIENT_H
 
 #include <sys/types.h>
-#include <utils/String16.h>
+#include <android/content/AttributionSourceState.h>
 
 namespace android {
 
 class AudioClient {
  public:
     AudioClient() :
-        clientUid(-1), clientPid(-1), clientTid(-1), packageName("") {}
+        clientTid(-1) {}
 
-    uid_t clientUid;
-    pid_t clientPid;
     pid_t clientTid;
-    String16 packageName;
+    android::content::AttributionSourceState attributionSource;
 };
 
 }; // namespace android

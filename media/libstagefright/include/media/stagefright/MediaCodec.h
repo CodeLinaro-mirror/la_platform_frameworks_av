@@ -50,6 +50,7 @@ struct AString;
 struct BatteryChecker;
 class BufferChannelBase;
 struct CodecBase;
+struct CodecParameterDescriptor;
 class IBatteryStats;
 struct ICrypto;
 class MediaCodecBuffer;
@@ -57,6 +58,7 @@ class IMemory;
 struct PersistentSurface;
 class SoftwareRenderer;
 class Surface;
+class PlaybackDurationAccumulator;
 namespace hardware {
 namespace cas {
 namespace native {
@@ -103,6 +105,10 @@ struct MediaCodec : public AHandler {
             const sp<ALooper> &looper, const AString &mime, bool encoder, status_t *err = NULL,
             pid_t pid = kNoPid, uid_t uid = kNoUid);
 
+    static sp<MediaCodec> CreateByType(
+            const sp<ALooper> &looper, const AString &mime, bool encoder, status_t *err,
+            pid_t pid, uid_t uid, sp<AMessage> format);
+
     static sp<MediaCodec> CreateByComponentName(
             const sp<ALooper> &looper, const AString &name, status_t *err = NULL,
             pid_t pid = kNoPid, uid_t uid = kNoUid);
@@ -127,6 +133,8 @@ struct MediaCodec : public AHandler {
     status_t setCallback(const sp<AMessage> &callback);
 
     status_t setOnFrameRenderedNotification(const sp<AMessage> &notify);
+
+    status_t setOnFirstTunnelFrameReadyNotification(const sp<AMessage> &notify);
 
     status_t createInputSurface(sp<IGraphicBufferProducer>* bufferProducer);
 
@@ -246,6 +254,11 @@ struct MediaCodec : public AHandler {
 
     status_t setParameters(const sp<AMessage> &params);
 
+    status_t querySupportedVendorParameters(std::vector<std::string> *names);
+    status_t describeParameter(const std::string &name, CodecParameterDescriptor *desc);
+    status_t subscribeToVendorParameters(const std::vector<std::string> &names);
+    status_t unsubscribeFromVendorParameters(const std::vector<std::string> &names);
+
     // Create a MediaCodec notification message from a list of rendered or dropped render infos
     // by adding rendered frame information to a base notification message. Returns the number
     // of frames that were rendered.
@@ -361,6 +374,30 @@ private:
         bool mOwnedByClient;
     };
 
+    // This type is used to track the tunnel mode video peek state machine:
+    //
+    // DisabledNoBuffer -> EnabledNoBuffer  when tunnel-peek = true
+    // DisabledQueued   -> EnabledQueued    when tunnel-peek = true
+    // DisabledNoBuffer -> DisabledQueued   when first frame queued
+    // EnabledNoBuffer  -> DisabledNoBuffer when tunnel-peek = false
+    // EnabledQueued    -> DisabledQueued   when tunnel-peek = false
+    // EnabledNoBuffer  -> EnabledQueued    when first frame queued
+    // DisabledNoBuffer -> BufferDecoded    when kWhatFirstTunnelFrameReady
+    // DisabledQueued   -> BufferDecoded    when kWhatFirstTunnelFrameReady
+    // EnabledNoBuffer  -> BufferDecoded    when kWhatFirstTunnelFrameReady
+    // EnabledQueued    -> BufferDecoded    when kWhatFirstTunnelFrameReady
+    // BufferDecoded    -> BufferRendered   when kWhatFrameRendered
+    // <all states>     -> EnabledNoBuffer  when flush
+    // <all states>     -> EnabledNoBuffer  when stop then configure then start
+    enum struct TunnelPeekState {
+        kDisabledNoBuffer,
+        kEnabledNoBuffer,
+        kDisabledQueued,
+        kEnabledQueued,
+        kBufferDecoded,
+        kBufferRendered,
+    };
+
     struct ResourceManagerServiceProxy;
 
     State mState;
@@ -376,6 +413,7 @@ private:
     std::string mLastReplyOrigin;
     std::vector<sp<AMessage>> mDeferredMessages;
     uint32_t mFlags;
+    int64_t mPresentationTimeUs = 0;
     status_t mStickyError;
     sp<Surface> mSurface;
     SoftwareRenderer *mSoftRenderer;
@@ -387,16 +425,21 @@ private:
     void flushMediametrics();
     void updateEphemeralMediametrics(mediametrics_handle_t item);
     void updateLowLatency(const sp<AMessage> &msg);
+    constexpr const char *asString(TunnelPeekState state, const char *default_string="?");
+    void updateTunnelPeek(const sp<AMessage> &msg);
+    void updatePlaybackDuration(const sp<AMessage> &msg);
 
     sp<AMessage> mOutputFormat;
     sp<AMessage> mInputFormat;
     sp<AMessage> mCallback;
     sp<AMessage> mOnFrameRenderedNotification;
     sp<AMessage> mAsyncReleaseCompleteNotification;
+    sp<AMessage> mOnFirstTunnelFrameReadyNotification;
 
     sp<ResourceManagerServiceProxy> mResourceManagerProxy;
 
     bool mIsVideo;
+    AString mLogSessionId;
     int32_t mVideoWidth;
     int32_t mVideoHeight;
     int32_t mRotationDegrees;
@@ -407,6 +450,17 @@ private:
 
     // configure parameter
     sp<AMessage> mConfigureMsg;
+
+    // rewrites the format description during configure() for encoding.
+    // format and flags as they exist within configure()
+    // the (possibly) updated format is returned in place.
+    status_t shapeMediaFormat(
+            const sp<AMessage> &format,
+            uint32_t flags);
+
+    // populate the format shaper library with information for this codec encoding
+    // for the indicated media type
+    status_t setupFormatShaper(AString mediaType);
 
     // Used only to synchronize asynchronous getBufferAndFormat
     // across all the other (synchronous) buffer state change
@@ -428,6 +482,7 @@ private:
     int32_t mTunneledInputWidth;
     int32_t mTunneledInputHeight;
     bool mTunneled;
+    TunnelPeekState mTunnelPeekState;
 
     sp<IDescrambler> mDescrambler;
 
@@ -440,6 +495,9 @@ private:
     bool mCpuBoostRequested;
 
     std::shared_ptr<BufferChannelBase> mBufferChannel;
+
+    PlaybackDurationAccumulator * mPlaybackDurationAccumulator;
+    bool mIsSurfaceToScreen;
 
     MediaCodec(
             const sp<ALooper> &looper, pid_t pid, uid_t uid,
@@ -528,6 +586,15 @@ private:
     std::deque<BufferFlightTiming_t> mBuffersInFlight;
     Mutex mLatencyLock;
     int64_t mLatencyUnknown;    // buffers for which we couldn't calculate latency
+
+    Mutex mOutputStatsLock;
+    int64_t mBytesEncoded = 0;
+    int64_t mEarliestEncodedPtsUs = INT64_MAX;
+    int64_t mLatestEncodedPtsUs = INT64_MIN;
+    int64_t mFramesEncoded = 0;
+    int64_t mBytesInput = 0;
+    int64_t mFramesInput = 0;
+
     int64_t mNumLowLatencyEnables;  // how many times low latency mode is enabled
     int64_t mNumLowLatencyDisables;  // how many times low latency mode is disabled
     bool mIsLowLatencyModeOn;  // is low latency mode on currently
@@ -543,8 +610,8 @@ private:
 
     sp<BatteryChecker> mBatteryChecker;
 
-    void statsBufferSent(int64_t presentationUs);
-    void statsBufferReceived(int64_t presentationUs);
+    void statsBufferSent(int64_t presentationUs, const sp<MediaCodecBuffer> &buffer);
+    void statsBufferReceived(int64_t presentationUs, const sp<MediaCodecBuffer> &buffer);
 
     enum {
         // the default shape of our latency histogram buckets

@@ -61,6 +61,12 @@ public:
         mCondition.notify_all();
     }
 
+    virtual void onTrackStopped(const MediaTrackTranscoder* transcoder __unused) override {
+        std::unique_lock lock(mMutex);
+        mFinished = true;
+        mCondition.notify_all();
+    }
+
     virtual void onTrackError(const MediaTrackTranscoder* transcoder __unused,
                               media_status_t status) override {
         std::unique_lock lock(mMutex);
@@ -159,6 +165,10 @@ public:
         mPtsDiff = mSamples[1].second.presentationTimeUs - mSamples[0].second.presentationTimeUs;
 
         return AMEDIA_OK;
+    }
+
+    media_status_t unselectTrack(int trackIndex __unused) override {
+        return AMEDIA_ERROR_UNSUPPORTED;
     }
 
     media_status_t setEnforceSequentialAccess(bool enforce __unused) override { return AMEDIA_OK; }

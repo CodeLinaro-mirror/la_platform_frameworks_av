@@ -27,14 +27,6 @@
 
 #include "ResourceObserverService.h"
 
-namespace aidl {
-namespace android {
-namespace media {
-bool operator<(const MediaObservableFilter& lhs, const MediaObservableFilter &rhs) {
-    return lhs.type < rhs.type || (lhs.type == rhs.type && lhs.eventFilter < rhs.eventFilter);
-}
-}}} // namespace ::aidl::android::media
-
 namespace android {
 
 using ::aidl::android::media::MediaResourceParcel;
@@ -173,6 +165,10 @@ Status ResourceObserverService::registerObserver(
         return Status::fromServiceSpecificError(PERMISSION_DENIED);
     }
 
+    if (in_observer == nullptr) {
+        return Status::fromServiceSpecificError(BAD_VALUE);
+    }
+
     ::ndk::SpAIBinder binder = in_observer->asBinder();
 
     {
@@ -226,6 +222,10 @@ Status ResourceObserverService::unregisterObserver(
                 AIBinder_getCallingPid(),
                 AIBinder_getCallingUid());
         return Status::fromServiceSpecificError(PERMISSION_DENIED);
+    }
+
+    if (in_observer == nullptr) {
+        return Status::fromServiceSpecificError(BAD_VALUE);
     }
 
     ::ndk::SpAIBinder binder = in_observer->asBinder();

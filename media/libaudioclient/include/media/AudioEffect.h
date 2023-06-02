@@ -21,9 +21,9 @@
 #include <sys/types.h>
 
 #include <media/IAudioFlinger.h>
-#include <media/IAudioPolicyService.h>
 #include <media/AudioSystem.h>
 #include <system/audio_effect.h>
+#include <android/content/AttributionSourceState.h>
 
 #include <utils/RefBase.h>
 #include <utils/Errors.h>
@@ -31,7 +31,6 @@
 
 #include "android/media/IEffect.h"
 #include "android/media/BnEffectClient.h"
-
 
 namespace android {
 
@@ -284,7 +283,8 @@ public:
         EVENT_CONTROL_STATUS_CHANGED = 0,
         EVENT_ENABLE_STATUS_CHANGED = 1,
         EVENT_PARAMETER_CHANGED = 2,
-        EVENT_ERROR = 3
+        EVENT_ERROR = 3,
+        EVENT_FRAMES_PROCESSED = 4,
     };
 
     /* Callback function notifying client application of a change in effect engine state or
@@ -338,9 +338,9 @@ public:
      *
      * Parameters:
      *
-     * opPackageName:      The package name used for app op checks.
+     * client:      Attribution source for app-op checks
      */
-    explicit AudioEffect(const String16& opPackageName);
+    explicit AudioEffect(const android::content::AttributionSourceState& client);
 
     /* Terminates the AudioEffect and unregisters it from AudioFlinger.
      * The effect engine is also destroyed if this AudioEffect was the last controlling
@@ -390,7 +390,8 @@ public:
                             audio_session_t sessionId = AUDIO_SESSION_OUTPUT_MIX,
                             audio_io_handle_t io = AUDIO_IO_HANDLE_NONE,
                             const AudioDeviceTypeAddr& device = {},
-                            bool probe = false);
+                            bool probe = false,
+                            bool notifyFramesProcessed = false);
     /*
      * Same as above but with type and uuid specified by character strings.
      */
@@ -402,7 +403,8 @@ public:
                             audio_session_t sessionId = AUDIO_SESSION_OUTPUT_MIX,
                             audio_io_handle_t io = AUDIO_IO_HANDLE_NONE,
                             const AudioDeviceTypeAddr& device = {},
-                            bool probe = false);
+                            bool probe = false,
+                            bool notifyFramesProcessed = false);
 
     /* Result of constructing the AudioEffect. This must be checked
      * before using any AudioEffect API.
@@ -532,7 +534,7 @@ public:
      static const uint32_t kMaxPreProcessing = 10;
 
 protected:
-     const String16          mOpPackageName;     // The package name used for app op checks.
+     android::content::AttributionSourceState mClientAttributionSource; // source for app op checks.
      bool                    mEnabled = false;   // enable state
      audio_session_t         mSessionId = AUDIO_SESSION_OUTPUT_MIX; // audio session ID
      int32_t                 mPriority = 0;      // priority for effect control
@@ -553,6 +555,7 @@ protected:
      virtual void commandExecuted(int32_t cmdCode,
                                   const std::vector<uint8_t>& cmdData,
                                   const std::vector<uint8_t>& replyData);
+     virtual void framesProcessed(int32_t frames);
 
 private:
 
@@ -588,6 +591,14 @@ private:
             }
             return binder::Status::ok();
         }
+        binder::Status framesProcessed(int32_t frames) override {
+            sp<AudioEffect> effect = mEffect.promote();
+            if (effect != 0) {
+                effect->framesProcessed(frames);
+            }
+            return binder::Status::ok();
+        }
+
 
         // IBinder::DeathRecipient
         virtual void binderDied(const wp<IBinder>& /*who*/) {
@@ -607,8 +618,6 @@ private:
     sp<EffectClient>        mIEffectClient;     // IEffectClient implementation
     sp<IMemory>             mCblkMemory;        // shared memory for deferred parameter setting
     effect_param_cblk_t*    mCblk = nullptr;    // control block for deferred parameter setting
-    pid_t                   mClientPid = (pid_t)-1;
-    uid_t                   mClientUid = (uid_t)-1;
 };
 
 

@@ -149,7 +149,8 @@ status_t CameraSource::isCameraAvailable(
     int32_t cameraId, const String16& clientName, uid_t clientUid, pid_t clientPid) {
 
     if (camera == 0) {
-        mCamera = Camera::connect(cameraId, clientName, clientUid, clientPid);
+        mCamera = Camera::connect(cameraId, clientName, clientUid, clientPid,
+                /*targetSdkVersion*/__ANDROID_API_FUTURE__);
         if (mCamera == 0) return -EBUSY;
         mCameraFlags &= ~FLAGS_HOT_CAMERA;
     } else {
@@ -658,7 +659,7 @@ status_t CameraSource::start(MetaData *meta) {
     mStartTimeUs = 0;
     mNumInputBuffers = 0;
     mEncoderFormat = HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED;
-    mEncoderDataSpace = HAL_DATASPACE_V0_BT709;
+    mEncoderDataSpace = mBufferDataSpace = HAL_DATASPACE_V0_BT709;
 
     if (meta) {
         int64_t startTimeUs;
@@ -678,6 +679,7 @@ status_t CameraSource::start(MetaData *meta) {
         }
         if (meta->findInt32(kKeyColorSpace, &mEncoderDataSpace)) {
             ALOGI("Using encoder data space: %#x", mEncoderDataSpace);
+            mBufferDataSpace = mEncoderDataSpace;
         }
     }
 
@@ -908,6 +910,11 @@ status_t CameraSource::read(
         (*buffer)->setObserver(this);
         (*buffer)->add_ref();
         (*buffer)->meta_data().setInt64(kKeyTime, frameTime);
+        if (mBufferDataSpace != mEncoderDataSpace) {
+            ALOGD("Data space updated to %x", mBufferDataSpace);
+            (*buffer)->meta_data().setInt32(kKeyColorSpace, mBufferDataSpace);
+            mEncoderDataSpace = mBufferDataSpace;
+        }
     }
     return OK;
 }
@@ -1039,6 +1046,7 @@ void CameraSource::processBufferQueueFrame(BufferItem& buffer) {
     // Find a available memory slot to store the buffer as VideoNativeMetadata.
     sp<IMemory> data = *mMemoryBases.begin();
     mMemoryBases.erase(mMemoryBases.begin());
+    mBufferDataSpace = buffer.mDataSpace;
 
     ssize_t offset;
     size_t size;

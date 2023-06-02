@@ -37,7 +37,8 @@ public:
                 const std::map<audio_patch_handle_t, PatchPanel::Patch>& patches,
                 int *enabled,
                 status_t *status,
-                bool probe);
+                bool probe,
+                bool notifyFramesProcessed);
     void createAudioPatch(audio_patch_handle_t handle, const PatchPanel::Patch& patch);
     void releaseAudioPatch(audio_patch_handle_t handle);
 
@@ -161,10 +162,16 @@ public:
     bool isOffload() const override { return false; }
     bool isOffloadOrDirect() const override { return false; }
     bool isOffloadOrMmap() const override { return false; }
+    bool isSpatializer() const override { return false; }
 
     uint32_t  sampleRate() const override { return 0; }
-    audio_channel_mask_t channelMask() const override { return AUDIO_CHANNEL_NONE; }
-    uint32_t channelCount() const override { return 0; }
+    audio_channel_mask_t inChannelMask(int id __unused) const override {
+        return AUDIO_CHANNEL_NONE;
+    }
+    uint32_t inChannelCount(int id __unused) const override { return 0; }
+    audio_channel_mask_t outChannelMask() const override { return AUDIO_CHANNEL_NONE; }
+    uint32_t outChannelCount() const override { return 0; }
+
     audio_channel_mask_t hapticChannelMask() const override { return AUDIO_CHANNEL_NONE; }
     size_t    frameCount() const override  { return 0; }
     uint32_t  latency() const override  { return 0; }
@@ -183,12 +190,16 @@ public:
     void checkSuspendOnEffectEnabled(const sp<EffectBase>& effect __unused,
                           bool enabled __unused, bool threadLocked __unused) override {}
     void resetVolume() override {}
-    uint32_t strategy() const override  { return 0; }
+    product_strategy_t strategy() const override  { return static_cast<product_strategy_t>(0); }
     int32_t activeTrackCnt() const override { return 0; }
     void onEffectEnable(const sp<EffectBase>& effect __unused) override {}
     void onEffectDisable(const sp<EffectBase>& effect __unused) override {}
 
     wp<EffectChain> chain() const override { return nullptr; }
+
+    bool isAudioPolicyReady() const override {
+        return mManager.audioFlinger().isAudioPolicyReady();
+    }
 
     int newEffectId() { return mManager.audioFlinger().nextUniqueId(AUDIO_UNIQUE_ID_USE_EFFECT); }
 

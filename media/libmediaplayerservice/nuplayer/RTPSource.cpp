@@ -45,8 +45,18 @@ NuPlayer::RTPSource::RTPSource(
       mRTPConn(new ARTPConnection(ARTPConnection::kViLTEConnection)),
       mEOSTimeoutAudio(0),
       mEOSTimeoutVideo(0),
-      mLastCVOUpdated(-1) {
-      ALOGD("RTPSource initialized with rtpParams=%s", rtpParams.string());
+      mFirstAccessUnit(true),
+      mAllTracksHaveTime(false),
+      mNTPAnchorUs(-1),
+      mMediaAnchorUs(-1),
+      mLastMediaTimeUs(-1),
+      mNumAccessUnitsReceived(0),
+      mLastCVOUpdated(-1),
+      mReceivedFirstRTCPPacket(false),
+      mReceivedFirstRTPPacket(false),
+      mPausing(false),
+      mPauseGeneration(0) {
+    ALOGD("RTPSource initialized with rtpParams=%s", rtpParams.string());
 }
 
 NuPlayer::RTPSource::~RTPSource() {
@@ -114,8 +124,16 @@ void NuPlayer::RTPSource::prepareAsync() {
         // index(i) should be started from 1. 0 is reserved for [root]
         mRTPConn->addStream(sockRtp, sockRtcp, desc, i + 1, notify, false);
         mRTPConn->setSelfID(info->mSelfID);
-        mRTPConn->setJbTime(
-                (info->mJbTimeMs <= 3000 && info->mJbTimeMs >= 40) ? info->mJbTimeMs : 300);
+        mRTPConn->setStaticJitterTimeMs(info->mJbTimeMs);
+
+        unsigned long PT;
+        AString formatDesc, formatParams;
+        // index(i) should be started from 1. 0 is reserved for [root]
+        desc->getFormatType(i + 1, &PT, &formatDesc, &formatParams);
+
+        int32_t clockRate, numChannels;
+        ASessionDescription::ParseFormatDesc(formatDesc.c_str(), &clockRate, &numChannels);
+        info->mTimeScale = clockRate;
 
         info->mRTPSocket = sockRtp;
         info->mRTCPSocket = sockRtcp;
@@ -136,10 +154,8 @@ void NuPlayer::RTPSource::prepareAsync() {
 
         if (info->mIsAudio) {
             mAudioTrack = source;
-            info->mTimeScale = 16000;
         } else {
             mVideoTrack = source;
-            info->mTimeScale = 90000;
         }
 
         info->mSource = source;
@@ -289,7 +305,7 @@ status_t NuPlayer::RTPSource::dequeueAccessUnit(
     if ((*accessUnit) != NULL && (*accessUnit)->meta()->findInt32("cvo", &cvo) &&
             cvo != mLastCVOUpdated) {
         sp<AMessage> msg = new AMessage();
-        msg->setInt32("payload-type", NuPlayer::RTPSource::RTP_CVO);
+        msg->setInt32("payload-type", ARTPSource::RTP_CVO);
         msg->setInt32("cvo", cvo);
 
         sp<AMessage> notify = dupNotify();
@@ -379,23 +395,13 @@ void NuPlayer::RTPSource::onMessageReceived(const sp<AMessage> &msg) {
                 CHECK(msg->findInt64("ntp-time", (int64_t *)&ntpTime));
 
                 onTimeUpdate(trackIndex, rtpTime, ntpTime);
-                break;
-            }
-
-            int32_t firstRTCP;
-            if (msg->findInt32("first-rtcp", &firstRTCP)) {
-                // There won't be an access unit here, it's just a notification
-                // that the data communication worked since we got the first
-                // rtcp packet.
-                ALOGV("first-rtcp");
-                break;
             }
 
             int32_t IMSRxNotice;
             if (msg->findInt32("rtcp-event", &IMSRxNotice)) {
-                int32_t payloadType, feedbackType;
+                int32_t payloadType = 0, feedbackType = 0;
                 CHECK(msg->findInt32("payload-type", &payloadType));
-                CHECK(msg->findInt32("feedback-type", &feedbackType));
+                msg->findInt32("feedback-type", &feedbackType);
 
                 sp<AMessage> notify = dupNotify();
                 notify->setInt32("what", kWhatIMSRxNotice);
@@ -670,7 +676,7 @@ status_t NuPlayer::RTPSource::setParameter(const String8 &key, const String8 &va
         newTrackInfo.mIsAudio = isAudioKey;
         mTracks.push(newTrackInfo);
         info = &mTracks.editTop();
-        info->mJbTimeMs = 300;
+        info->mJbTimeMs = kStaticJitterTimeMs;
     }
 
     if (key == "rtp-param-mime-type") {
@@ -714,7 +720,8 @@ status_t NuPlayer::RTPSource::setParameter(const String8 &key, const String8 &va
         int64_t networkHandle = atoll(value);
         setSocketNetwork(networkHandle);
     } else if (key == "rtp-param-jitter-buffer-time") {
-        info->mJbTimeMs = atoi(value);
+        // clamping min at 40, max at 3000
+        info->mJbTimeMs = std::min(std::max(40, atoi(value)), 3000);
     }
 
     return OK;

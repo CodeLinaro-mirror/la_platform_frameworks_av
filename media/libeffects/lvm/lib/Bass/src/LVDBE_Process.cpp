@@ -20,6 +20,7 @@
 /*    Includes                                                                          */
 /*                                                                                      */
 /****************************************************************************************/
+#include <audio_utils/BiquadFilter.h>
 
 #include <string.h>  // memset
 #include "LVDBE.h"
@@ -78,11 +79,7 @@ LVDBE_ReturnStatus_en LVDBE_Process(
         const LVM_UINT16 NrFrames)  // updated to use samples = frames * channels.
 {
     LVDBE_Instance_t* pInstance = (LVDBE_Instance_t*)hInstance;
-
-    /*Extract number of Channels info*/
-    // Mono passed in as stereo
-    const LVM_INT32 NrChannels =
-            pInstance->Params.NrChannels == 1 ? 2 : pInstance->Params.NrChannels;
+    const LVM_INT32 NrChannels = pInstance->Params.NrChannels;
     const LVM_INT32 NrSamples = NrChannels * NrFrames;
 
     /* Space to store DBE path computation */
@@ -125,10 +122,7 @@ LVDBE_ReturnStatus_en LVDBE_Process(
          * Apply the high pass filter if selected
          */
         if (pInstance->Params.HPFSelect == LVDBE_HPF_ON) {
-            BQ_MC_D32F32C30_TRC_WRA_01(&pInstance->pCoef->HPFInstance, /* Filter instance      */
-                                       pScratch,                       /* Source               */
-                                       pScratch,                       /* Destination          */
-                                       (LVM_INT16)NrFrames, (LVM_INT16)NrChannels);
+            pInstance->pHPFBiquad->process(pScratch, pScratch, NrFrames);
         }
 
         /*
@@ -142,10 +136,7 @@ LVDBE_ReturnStatus_en LVDBE_Process(
         /*
          * Apply the band pass filter
          */
-        BP_1I_D32F32C30_TRC_WRA_02(&pInstance->pCoef->BPFInstance, /* Filter instance       */
-                                   pMono,                          /* Source                */
-                                   pMono,                          /* Destination           */
-                                   (LVM_INT16)NrFrames);
+        pInstance->pBPFBiquad->process(pMono, pMono, NrFrames);
 
         /*
          * Apply the AGC and mix
@@ -156,15 +147,6 @@ LVDBE_ReturnStatus_en LVDBE_Process(
                                    pScratch,                       /* Destination    */
                                    NrFrames,                       /* Number of frames     */
                                    NrChannels);                    /* Number of channels     */
-
-        for (LVM_INT32 ii = 0; ii < NrSamples; ++ii) {
-            // TODO: replace with existing clamping function
-            if (pScratch[ii] < -1.0) {
-                pScratch[ii] = -1.0;
-            } else if (pScratch[ii] > 1.0) {
-                pScratch[ii] = 1.0;
-            }
-        }
     } else {
         // clear DBE processed path
         memset(pScratch, 0, sizeof(*pScratch) * NrSamples);

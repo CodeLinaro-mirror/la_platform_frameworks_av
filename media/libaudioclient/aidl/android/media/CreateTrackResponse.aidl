@@ -16,6 +16,9 @@
 
 package android.media;
 
+import android.media.AudioStreamType;
+import android.media.IAudioTrack;
+
 /**
  * CreateTrackOutput contains all output arguments returned by AudioFlinger to AudioTrack
  * when calling createTrack() including arguments that were passed as I/O for update by
@@ -32,6 +35,7 @@ parcelable CreateTrackResponse {
     int selectedDeviceId;
     int sessionId;
     int sampleRate;
+    AudioStreamType streamType;
     long afFrameCount;
     int afSampleRate;
     int afLatencyMs;
@@ -39,4 +43,6 @@ parcelable CreateTrackResponse {
     int outputId;
     /** Interpreted as audio_port_handle_t. */
     int portId;
+    /** The newly created track. */
+    @nullable IAudioTrack audioTrack;
 }

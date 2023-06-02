@@ -28,7 +28,6 @@
 #include <cutils/properties.h>
 
 #include <media/MediaMetricsItem.h>
-#include <utils/String16.h>
 #include <utils/Trace.h>
 
 #include "AudioEndpointParcelable.h"
@@ -39,6 +38,7 @@
 #include "core/AudioStreamBuilder.h"
 #include "fifo/FifoBuffer.h"
 #include "utility/AudioClock.h"
+#include <media/AidlConversion.h>
 
 #include "AudioStreamInternal.h"
 
@@ -49,9 +49,9 @@
 // This is needed to make sense of the logs more easily.
 #define LOG_TAG (mInService ? "AudioStreamInternal_Service" : "AudioStreamInternal_Client")
 
-using android::String16;
 using android::Mutex;
 using android::WrappingBuffer;
+using android::content::AttributionSourceState;
 
 using namespace aaudio;
 
@@ -100,27 +100,37 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
     const int32_t burstMinMicros = AAudioProperty_getHardwareBurstMinMicros();
     int32_t burstMicros = 0;
 
+    const audio_format_t requestedFormat = getFormat();
     // We have to do volume scaling. So we prefer FLOAT format.
-    if (getFormat() == AUDIO_FORMAT_DEFAULT) {
+    if (requestedFormat == AUDIO_FORMAT_DEFAULT) {
         setFormat(AUDIO_FORMAT_PCM_FLOAT);
     }
-    // Request FLOAT for the shared mixer.
+    // Request FLOAT for the shared mixer or the device.
     request.getConfiguration().setFormat(AUDIO_FORMAT_PCM_FLOAT);
 
+    // TODO b/182392769: use attribution source util
+    AttributionSourceState attributionSource;
+    attributionSource.uid = VALUE_OR_FATAL(android::legacy2aidl_uid_t_int32_t(getuid()));
+    attributionSource.pid = VALUE_OR_FATAL(android::legacy2aidl_pid_t_int32_t(getpid()));
+    attributionSource.packageName = builder.getOpPackageName();
+    attributionSource.attributionTag = builder.getAttributionTag();
+    attributionSource.token = sp<android::BBinder>::make();
+
     // Build the request to send to the server.
-    request.setUserId(getuid());
-    request.setProcessId(getpid());
+    request.setAttributionSource(attributionSource);
     request.setSharingModeMatchRequired(isSharingModeMatchRequired());
     request.setInService(isInService());
 
     request.getConfiguration().setDeviceId(getDeviceId());
     request.getConfiguration().setSampleRate(getSampleRate());
-    request.getConfiguration().setSamplesPerFrame(getSamplesPerFrame());
     request.getConfiguration().setDirection(getDirection());
     request.getConfiguration().setSharingMode(getSharingMode());
+    request.getConfiguration().setChannelMask(getChannelMask());
 
     request.getConfiguration().setUsage(getUsage());
     request.getConfiguration().setContentType(getContentType());
+    request.getConfiguration().setSpatializationBehavior(getSpatializationBehavior());
+    request.getConfiguration().setIsContentSpatialized(isContentSpatialized());
     request.getConfiguration().setInputPreset(getInputPreset());
     request.getConfiguration().setPrivacySensitive(isPrivacySensitive());
 
@@ -130,7 +140,8 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
 
     mServiceStreamHandle = mServiceInterface.openStream(request, configurationOutput);
     if (mServiceStreamHandle < 0
-            && request.getConfiguration().getSamplesPerFrame() == 1 // mono?
+            && (request.getConfiguration().getSamplesPerFrame() == 1
+                    || request.getConfiguration().getChannelMask() == AAUDIO_CHANNEL_MONO)
             && getDirection() == AAUDIO_DIRECTION_OUTPUT
             && !isInService()) {
         // if that failed then try switching from mono to stereo if OUTPUT.
@@ -138,7 +149,7 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
         // that writes to a stereo MMAP stream.
         ALOGD("%s() - openStream() returned %d, try switching from MONO to STEREO",
               __func__, mServiceStreamHandle);
-        request.getConfiguration().setSamplesPerFrame(2); // stereo
+        request.getConfiguration().setChannelMask(AAUDIO_CHANNEL_STEREO);
         mServiceStreamHandle = mServiceInterface.openStream(request, configurationOutput);
     }
     if (mServiceStreamHandle < 0) {
@@ -147,17 +158,29 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
 
     // This must match the key generated in oboeservice/AAudioServiceStreamBase.cpp
     // so the client can have permission to log.
-    mMetricsId = std::string(AMEDIAMETRICS_KEY_PREFIX_AUDIO_STREAM)
-            + std::to_string(mServiceStreamHandle);
+    if (!mInService) {
+        // No need to log if it is from service side.
+        mMetricsId = std::string(AMEDIAMETRICS_KEY_PREFIX_AUDIO_STREAM)
+                     + std::to_string(mServiceStreamHandle);
+    }
+
+    android::mediametrics::LogItem(mMetricsId)
+            .set(AMEDIAMETRICS_PROP_PERFORMANCEMODE,
+                 AudioGlobal_convertPerformanceModeToText(builder.getPerformanceMode()))
+            .set(AMEDIAMETRICS_PROP_SHARINGMODE,
+                 AudioGlobal_convertSharingModeToText(builder.getSharingMode()))
+            .set(AMEDIAMETRICS_PROP_ENCODINGCLIENT,
+                 android::toString(requestedFormat).c_str()).record();
 
     result = configurationOutput.validate();
     if (result != AAUDIO_OK) {
         goto error;
     }
     // Save results of the open.
-    if (getSamplesPerFrame() == AAUDIO_UNSPECIFIED) {
-        setSamplesPerFrame(configurationOutput.getSamplesPerFrame());
+    if (getChannelMask() == AAUDIO_UNSPECIFIED) {
+        setChannelMask(configurationOutput.getChannelMask());
     }
+
     mDeviceChannelCount = configurationOutput.getSamplesPerFrame();
 
     setSampleRate(configurationOutput.getSampleRate());
@@ -167,6 +190,8 @@ aaudio_result_t AudioStreamInternal::open(const AudioStreamBuilder &builder) {
 
     setUsage(configurationOutput.getUsage());
     setContentType(configurationOutput.getContentType());
+    setSpatializationBehavior(configurationOutput.getSpatializationBehavior());
+    setIsContentSpatialized(configurationOutput.isContentSpatialized());
     setInputPreset(configurationOutput.getInputPreset());
 
     // Save device format so we can do format conversion and volume scaling together.

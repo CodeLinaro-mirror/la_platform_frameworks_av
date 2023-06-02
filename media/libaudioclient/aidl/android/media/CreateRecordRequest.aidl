@@ -31,9 +31,9 @@ parcelable CreateRecordRequest {
     AudioAttributesInternal attr;
     AudioConfigBase config;
     AudioClient clientInfo;
-    @utf8InCpp String opPackageName;
     /** Interpreted as audio_unique_id_t. */
     int riid;
+    int maxSharedAudioHistoryMs;
     /** Bitmask, indexed by AudioInputFlags. */
     int flags;
     long frameCount;

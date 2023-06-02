@@ -40,13 +40,13 @@ struct ARTPConnection : public AHandler {
             const sp<ASessionDescription> &sessionDesc, size_t index,
             const sp<AMessage> &notify,
             bool injected);
-
+    void seekStream();
     void removeStream(int rtpSocket, int rtcpSocket);
 
     void injectPacket(int index, const sp<ABuffer> &buffer);
 
     void setSelfID(const uint32_t selfID);
-    void setJbTime(const uint32_t jbTimeMs);
+    void setStaticJitterTimeMs(const uint32_t jbTimeMs);
     void setTargetBitrate(int32_t targetBitrate);
 
     // Creates a pair of UDP datagram sockets bound to adjacent ports
@@ -69,9 +69,11 @@ protected:
 private:
     enum {
         kWhatAddStream,
+        kWhatSeekStream,
         kWhatRemoveStream,
         kWhatPollStreams,
         kWhatInjectPacket,
+        kWhatAlarmStream,
     };
 
     static const int64_t kSelectTimeoutUs;
@@ -84,17 +86,20 @@ private:
     bool mPollEventPending;
     int64_t mLastReceiverReportTimeUs;
     int64_t mLastBitrateReportTimeUs;
+    int64_t mLastEarlyNotifyTimeUs;
 
     int32_t mSelfID;
     int32_t mTargetBitrate;
 
-    uint32_t mJbTimeMs;
+    uint32_t mStaticJitterTimeMs;
 
     int32_t mCumulativeBytes;
 
     void onAddStream(const sp<AMessage> &msg);
+    void onSeekStream(const sp<AMessage> &msg);
     void onRemoveStream(const sp<AMessage> &msg);
     void onPollStreams();
+    void onAlarmStream(const sp<AMessage> msg);
     void onInjectPacket(const sp<AMessage> &msg);
     void onSendReceiverReports();
     void checkRxBitrate(int64_t nowUs);

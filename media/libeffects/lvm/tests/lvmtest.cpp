@@ -79,6 +79,7 @@ struct lvmConfigParams_t {
     int bassEffectLevel = 0;
     int eqPresetLevel = 0;
     int frameLength = 256;
+    int trebleEffectLevel = 0;
     LVM_BE_Mode_en bassEnable = LVM_BE_OFF;
     LVM_TE_Mode_en trebleEnable = LVM_TE_OFF;
     LVM_EQNB_Mode_en eqEnable = LVM_EQNB_OFF;
@@ -109,6 +110,22 @@ constexpr audio_channel_mask_t lvmConfigChMask[] = {
         AUDIO_CHANNEL_OUT_5POINT1POINT2,
         AUDIO_CHANNEL_OUT_7POINT1,
         AUDIO_CHANNEL_INDEX_MASK_8,
+        AUDIO_CHANNEL_INDEX_MASK_9,
+        AUDIO_CHANNEL_INDEX_MASK_10,
+        AUDIO_CHANNEL_INDEX_MASK_11,
+        AUDIO_CHANNEL_INDEX_MASK_12,
+        AUDIO_CHANNEL_INDEX_MASK_13,
+        AUDIO_CHANNEL_INDEX_MASK_14,
+        AUDIO_CHANNEL_INDEX_MASK_15,
+        AUDIO_CHANNEL_INDEX_MASK_16,
+        AUDIO_CHANNEL_INDEX_MASK_17,
+        AUDIO_CHANNEL_INDEX_MASK_18,
+        AUDIO_CHANNEL_INDEX_MASK_19,
+        AUDIO_CHANNEL_INDEX_MASK_20,
+        AUDIO_CHANNEL_INDEX_MASK_21,
+        AUDIO_CHANNEL_INDEX_MASK_22,
+        AUDIO_CHANNEL_INDEX_MASK_23,
+        AUDIO_CHANNEL_INDEX_MASK_24,
 };
 
 void printUsage() {
@@ -287,10 +304,6 @@ int LvmBundle_init(struct EffectContext* pContext, LVM_ControlParams_t* params) 
     params->PSA_Enable = LVM_PSA_OFF;
     params->PSA_PeakDecayRate = LVM_PSA_SPEED_MEDIUM;
 
-    /* TE Control parameters */
-    params->TE_OperatingMode = LVM_TE_OFF;
-    params->TE_EffectLevel = 0;
-
     /* Activate the initial settings */
     LvmStatus = LVM_SetControlParameters(pContext->pBundledContext->hInstance, params);
 
@@ -394,57 +407,16 @@ int lvmControl(struct EffectContext* pContext, lvmConfigParams_t* plvmConfigPara
         params->SourceFormat = LVM_MONO;
     } else if (params->NrChannels == 2) {
         params->SourceFormat = LVM_STEREO;
-    } else if (params->NrChannels > 2 && params->NrChannels <= 8) {  // FCC_2 FCC_8
+    } else if (params->NrChannels > FCC_2 && params->NrChannels <= FCC_24) {
         params->SourceFormat = LVM_MULTICHANNEL;
     } else {
         return -EINVAL;
     }
-
-    LVM_Fs_en sampleRate;
-    switch (plvmConfigParams->samplingFreq) {
-        case 8000:
-            sampleRate = LVM_FS_8000;
-            break;
-        case 11025:
-            sampleRate = LVM_FS_11025;
-            break;
-        case 12000:
-            sampleRate = LVM_FS_12000;
-            break;
-        case 16000:
-            sampleRate = LVM_FS_16000;
-            break;
-        case 22050:
-            sampleRate = LVM_FS_22050;
-            break;
-        case 24000:
-            sampleRate = LVM_FS_24000;
-            break;
-        case 32000:
-            sampleRate = LVM_FS_32000;
-            break;
-        case 44100:
-            sampleRate = LVM_FS_44100;
-            break;
-        case 48000:
-            sampleRate = LVM_FS_48000;
-            break;
-        case 88200:
-            sampleRate = LVM_FS_88200;
-            break;
-        case 96000:
-            sampleRate = LVM_FS_96000;
-            break;
-        case 176400:
-            sampleRate = LVM_FS_176400;
-            break;
-        case 192000:
-            sampleRate = LVM_FS_192000;
-            break;
-        default:
-            return -EINVAL;
+    params->SampleRate = lvmFsForSampleRate(plvmConfigParams->samplingFreq);
+    if (params->SampleRate == LVM_FS_INVALID) {
+        ALOGE("lvmControl invalid sampling rate %d", plvmConfigParams->samplingFreq);
+        return -EINVAL;
     }
-    params->SampleRate = sampleRate;
 
     /* Concert Sound parameters */
     params->VirtualizerOperatingMode = plvmConfigParams->csEnable;
@@ -470,6 +442,7 @@ int lvmControl(struct EffectContext* pContext, lvmConfigParams_t* plvmConfigPara
 
     /* Treble Enhancement parameters */
     params->TE_OperatingMode = plvmConfigParams->trebleEnable;
+    params->TE_EffectLevel = plvmConfigParams->trebleEffectLevel;
 
     /* PSA Control parameters */
     params->PSA_Enable = LVM_PSA_ON;
@@ -514,19 +487,11 @@ int lvmMainProcess(EffectContext* pContext, LVM_ControlParams_t* pParams,
     const int ioChannelCount = plvmConfigParams->fChannels;
     const int ioFrameSize = ioChannelCount * sizeof(short);  // file load size
     const int maxChannelCount = std::max(channelCount, ioChannelCount);
-    /*
-     * Mono input will be converted to 2 channels internally in the process call
-     * by copying the same data into the second channel.
-     * Hence when channelCount is 1, output buffer should be allocated for
-     * 2 channels. The memAllocChCount takes care of allocation of sufficient
-     * memory for the output buffer.
-     */
-    const int memAllocChCount = (channelCount == 1 ? 2 : channelCount);
 
     std::vector<short> in(frameLength * maxChannelCount);
     std::vector<short> out(frameLength * maxChannelCount);
     std::vector<float> floatIn(frameLength * channelCount);
-    std::vector<float> floatOut(frameLength * memAllocChCount);
+    std::vector<float> floatOut(frameLength * channelCount);
 
     int frameCounter = 0;
     while (fread(in.data(), ioFrameSize, frameLength, finp) == (size_t)frameLength) {
@@ -637,6 +602,15 @@ int main(int argc, const char* argv[]) {
                 return -1;
             }
             lvmConfigParams.eqPresetLevel = eqPresetLevel;
+        } else if (!strncmp(argv[i], "-trebleLvl:", 11)) {
+            const int trebleEffectLevel = atoi(argv[i] + 11);
+            if (trebleEffectLevel > LVM_TE_MAX_EFFECTLEVEL ||
+                trebleEffectLevel < LVM_TE_MIN_EFFECTLEVEL) {
+                printf("Error: Unsupported Treble Effect Level : %d\n", trebleEffectLevel);
+                printUsage();
+                return -1;
+            }
+            lvmConfigParams.trebleEffectLevel = trebleEffectLevel;
         } else if (!strcmp(argv[i], "-bE")) {
             lvmConfigParams.bassEnable = LVM_BE_ON;
         } else if (!strcmp(argv[i], "-eqE")) {

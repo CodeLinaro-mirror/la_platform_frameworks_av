@@ -20,6 +20,7 @@
 #include <android-base/logging.h>
 #include <media/MediaTrackTranscoder.h>
 #include <media/MediaTrackTranscoderCallback.h>
+#include <utils/AndroidThreads.h>
 
 namespace android {
 
@@ -69,41 +70,45 @@ bool MediaTrackTranscoder::start() {
         LOG(ERROR) << "TrackTranscoder must be configured before started";
         return false;
     }
+    mState = STARTED;
 
-    mTranscodingThread = std::thread([this] {
-        media_status_t status = runTranscodeLoop();
+    std::thread([this] {
+        androidSetThreadPriority(0 /* tid (0 = current) */, ANDROID_PRIORITY_BACKGROUND);
+        bool stopped = false;
+        media_status_t status = runTranscodeLoop(&stopped);
+
+        // Output an EOS sample if the transcoder was stopped.
+        if (stopped) {
+            auto sample = std::make_shared<MediaSample>();
+            sample->info.flags = SAMPLE_FLAG_END_OF_STREAM;
+            onOutputSampleAvailable(sample);
+        }
 
         // Notify the client.
         if (auto callbacks = mTranscoderCallback.lock()) {
-            if (status != AMEDIA_OK) {
-                callbacks->onTrackError(this, status);
-            } else {
+            if (stopped) {
+                callbacks->onTrackStopped(this);
+            } else if (status == AMEDIA_OK) {
                 callbacks->onTrackFinished(this);
+            } else {
+                callbacks->onTrackError(this, status);
             }
         }
-    });
+    }).detach();
 
-    mState = STARTED;
     return true;
 }
 
-bool MediaTrackTranscoder::stop() {
+void MediaTrackTranscoder::stop(bool stopOnSyncSample) {
     std::scoped_lock lock{mStateMutex};
 
-    if (mState == STARTED) {
+    if (mState == STARTED || (mStopRequest == STOP_ON_SYNC && !stopOnSyncSample)) {
+        mStopRequest = stopOnSyncSample ? STOP_ON_SYNC : STOP_NOW;
         abortTranscodeLoop();
-        mMediaSampleReader->setEnforceSequentialAccess(false);
-        mTranscodingThread.join();
-        {
-            std::scoped_lock lock{mSampleMutex};
-            mSampleQueue.abort();  // Release any buffered samples.
-        }
         mState = STOPPED;
-        return true;
+    } else {
+        LOG(WARNING) << "TrackTranscoder must be started before stopped";
     }
-
-    LOG(ERROR) << "TrackTranscoder must be started before stopped";
-    return false;
 }
 
 void MediaTrackTranscoder::notifyTrackFormatAvailable() {

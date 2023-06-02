@@ -106,6 +106,9 @@ class DeviceHalInterface : public RefBase
     // Fills the list of supported attributes for a given audio port.
     virtual status_t getAudioPort(struct audio_port *port) = 0;
 
+    // Fills the list of supported attributes for a given audio port.
+    virtual status_t getAudioPort(struct audio_port_v7 *port) = 0;
+
     // Set audio port configuration.
     virtual status_t setAudioPortConfig(const struct audio_port_config *config) = 0;
 
@@ -117,7 +120,7 @@ class DeviceHalInterface : public RefBase
     virtual status_t removeDeviceEffect(
             audio_port_handle_t device, sp<EffectHalInterface> effect) = 0;
 
-    virtual status_t dump(int fd) = 0;
+    virtual status_t dump(int fd, const Vector<String16>& args) = 0;
 
   protected:
     // Subclasses can not be constructed directly by clients.

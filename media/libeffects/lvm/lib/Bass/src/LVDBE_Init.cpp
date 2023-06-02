@@ -20,8 +20,9 @@
 /*    Includes                                                                          */
 /*                                                                                      */
 /****************************************************************************************/
-#include <stdlib.h>
 
+#include <system/audio.h>
+#include <stdlib.h>
 #include "LVDBE.h"
 #include "LVDBE_Private.h"
 
@@ -56,10 +57,7 @@ LVDBE_ReturnStatus_en LVDBE_Init(LVDBE_Handle_t* phInstance, LVDBE_Capabilities_
      * Create the instance handle if not already initialised
      */
     if (*phInstance == LVM_NULL) {
-        *phInstance = calloc(1, sizeof(*pInstance));
-    }
-    if (*phInstance == LVM_NULL) {
-        return LVDBE_NULLADDRESS;
+        *phInstance = new LVDBE_Instance_t{};
     }
     pInstance = (LVDBE_Instance_t*)*phInstance;
 
@@ -81,6 +79,7 @@ LVDBE_ReturnStatus_en LVDBE_Init(LVDBE_Handle_t* phInstance, LVDBE_Capabilities_
     pInstance->Params.SampleRate = LVDBE_FS_8000;
     pInstance->Params.VolumeControl = LVDBE_VOLUME_OFF;
     pInstance->Params.VolumedB = 0;
+    pInstance->Params.NrChannels = FCC_2;
 
     /*
      * Create pointer to data and coef memory
@@ -89,10 +88,12 @@ LVDBE_ReturnStatus_en LVDBE_Init(LVDBE_Handle_t* phInstance, LVDBE_Capabilities_
     if (pInstance->pData == NULL) {
         return LVDBE_NULLADDRESS;
     }
-    pInstance->pCoef = (LVDBE_Coef_FLOAT_t*)calloc(1, sizeof(*(pInstance->pCoef)));
-    if (pInstance->pCoef == NULL) {
-        return LVDBE_NULLADDRESS;
-    }
+    /*
+     * Create biquad instance
+     */
+    pInstance->pHPFBiquad.reset(
+            new android::audio_utils::BiquadFilter<LVM_FLOAT>(pInstance->Params.NrChannels));
+    pInstance->pBPFBiquad.reset(new android::audio_utils::BiquadFilter<LVM_FLOAT>(FCC_1));
 
     /*
      * Initialise the filters
@@ -182,10 +183,6 @@ void LVDBE_DeInit(LVDBE_Handle_t* phInstance) {
         free(pInstance->pData);
         pInstance->pData = LVM_NULL;
     }
-    if (pInstance->pCoef != LVM_NULL) {
-        free(pInstance->pCoef);
-        pInstance->pCoef = LVM_NULL;
-    }
-    free(pInstance);
+    delete pInstance;
     *phInstance = LVM_NULL;
 }

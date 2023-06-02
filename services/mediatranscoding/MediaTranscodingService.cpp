@@ -20,12 +20,15 @@
 
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
-#include <binder/IServiceManager.h>
+#include <android/permission_manager.h>
 #include <cutils/properties.h>
 #include <media/TranscoderWrapper.h>
 #include <media/TranscodingClientManager.h>
+#include <media/TranscodingDefs.h>
+#include <media/TranscodingLogger.h>
 #include <media/TranscodingResourcePolicy.h>
 #include <media/TranscodingSessionController.h>
+#include <media/TranscodingThermalPolicy.h>
 #include <media/TranscodingUidPolicy.h>
 #include <utils/Log.h>
 #include <utils/Vector.h>
@@ -40,17 +43,53 @@ namespace android {
             errorCode,                                \
             String8::format("%s:%d: " errorString, __FUNCTION__, __LINE__, ##__VA_ARGS__))
 
-MediaTranscodingService::MediaTranscodingService(
-        const std::shared_ptr<TranscoderInterface>& transcoder)
+static constexpr int64_t kTranscoderHeartBeatIntervalUs = 1000000LL;
+
+MediaTranscodingService::MediaTranscodingService()
       : mUidPolicy(new TranscodingUidPolicy()),
         mResourcePolicy(new TranscodingResourcePolicy()),
-        mSessionController(
-                new TranscodingSessionController(transcoder, mUidPolicy, mResourcePolicy)),
-        mClientManager(new TranscodingClientManager(mSessionController)) {
+        mThermalPolicy(new TranscodingThermalPolicy()),
+        mLogger(new TranscodingLogger()) {
     ALOGV("MediaTranscodingService is created");
-    transcoder->setCallback(mSessionController);
+    bool simulated = property_get_bool("debug.transcoding.simulated_transcoder", false);
+    if (simulated) {
+        // Overrid default config params with shorter values for testing.
+        TranscodingSessionController::ControllerConfig config = {
+                .pacerBurstThresholdMs = 500,
+                .pacerBurstCountQuota = 10,
+                .pacerBurstTimeQuotaSeconds = 3,
+        };
+        mSessionController.reset(new TranscodingSessionController(
+                [](const std::shared_ptr<TranscoderCallbackInterface>& cb)
+                        -> std::shared_ptr<TranscoderInterface> {
+                    return std::make_shared<SimulatedTranscoder>(cb);
+                },
+                mUidPolicy, mResourcePolicy, mThermalPolicy, &config));
+    } else {
+        int32_t overrideBurstCountQuota =
+                property_get_int32("persist.transcoding.burst_count_quota", -1);
+        int32_t pacerBurstTimeQuotaSeconds =
+                property_get_int32("persist.transcoding.burst_time_quota_seconds", -1);
+        // Override default config params with properties if present.
+        TranscodingSessionController::ControllerConfig config;
+        if (overrideBurstCountQuota > 0) {
+            config.pacerBurstCountQuota = overrideBurstCountQuota;
+        }
+        if (pacerBurstTimeQuotaSeconds > 0) {
+            config.pacerBurstTimeQuotaSeconds = pacerBurstTimeQuotaSeconds;
+        }
+        mSessionController.reset(new TranscodingSessionController(
+                [logger = mLogger](const std::shared_ptr<TranscoderCallbackInterface>& cb)
+                        -> std::shared_ptr<TranscoderInterface> {
+                    return std::make_shared<TranscoderWrapper>(cb, logger,
+                                                               kTranscoderHeartBeatIntervalUs);
+                },
+                mUidPolicy, mResourcePolicy, mThermalPolicy, &config));
+    }
+    mClientManager.reset(new TranscodingClientManager(mSessionController));
     mUidPolicy->setCallback(mSessionController);
     mResourcePolicy->setCallback(mSessionController);
+    mThermalPolicy->setCallback(mSessionController);
 }
 
 MediaTranscodingService::~MediaTranscodingService() {
@@ -60,14 +99,20 @@ MediaTranscodingService::~MediaTranscodingService() {
 binder_status_t MediaTranscodingService::dump(int fd, const char** /*args*/, uint32_t /*numArgs*/) {
     String8 result;
 
-    // TODO(b/161549994): Remove libbinder dependencies for mainline.
-    if (checkCallingPermission(String16("android.permission.DUMP")) == false) {
-        result.format(
-                "Permission Denial: "
-                "can't dump MediaTranscodingService from pid=%d, uid=%d\n",
-                AIBinder_getCallingPid(), AIBinder_getCallingUid());
-        write(fd, result.string(), result.size());
-        return PERMISSION_DENIED;
+    uid_t callingUid = AIBinder_getCallingUid();
+    pid_t callingPid = AIBinder_getCallingPid();
+    if (__builtin_available(android __TRANSCODING_MIN_API__, *)) {
+        int32_t permissionResult;
+        if (APermissionManager_checkPermission("android.permission.DUMP", callingPid, callingUid,
+                                               &permissionResult) != PERMISSION_MANAGER_STATUS_OK ||
+            permissionResult != PERMISSION_MANAGER_PERMISSION_GRANTED) {
+            result.format(
+                    "Permission Denial: "
+                    "can't dump MediaTranscodingService from pid=%d, uid=%d\n",
+                    AIBinder_getCallingPid(), AIBinder_getCallingUid());
+            write(fd, result.string(), result.size());
+            return PERMISSION_DENIED;
+        }
     }
 
     const size_t SIZE = 256;
@@ -85,19 +130,12 @@ binder_status_t MediaTranscodingService::dump(int fd, const char** /*args*/, uin
 
 //static
 void MediaTranscodingService::instantiate() {
-    std::shared_ptr<TranscoderInterface> transcoder;
-    if (property_get_bool("debug.transcoding.simulated_transcoder", false)) {
-        transcoder = std::make_shared<SimulatedTranscoder>();
-    } else {
-        transcoder = std::make_shared<TranscoderWrapper>();
-    }
-
     std::shared_ptr<MediaTranscodingService> service =
-            ::ndk::SharedRefBase::make<MediaTranscodingService>(transcoder);
-    binder_status_t status =
-            AServiceManager_addService(service->asBinder().get(), getServiceName());
-    if (status != STATUS_OK) {
-        return;
+            ::ndk::SharedRefBase::make<MediaTranscodingService>();
+    if (__builtin_available(android __TRANSCODING_MIN_API__, *)) {
+        // Once service is started, we want it to stay even is client side perished.
+        AServiceManager_forceLazyServicesPersist(true /*persist*/);
+        (void)AServiceManager_registerLazyService(service->asBinder().get(), getServiceName());
     }
 }
 

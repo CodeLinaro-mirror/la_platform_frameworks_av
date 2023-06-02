@@ -30,10 +30,16 @@
  */
 
 #include <benchmark/benchmark.h>
+#include <binder/ProcessState.h>
 #include <fcntl.h>
 #include <media/MediaTranscoder.h>
+#include <media/NdkCommon.h>
+
+#include <iostream>
 
 using namespace android;
+
+const std::string PARAM_VIDEO_FRAME_RATE = "VideoFrameRate";
 
 class TranscoderCallbacks : public MediaTranscoder::CallbackInterface {
 public:
@@ -53,6 +59,8 @@ public:
 
     virtual void onProgressUpdate(const MediaTranscoder* transcoder __unused,
                                   int32_t progress __unused) override {}
+
+    virtual void onHeartBeat(const MediaTranscoder* transcoder __unused) override {}
 
     virtual void onCodecResourceLost(const MediaTranscoder* transcoder __unused,
                                      const std::shared_ptr<ndk::ScopedAParcel>& pausedState
@@ -82,6 +90,7 @@ static AMediaFormat* CreateDefaultVideoFormat() {
 
     AMediaFormat* videoFormat = AMediaFormat_new();
     AMediaFormat_setInt32(videoFormat, AMEDIAFORMAT_KEY_BIT_RATE, kVideoBitRate);
+    AMediaFormat_setString(videoFormat, AMEDIAFORMAT_KEY_MIME, AMEDIA_MIMETYPE_VIDEO_AVC);
     return videoFormat;
 }
 
@@ -104,13 +113,22 @@ static void TranscodeMediaFile(benchmark::State& state, const std::string& srcFi
     // Asset directory
     static const std::string kAssetDirectory = "/data/local/tmp/TranscodingBenchmark/";
 
+    // Transcoding configuration params to be logged
+    int64_t trackDurationUs = 0;
+    int32_t width = 0;
+    int32_t height = 0;
+    std::string sourceMime = "NA";
+    std::string targetMime = "NA";
+    bool includeAudio = false;
+    bool transcodeVideo = false;
+    int32_t targetBitrate = 0;
+
     int srcFd = 0;
     int dstFd = 0;
 
     std::string srcPath = kAssetDirectory + srcFileName;
     std::string dstPath = kAssetDirectory + dstFileName;
 
-    auto callbacks = std::make_shared<TranscoderCallbacks>();
     media_status_t status = AMEDIA_OK;
 
     if ((srcFd = open(srcPath.c_str(), O_RDONLY)) < 0) {
@@ -123,7 +141,8 @@ static void TranscodeMediaFile(benchmark::State& state, const std::string& srcFi
     }
 
     for (auto _ : state) {
-        auto transcoder = MediaTranscoder::create(callbacks, nullptr);
+        auto callbacks = std::make_shared<TranscoderCallbacks>();
+        auto transcoder = MediaTranscoder::create(callbacks);
 
         status = transcoder->configureSource(srcFd);
         if (status != AMEDIA_OK) {
@@ -151,13 +170,33 @@ static void TranscodeMediaFile(benchmark::State& state, const std::string& srcFi
             if (strncmp(mime, "video/", 6) == 0) {
                 int32_t frameCount;
                 if (AMediaFormat_getInt32(srcFormat, AMEDIAFORMAT_KEY_FRAME_COUNT, &frameCount)) {
-                    state.counters["VideoFrameRate"] =
-                            benchmark::Counter(frameCount, benchmark::Counter::kIsRate);
+                    state.counters[PARAM_VIDEO_FRAME_RATE] = benchmark::Counter(
+                            frameCount, benchmark::Counter::kIsIterationInvariantRate);
                 }
+                if (!AMediaFormat_getInt32(srcFormat, AMEDIAFORMAT_KEY_WIDTH, &width)) {
+                    state.SkipWithError("Video source track format does not have width");
+                    goto exit;
+                }
+                if (!AMediaFormat_getInt32(srcFormat, AMEDIAFORMAT_KEY_HEIGHT, &height)) {
+                    state.SkipWithError("Video source track format does not have height");
+                    goto exit;
+                }
+                AMediaFormat_getInt64(srcFormat, AMEDIAFORMAT_KEY_DURATION, &trackDurationUs);
+                sourceMime = mime;
             }
 
             if (trackSelectionCallback(mime, &dstFormat)) {
                 status = transcoder->configureTrackFormat(i, dstFormat);
+                if (strncmp(mime, "video/", 6) == 0 && dstFormat != nullptr) {
+                    const char* mime = nullptr;
+                    if (AMediaFormat_getString(dstFormat, AMEDIAFORMAT_KEY_MIME, &mime)) {
+                        targetMime = mime;
+                    }
+                    AMediaFormat_getInt32(dstFormat, AMEDIAFORMAT_KEY_BIT_RATE, &targetBitrate);
+                    transcodeVideo = true;
+                } else if (strncmp(mime, "audio/", 6) == 0) {
+                    includeAudio = true;
+                }
             }
 
             if (dstFormat != nullptr) {
@@ -185,6 +224,17 @@ static void TranscodeMediaFile(benchmark::State& state, const std::string& srcFi
             goto exit;
         }
     }
+
+    // Set transcoding configuration params in benchmark label
+    state.SetLabel(srcFileName + "," +
+                   std::to_string(width) + "x" + std::to_string(height) + "," +
+                   sourceMime + "," +
+                   std::to_string(trackDurationUs/1000) + "," +
+                   (includeAudio ? "Yes" : "No") + "," +
+                   (transcodeVideo ? "Yes" : "No") + "," +
+                   targetMime + "," +
+                   std::to_string(targetBitrate)
+                   );
 
 exit:
     if (srcFd > 0) close(srcFd);
@@ -217,7 +267,7 @@ static void TranscodeMediaFile(benchmark::State& state, const std::string& srcFi
 }
 
 static void SetMaxOperatingRate(AMediaFormat* format) {
-    AMediaFormat_setFloat(format, AMEDIAFORMAT_KEY_OPERATING_RATE, INT32_MAX);
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_OPERATING_RATE, INT32_MAX);
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_PRIORITY, 1);
 }
 
@@ -309,6 +359,174 @@ static void BM_TranscodeVideoPassthrough(benchmark::State& state) {
                        false /* includeAudio */, false /* transcodeVideo */);
 }
 
+//---------------------------- Codecs, Resolutions, Bitrate  ---------------------------------------
+static void SetMimeBitrate(AMediaFormat* format, std::string mime, int32_t bitrate) {
+    AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, mime.c_str());
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, bitrate);
+}
+
+static void BM_1920x1080_Avc22Mbps2Avc12Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1920_1080_30fps_h264_22Mbps.mp4",
+                       "tx_bm_1920_1080_30fps_h264_22Mbps_transcoded_h264_12Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 12000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1920x1080_Avc15Mbps2Avc8Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1920_1080_30fps_h264_15Mbps.mp4",
+                       "tx_bm_1920_1080_30fps_h264_15Mbps_transcoded_h264_8Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 8000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1920x1080_Avc15Mbps2AvcPassthrough(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1920_1080_30fps_h264_15Mbps.mp4",
+                       "tx_bm_1920_1080_30fps_h264_15Mbps_passthrough_V.mp4",
+                       false /* includeAudio */, false /* transcodeVideo */);
+}
+
+static void BM_1920x1080_Avc15MbpsAac2Avc8Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1920_1080_30fps_h264_15Mbps_aac.mp4",
+                       "tx_bm_1920_1080_30fps_h264_15Mbps_aac_transcoded_h264_8Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 8000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1920x1080_Avc15MbpsAac2Avc8MbpsAac(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1920_1080_30fps_h264_15Mbps_aac.mp4",
+                       "tx_bm_1920_1080_30fps_h264_15Mbps_aac_transcoded_h264_8Mbps_aac.mp4",
+                       true /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 8000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1920x1080_Avc15MbpsAac2AvcPassthrough(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1920_1080_30fps_h264_15Mbps_aac.mp4",
+                       "tx_bm_1920_1080_30fps_h264_15Mbps_aac_passthrough_V.mp4",
+                       false /* includeAudio */, false /* transcodeVideo */);
+}
+
+static void BM_1920x1080_Avc15MbpsAac2AvcAacPassthrough(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1920_1080_30fps_h264_15Mbps_aac.mp4",
+                       "tx_bm_1920_1080_30fps_h264_15Mbps_aac_passthrough_AV.mp4",
+                       true /* includeAudio */, false /* transcodeVideo */);
+}
+
+static void BM_1920x1080_Hevc17Mbps2Hevc8Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1920_1080_30fps_hevc_17Mbps.mp4",
+                       "tx_bm_1920_1080_30fps_hevc_17Mbps_transcoded_hevc_8Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/hevc", bitrate = 8000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1920x1080_Hevc17Mbps2Avc12Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1920_1080_30fps_hevc_17Mbps.mp4",
+                       "tx_bm_1920_1080_30fps_hevc_17Mbps_transcoded_h264_12Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 12000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1920x1080_60fps_Hevc28Mbps2Avc15Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1920_1080_60fps_hevc_28Mbps.mp4",
+                       "tx_bm_1920_1080_60fps_hevc_28Mbps_transcoded_h264_15Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 15000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1280x720_Avc10Mbps2Avc4Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1280_720_30fps_h264_10Mbps.mp4",
+                       "tx_bm_1280_720_30fps_h264_10Mbps_transcoded_h264_4Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 4000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1280x720_Avc10Mbps2AvcPassthrough(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1280_720_30fps_h264_10Mbps.mp4",
+                       "tx_bm_1280_720_30fps_h264_10Mbps_passthrough_V.mp4",
+                       false /* includeAudio */, false /* transcodeVideo */);
+}
+
+static void BM_1280x720_Avc10MbpsAac2Avc4Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1280_720_30fps_h264_10Mbps_aac.mp4",
+                       "tx_bm_1280_720_30fps_h264_10Mbps_aac_transcoded_h264_4Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 4000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1280x720_Avc10MbpsAac2Avc4MbpsAac(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1280_720_30fps_h264_10Mbps_aac.mp4",
+                       "tx_bm_1280_720_30fps_h264_10Mbps_aac_transcoded_h264_4Mbps_aac.mp4",
+                       true /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 4000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1280x720_Avc10MbpsAac2AvcPassthrough(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1280_720_30fps_h264_10Mbps_aac.mp4",
+                       "tx_bm_1280_720_30fps_h264_10Mbps_aac_passthrough_V.mp4",
+                       false /* includeAudio */, false /* transcodeVideo */);
+}
+
+static void BM_1280x720_Avc10MbpsAac2AvcAacPassthrough(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1280_720_30fps_h264_10Mbps_aac.mp4",
+                       "tx_bm_1280_720_30fps_h264_10Mbps_aac_passthrough_AV.mp4",
+                       true /* includeAudio */, false /* transcodeVideo */);
+}
+
+static void BM_1280x720_Hevc8Mbps2Avc4Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1280_720_30fps_hevc_8Mbps.mp4",
+                       "tx_bm_1280_720_30fps_hevc_8Mbps_transcoded_h264_4Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 4000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_1080x1920_Avc15Mbps2Avc8Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_1080_1920_30fps_h264_15Mbps.mp4",
+                       "tx_bm_1080_1920_30fps_h264_15Mbps_transcoded_h264_8Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 8000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_720x1280_Avc10Mbps2Avc4Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_720_1280_30fps_h264_10Mbps.mp4",
+                       "tx_bm_720_1280_30fps_h264_10Mbps_transcoded_h264_4Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 4000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
+static void BM_3840x2160_Hevc42Mbps2Avc20Mbps(benchmark::State& state) {
+    TranscodeMediaFile(state, "tx_bm_3840_2160_30fps_hevc_42Mbps.mp4",
+                       "tx_bm_3840_2160_30fps_hevc_42Mbps_transcoded_h264_4Mbps.mp4",
+                       false /* includeAudio */, true /* transcodeVideo */,
+                       [mime = "video/avc", bitrate = 20000000](AMediaFormat* dstFormat) {
+                           SetMimeBitrate(dstFormat, mime, bitrate);
+                       });
+}
+
 //-------------------------------- Benchmark Registration ------------------------------------------
 
 // Benchmark registration wrapper for transcoding.
@@ -332,4 +550,99 @@ TRANSCODER_BENCHMARK(BM_TranscodeHevc2AvcAV2AV720PMaxOperatingRate);
 TRANSCODER_BENCHMARK(BM_TranscodeAudioVideoPassthrough);
 TRANSCODER_BENCHMARK(BM_TranscodeVideoPassthrough);
 
-BENCHMARK_MAIN();
+TRANSCODER_BENCHMARK(BM_1920x1080_Avc22Mbps2Avc12Mbps);
+TRANSCODER_BENCHMARK(BM_1920x1080_Avc15Mbps2Avc8Mbps);
+TRANSCODER_BENCHMARK(BM_1920x1080_Avc15Mbps2AvcPassthrough);
+TRANSCODER_BENCHMARK(BM_1920x1080_Avc15MbpsAac2Avc8Mbps);
+TRANSCODER_BENCHMARK(BM_1920x1080_Avc15MbpsAac2Avc8MbpsAac);
+TRANSCODER_BENCHMARK(BM_1920x1080_Avc15MbpsAac2AvcPassthrough);
+TRANSCODER_BENCHMARK(BM_1920x1080_Avc15MbpsAac2AvcAacPassthrough);
+TRANSCODER_BENCHMARK(BM_1920x1080_Hevc17Mbps2Hevc8Mbps);
+TRANSCODER_BENCHMARK(BM_1920x1080_Hevc17Mbps2Avc12Mbps);
+TRANSCODER_BENCHMARK(BM_1920x1080_60fps_Hevc28Mbps2Avc15Mbps);
+
+TRANSCODER_BENCHMARK(BM_1280x720_Avc10Mbps2Avc4Mbps);
+TRANSCODER_BENCHMARK(BM_1280x720_Avc10Mbps2AvcPassthrough);
+TRANSCODER_BENCHMARK(BM_1280x720_Avc10MbpsAac2Avc4Mbps);
+TRANSCODER_BENCHMARK(BM_1280x720_Avc10MbpsAac2Avc4MbpsAac);
+TRANSCODER_BENCHMARK(BM_1280x720_Avc10MbpsAac2AvcPassthrough);
+TRANSCODER_BENCHMARK(BM_1280x720_Avc10MbpsAac2AvcAacPassthrough);
+TRANSCODER_BENCHMARK(BM_1280x720_Hevc8Mbps2Avc4Mbps);
+
+TRANSCODER_BENCHMARK(BM_1080x1920_Avc15Mbps2Avc8Mbps);
+TRANSCODER_BENCHMARK(BM_720x1280_Avc10Mbps2Avc4Mbps);
+
+TRANSCODER_BENCHMARK(BM_3840x2160_Hevc42Mbps2Avc20Mbps);
+
+class CustomCsvReporter : public benchmark::BenchmarkReporter {
+public:
+    CustomCsvReporter() : mPrintedHeader(false) {}
+    virtual bool ReportContext(const Context& context);
+    virtual void ReportRuns(const std::vector<Run>& reports);
+
+private:
+    void PrintRunData(const Run& report);
+
+    bool mPrintedHeader;
+    std::vector<std::string> mHeaders = {
+        "File",          "Resolution",     "SourceMime", "VideoTrackDuration(ms)",
+        "IncludeAudio",  "TranscodeVideo", "TargetMime", "TargetBirate(bps)",
+        "real_time(ms)", "cpu_time(ms)",   PARAM_VIDEO_FRAME_RATE
+    };
+};
+
+bool CustomCsvReporter::ReportContext(const Context& context __unused) {
+    return true;
+}
+
+void CustomCsvReporter::ReportRuns(const std::vector<Run>& reports) {
+    std::ostream& Out = GetOutputStream();
+
+    if (!mPrintedHeader) {
+        // print the header
+        for (auto header = mHeaders.begin(); header != mHeaders.end();) {
+            Out << *header++;
+            if (header != mHeaders.end()) Out << ",";
+        }
+        Out << "\n";
+        mPrintedHeader = true;
+    }
+
+    // print results for each run
+    for (const auto& run : reports) {
+        PrintRunData(run);
+    }
+}
+
+void CustomCsvReporter::PrintRunData(const Run& run) {
+    if (run.error_occurred) {
+        return;
+    }
+    std::ostream& Out = GetOutputStream();
+    // Log the transcoding params reported through label
+    Out << run.report_label << ",";
+    Out << run.GetAdjustedRealTime() << ",";
+    Out << run.GetAdjustedCPUTime() << ",";
+    auto frameRate = run.counters.find(PARAM_VIDEO_FRAME_RATE);
+    if (frameRate == run.counters.end()) {
+        Out << "NA"
+            << ",";
+    } else {
+        Out << frameRate->second << ",";
+    }
+    Out << '\n';
+}
+
+int main(int argc, char** argv) {
+    android::ProcessState::self()->startThreadPool();
+    std::unique_ptr<benchmark::BenchmarkReporter> fileReporter;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]).find("--benchmark_out") != std::string::npos) {
+            fileReporter.reset(new CustomCsvReporter);
+            break;
+        }
+    }
+    ::benchmark::Initialize(&argc, argv);
+    if (::benchmark::ReportUnrecognizedArguments(argc, argv)) return 1;
+    ::benchmark::RunSpecifiedBenchmarks(nullptr, fileReporter.get());
+}

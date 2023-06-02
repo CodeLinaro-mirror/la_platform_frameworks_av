@@ -17,7 +17,7 @@
 //#define LOG_NDEBUG 0
 #define LOG_TAG "CodecServiceRegistrant"
 
-#include <android-base/properties.h>
+#include <android/api-level.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 
@@ -25,8 +25,9 @@
 #include <C2PlatformSupport.h>
 #include <codec2/hidl/1.0/ComponentStore.h>
 #include <codec2/hidl/1.1/ComponentStore.h>
-#include <codec2/hidl/1.1/Configurable.h>
-#include <codec2/hidl/1.1/types.h>
+#include <codec2/hidl/1.2/ComponentStore.h>
+#include <codec2/hidl/1.2/Configurable.h>
+#include <codec2/hidl/1.2/types.h>
 #include <hidl/HidlSupport.h>
 #include <media/CodecServiceRegistrant.h>
 
@@ -37,8 +38,8 @@ using ::android::hardware::hidl_string;
 using ::android::hardware::Return;
 using ::android::hardware::Void;
 using ::android::sp;
-using namespace ::android::hardware::media::c2::V1_1;
-using namespace ::android::hardware::media::c2::V1_1::utils;
+using namespace ::android::hardware::media::c2::V1_2;
+using namespace ::android::hardware::media::c2::V1_2::utils;
 
 constexpr c2_status_t C2_TRANSACTION_FAILED = C2_CORRUPTED;
 
@@ -415,39 +416,33 @@ extern "C" void RegisterCodecServices() {
 
     using namespace ::android::hardware::media::c2;
 
-    int platformVersion =
-        android::base::GetIntProperty("ro.build.version.sdk", int32_t(29));
-    // STOPSHIP: Remove code name checking once platform version bumps up to 30.
-    std::string codeName =
-        android::base::GetProperty("ro.build.version.codename", "");
-    if (codeName == "R") {
-        platformVersion = 30;
-    }
+    int platformVersion = android_get_device_api_level();
 
-    switch (platformVersion) {
-        case 30: {
-            android::sp<V1_1::IComponentStore> storeV1_1 =
-                new V1_1::utils::ComponentStore(store);
-            if (storeV1_1->registerAsService("software") != android::OK) {
-                LOG(ERROR) << "Cannot register software Codec2 v1.1 service.";
-                return;
-            }
-            break;
-        }
-        case 29: {
-            android::sp<V1_0::IComponentStore> storeV1_0 =
-                new V1_0::utils::ComponentStore(store);
-            if (storeV1_0->registerAsService("software") != android::OK) {
-                LOG(ERROR) << "Cannot register software Codec2 v1.0 service.";
-                return;
-            }
-            break;
-        }
-        default: {
-            LOG(ERROR) << "The platform version " << platformVersion <<
-                          " is not supported.";
+    if (platformVersion >= __ANDROID_API_S__) {
+        android::sp<V1_2::IComponentStore> storeV1_2 =
+            new V1_2::utils::ComponentStore(store);
+        if (storeV1_2->registerAsService("software") != android::OK) {
+            LOG(ERROR) << "Cannot register software Codec2 v1.2 service.";
             return;
         }
+    } else if (platformVersion == __ANDROID_API_R__) {
+        android::sp<V1_1::IComponentStore> storeV1_1 =
+            new V1_1::utils::ComponentStore(store);
+        if (storeV1_1->registerAsService("software") != android::OK) {
+            LOG(ERROR) << "Cannot register software Codec2 v1.1 service.";
+            return;
+        }
+    } else if (platformVersion == __ANDROID_API_Q__) {
+        android::sp<V1_0::IComponentStore> storeV1_0 =
+            new V1_0::utils::ComponentStore(store);
+        if (storeV1_0->registerAsService("software") != android::OK) {
+            LOG(ERROR) << "Cannot register software Codec2 v1.0 service.";
+            return;
+        }
+    } else {  // platformVersion < __ANDROID_API_Q__
+        LOG(ERROR) << "The platform version " << platformVersion <<
+                      " is not supported.";
+        return;
     }
     if (!ionPropertiesDefined()) {
         using IComponentStore =

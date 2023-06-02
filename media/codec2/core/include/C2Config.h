@@ -75,6 +75,10 @@ struct C2Config {
     enum tiling_mode_t : uint32_t;          ///< tiling modes
 };
 
+struct C2PlatformConfig {
+    enum encoding_quality_level_t : uint32_t; ///< encoding quality level
+};
+
 namespace {
 
 enum C2ParamIndexKind : C2Param::type_index_t {
@@ -151,6 +155,7 @@ enum C2ParamIndexKind : C2Param::type_index_t {
 
     /* protected content */
     kParamIndexSecureMode,
+    kParamIndexEncryptedBuffer, // info-buffer, used with SM_READ_PROTECTED_WITH_ENCRYPTED
 
     // deprecated
     kParamIndexDelayRequest = kParamIndexDelay | C2Param::CoreIndex::IS_REQUEST_FLAG,
@@ -185,6 +190,8 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     kParamIndexPictureTypeMask,
     kParamIndexPictureType,
     kParamIndexHdr10PlusMetadata,
+
+    kParamIndexPictureQuantization,
 
     /* ------------------------------------ video components ------------------------------------ */
 
@@ -221,6 +228,7 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     kParamIndexDrcEffectType, // drc, enum
     kParamIndexDrcOutputLoudness, // drc, float (dBFS)
     kParamIndexDrcAlbumMode, // drc, enum
+    kParamIndexAudioFrameSize, // int
 
     /* ============================== platform-defined parameters ============================== */
 
@@ -254,8 +262,14 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     kParamIndexTunneledMode, // struct
     kParamIndexTunnelHandle, // int32[]
     kParamIndexTunnelSystemTime, // int64
+    kParamIndexTunnelHoldRender, // bool
+    kParamIndexTunnelStartRender, // bool
 
+    // dmabuf allocator
     kParamIndexStoreDmaBufUsage,  // store, struct
+
+    // encoding quality requirements
+    kParamIndexEncodingQualityLevel, // encoders, enum
 };
 
 }
@@ -380,6 +394,7 @@ constexpr char C2_PARAMKEY_TIME_STRETCH[]  = "algo.time-stretch";
 
 namespace {
 
+// Codec bases are ordered by their date of introduction to the code base.
 enum : uint32_t {
     _C2_PL_MP2V_BASE = 0x1000,
     _C2_PL_AAC_BASE  = 0x2000,
@@ -390,12 +405,16 @@ enum : uint32_t {
     _C2_PL_VP9_BASE  = 0x7000,
     _C2_PL_DV_BASE   = 0x8000,
     _C2_PL_AV1_BASE  = 0x9000,
+    _C2_PL_VP8_BASE  = 0xA000,
+    _C2_PL_MPEGH_BASE = 0xB000,     // MPEG-H 3D Audio
 
     C2_PROFILE_LEVEL_VENDOR_START = 0x70000000,
 };
 
 }
 
+// Profiles and levels for each codec are ordered based on how they are ordered in the
+// corresponding standard documents at introduction, and chronologically afterwards.
 enum C2Config::profile_t : uint32_t {
     PROFILE_UNUSED = 0,                         ///< profile is not used by this media type
 
@@ -543,6 +562,18 @@ enum C2Config::profile_t : uint32_t {
     PROFILE_AV1_0 = _C2_PL_AV1_BASE,            ///< AV1 Profile 0 (4:2:0, 8 to 10 bit)
     PROFILE_AV1_1,                              ///< AV1 Profile 1 (8 to 10 bit)
     PROFILE_AV1_2,                              ///< AV1 Profile 2 (8 to 12 bit)
+
+    // VP8 profiles
+    PROFILE_VP8_0 = _C2_PL_VP8_BASE,            ///< VP8 Profile 0
+    PROFILE_VP8_1,                              ///< VP8 Profile 1
+    PROFILE_VP8_2,                              ///< VP8 Profile 2
+    PROFILE_VP8_3,                              ///< VP8 Profile 3
+
+    // MPEG-H 3D Audio profiles
+    PROFILE_MPEGH_MAIN = _C2_PL_MPEGH_BASE,     ///< MPEG-H Main
+    PROFILE_MPEGH_HIGH,                         ///< MPEG-H High
+    PROFILE_MPEGH_LC,                           ///< MPEG-H Low-complexity
+    PROFILE_MPEGH_BASELINE,                     ///< MPEG-H Baseline
 };
 
 enum C2Config::level_t : uint32_t {
@@ -685,6 +716,13 @@ enum C2Config::level_t : uint32_t {
     LEVEL_AV1_7_1,                              ///< AV1 Level 7.1
     LEVEL_AV1_7_2,                              ///< AV1 Level 7.2
     LEVEL_AV1_7_3,                              ///< AV1 Level 7.3
+
+    // MPEG-H 3D Audio levels
+    LEVEL_MPEGH_1 = _C2_PL_MPEGH_BASE,          ///< MPEG-H L1
+    LEVEL_MPEGH_2,                              ///< MPEG-H L2
+    LEVEL_MPEGH_3,                              ///< MPEG-H L3
+    LEVEL_MPEGH_4,                              ///< MPEG-H L4
+    LEVEL_MPEGH_5,                              ///< MPEG-H L5
 };
 
 struct C2ProfileLevelStruct {
@@ -1144,6 +1182,8 @@ constexpr char C2_PARAMKEY_PRIORITY[] = "algo.priority";
 C2ENUM(C2Config::secure_mode_t, uint32_t,
     SM_UNPROTECTED,    ///< no content protection
     SM_READ_PROTECTED, ///< input and output buffers shall be protected from reading
+    /// both read protected and readable encrypted buffers are used
+    SM_READ_PROTECTED_WITH_ENCRYPTED,
 )
 
 typedef C2GlobalParam<C2Tuning, C2SimpleValueStruct<C2Config::secure_mode_t>, kParamIndexSecureMode>
@@ -1695,6 +1735,31 @@ typedef C2StreamParam<C2Tuning, C2SimpleArrayStruct<C2GopLayerStruct>, kParamInd
 constexpr char C2_PARAMKEY_GOP[] = "coding.gop";
 
 /**
+ * Quantization
+ * min/max for each picture type
+ *
+ */
+struct C2PictureQuantizationStruct {
+    C2PictureQuantizationStruct() : type_((C2Config::picture_type_t)0),
+                                         min(INT32_MIN), max(INT32_MAX) {}
+    C2PictureQuantizationStruct(C2Config::picture_type_t type, int32_t min_, int32_t max_)
+        : type_(type), min(min_), max(max_) { }
+
+    C2Config::picture_type_t type_;
+    int32_t min;      // INT32_MIN == 'no lower bound specified'
+    int32_t max;      // INT32_MAX == 'no upper bound specified'
+
+    DEFINE_AND_DESCRIBE_C2STRUCT(PictureQuantization)
+    C2FIELD(type_, "type")
+    C2FIELD(min, "min")
+    C2FIELD(max, "max")
+};
+
+typedef C2StreamParam<C2Tuning, C2SimpleArrayStruct<C2PictureQuantizationStruct>,
+        kParamIndexPictureQuantization> C2StreamPictureQuantizationTuning;
+constexpr char C2_PARAMKEY_PICTURE_QUANTIZATION[] = "coding.qp";
+
+/**
  * Sync frame can be requested on demand by the client.
  *
  * If true, the next I frame shall be encoded as a sync frame. This config can be passed
@@ -1870,7 +1935,9 @@ constexpr char C2_PARAMKEY_MAX_CODED_CHANNEL_COUNT[] = "coded.max-channel-count"
 C2ENUM(C2Config::pcm_encoding_t, uint32_t,
     PCM_16,
     PCM_8,
-    PCM_FLOAT
+    PCM_FLOAT,
+    PCM_24,
+    PCM_32
 )
 
 typedef C2StreamParam<C2Info, C2SimpleValueStruct<C2Config::pcm_encoding_t>, kParamIndexPcmEncoding>
@@ -1969,9 +2036,20 @@ constexpr char C2_PARAMKEY_DRC_ALBUM_MODE[] = "coding.drc.album-mode";
 /**
  * DRC output loudness in dBFS. Retrieved during decoding
  */
- typedef C2StreamParam<C2Info, C2FloatValue, kParamIndexDrcOutputLoudness>
+typedef C2StreamParam<C2Info, C2FloatValue, kParamIndexDrcOutputLoudness>
         C2StreamDrcOutputLoudnessTuning;
- constexpr char C2_PARAMKEY_DRC_OUTPUT_LOUDNESS[] = "output.drc.output-loudness";
+constexpr char C2_PARAMKEY_DRC_OUTPUT_LOUDNESS[] = "output.drc.output-loudness";
+
+/**
+ * Audio frame size in samples.
+ *
+ * Audio encoders can expose this parameter to signal the desired audio frame
+ * size that corresponds to a single coded access unit.
+ * Default value is 0, meaning that the encoder accepts input buffers of any size.
+ */
+typedef C2StreamParam<C2Info, C2Uint32Value, kParamIndexAudioFrameSize>
+        C2StreamAudioFrameSizeInfo;
+constexpr char C2_PARAMKEY_AUDIO_FRAME_SIZE[] = "raw.audio-frame-size";
 
 /* --------------------------------------- AAC components --------------------------------------- */
 
@@ -2288,6 +2366,50 @@ constexpr char C2_PARAMKEY_OUTPUT_TUNNEL_HANDLE[] = "output.tunnel-handle";
 typedef C2PortParam<C2Info, C2SimpleValueStruct<int64_t>, kParamIndexTunnelSystemTime>
         C2PortTunnelSystemTime;
 constexpr char C2_PARAMKEY_OUTPUT_RENDER_TIME[] = "output.render-time";
+
+
+/**
+ * Tunneled mode video peek signaling flag.
+ *
+ * When a video frame is pushed to the decoder with this parameter set to true,
+ * the decoder must decode the frame, signal partial completion, and hold on the
+ * frame until C2StreamTunnelStartRender is set to true (which resets this
+ * flag). Flush will also result in the frames being returned back to the
+ * client (but not rendered).
+ */
+typedef C2StreamParam<C2Info, C2EasyBoolValue, kParamIndexTunnelHoldRender>
+        C2StreamTunnelHoldRender;
+constexpr char C2_PARAMKEY_TUNNEL_HOLD_RENDER[] = "output.tunnel-hold-render";
+
+/**
+ * Tunneled mode video peek signaling flag.
+ *
+ * Upon receiving this flag, the decoder shall set C2StreamTunnelHoldRender to
+ * false, which shall cause any frames held for rendering to be immediately
+ * displayed, regardless of their timestamps.
+*/
+typedef C2StreamParam<C2Info, C2EasyBoolValue, kParamIndexTunnelStartRender>
+        C2StreamTunnelStartRender;
+constexpr char C2_PARAMKEY_TUNNEL_START_RENDER[] = "output.tunnel-start-render";
+
+/**
+ * Encoding quality level signaling.
+ *
+ * Signal the 'minimum encoding quality' introduced in Android 12/S. It indicates
+ * whether the underlying codec is expected to take extra steps to ensure quality meets the
+ * appropriate minimum. A value of NONE indicates that the codec is not to apply
+ * any minimum quality bar requirements. Other values indicate that the codec is to apply
+ * a minimum quality bar, with the exact quality bar being decided by the parameter value.
+ */
+typedef C2GlobalParam<C2Setting,
+        C2SimpleValueStruct<C2EasyEnum<C2PlatformConfig::encoding_quality_level_t>>,
+        kParamIndexEncodingQualityLevel> C2EncodingQualityLevel;
+constexpr char C2_PARAMKEY_ENCODING_QUALITY_LEVEL[] = "algo.encoding-quality-level";
+
+C2ENUM(C2PlatformConfig::encoding_quality_level_t, uint32_t,
+    NONE = 0,
+    S_HANDHELD = 1              // corresponds to VMAF=70
+);
 
 /// @}
 

@@ -44,16 +44,18 @@ public:
             const media::VolumeShaperConfiguration& configuration,
             const media::VolumeShaperOperation& operation) override;
 
-            status_t startWithStatus();
+            status_t startWithStatus(audio_port_handle_t deviceId);
             status_t pauseWithStatus();
             status_t stopWithStatus();
 
             //FIXME temporary method while some player state is outside of this class
-            void reportEvent(player_state_t event);
+            void reportEvent(player_state_t event, audio_port_handle_t deviceId);
+
+            void baseUpdateDeviceId(audio_port_handle_t deviceId);
 
 protected:
 
-            void init(player_type_t playerType, audio_usage_t usage);
+            void init(player_type_t playerType, audio_usage_t usage, audio_session_t sessionId);
             void baseDestroy();
 
     //IPlayer methods handlers for derived classes
@@ -69,20 +71,24 @@ protected:
     float mPanMultiplierL, mPanMultiplierR;
     float mVolumeMultiplierL, mVolumeMultiplierR;
 
+    // player interface ID, uniquely identifies the player in the system
+    // effectively const after PlayerBase::init().
+    audio_unique_id_t mPIId;
+
 private:
             // report events to AudioService
-            void servicePlayerEvent(player_state_t event);
+            void servicePlayerEvent(player_state_t event, audio_port_handle_t deviceId);
             void serviceReleasePlayer();
 
     // native interface to AudioService
     android::sp<android::IAudioManager> mAudioManager;
 
-    // player interface ID, uniquely identifies the player in the system
-    audio_unique_id_t mPIId;
-
     // Mutex for state reporting
     Mutex mPlayerStateLock;
     player_state_t mLastReportedEvent;
+
+    Mutex mDeviceIdLock;
+    audio_port_handle_t mLastReportedDeviceId;
 };
 
 } // namespace android

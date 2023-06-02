@@ -19,7 +19,10 @@
 
 #include <android-base/logging.h>
 #include <media/MediaSampleWriter.h>
+#include <media/NdkCommon.h>
 #include <media/NdkMediaMuxer.h>
+#include <sys/prctl.h>
+#include <utils/AndroidThreads.h>
 
 namespace android {
 
@@ -79,16 +82,18 @@ std::shared_ptr<MediaSampleWriter> MediaSampleWriter::Create() {
 
 MediaSampleWriter::~MediaSampleWriter() {
     if (mState == STARTED) {
-        stop();  // Join thread.
+        stop();
     }
 }
 
-bool MediaSampleWriter::init(int fd, const std::weak_ptr<CallbackInterface>& callbacks) {
-    return init(DefaultMuxer::create(fd), callbacks);
+bool MediaSampleWriter::init(int fd, const std::weak_ptr<CallbackInterface>& callbacks,
+                             int64_t heartBeatIntervalUs) {
+    return init(DefaultMuxer::create(fd), callbacks, heartBeatIntervalUs);
 }
 
 bool MediaSampleWriter::init(const std::shared_ptr<MediaSampleWriterMuxerInterface>& muxer,
-                             const std::weak_ptr<CallbackInterface>& callbacks) {
+                             const std::weak_ptr<CallbackInterface>& callbacks,
+                             int64_t heartBeatIntervalUs) {
     if (callbacks.lock() == nullptr) {
         LOG(ERROR) << "Callback object cannot be null";
         return false;
@@ -106,6 +111,7 @@ bool MediaSampleWriter::init(const std::shared_ptr<MediaSampleWriterMuxerInterfa
     mState = INITIALIZED;
     mMuxer = muxer;
     mCallbacks = callbacks;
+    mHeartBeatIntervalUs = heartBeatIntervalUs;
     return true;
 }
 
@@ -121,7 +127,15 @@ MediaSampleWriter::MediaSampleConsumerFunction MediaSampleWriter::addTrack(
         LOG(ERROR) << "Muxer needs to be initialized when adding tracks.";
         return nullptr;
     }
-    ssize_t trackIndexOrError = mMuxer->addTrack(trackFormat.get());
+
+    AMediaFormat* trackFormatCopy = AMediaFormat_new();
+    AMediaFormat_copy(trackFormatCopy, trackFormat.get());
+    // Request muxer to use background priorities by default.
+    AMediaFormatUtils::SetDefaultFormatValueInt32(TBD_AMEDIACODEC_PARAMETER_KEY_BACKGROUND_MODE,
+                                                  trackFormatCopy, 1 /* true */);
+
+    ssize_t trackIndexOrError = mMuxer->addTrack(trackFormatCopy);
+    AMediaFormat_delete(trackFormatCopy);
     if (trackIndexOrError < 0) {
         LOG(ERROR) << "Failed to add media track to muxer: " << trackIndexOrError;
         return nullptr;
@@ -169,38 +183,44 @@ bool MediaSampleWriter::start() {
     }
 
     mState = STARTED;
-    mThread = std::thread([this] {
-        media_status_t status = writeSamples();
+    std::thread([this] {
+        androidSetThreadPriority(0 /* tid (0 = current) */, ANDROID_PRIORITY_BACKGROUND);
+        prctl(PR_SET_NAME, (unsigned long)"SampleWriterTrd", 0, 0, 0);
+
+        bool wasStopped = false;
+        media_status_t status = writeSamples(&wasStopped);
         if (auto callbacks = mCallbacks.lock()) {
-            callbacks->onFinished(this, status);
+            if (wasStopped && status == AMEDIA_OK) {
+                callbacks->onStopped(this);
+            } else {
+                callbacks->onFinished(this, status);
+            }
         }
-    });
+    }).detach();
     return true;
 }
 
-bool MediaSampleWriter::stop() {
+void MediaSampleWriter::stop() {
     {
         std::scoped_lock lock(mMutex);
         if (mState != STARTED) {
             LOG(ERROR) << "Sample writer is not started.";
-            return false;
+            return;
         }
         mState = STOPPED;
     }
 
     mSampleSignal.notify_all();
-    mThread.join();
-    return true;
 }
 
-media_status_t MediaSampleWriter::writeSamples() {
+media_status_t MediaSampleWriter::writeSamples(bool* wasStopped) {
     media_status_t muxerStatus = mMuxer->start();
     if (muxerStatus != AMEDIA_OK) {
         LOG(ERROR) << "Error starting muxer: " << muxerStatus;
         return muxerStatus;
     }
 
-    media_status_t writeStatus = runWriterLoop();
+    media_status_t writeStatus = runWriterLoop(wasStopped);
     if (writeStatus != AMEDIA_OK) {
         LOG(ERROR) << "Error writing samples: " << writeStatus;
     }
@@ -213,9 +233,10 @@ media_status_t MediaSampleWriter::writeSamples() {
     return writeStatus != AMEDIA_OK ? writeStatus : muxerStatus;
 }
 
-media_status_t MediaSampleWriter::runWriterLoop() NO_THREAD_SAFETY_ANALYSIS {
+media_status_t MediaSampleWriter::runWriterLoop(bool* wasStopped) NO_THREAD_SAFETY_ANALYSIS {
     AMediaCodecBufferInfo bufferInfo;
     int32_t lastProgressUpdate = 0;
+    bool progressSinceLastReport = false;
     int trackEosCount = 0;
 
     // Set the "primary" track that will be used to determine progress to the track with longest
@@ -229,6 +250,10 @@ media_status_t MediaSampleWriter::runWriterLoop() NO_THREAD_SAFETY_ANALYSIS {
         }
     }
 
+    std::chrono::microseconds updateInterval(mHeartBeatIntervalUs);
+    std::chrono::steady_clock::time_point nextUpdateTime =
+            std::chrono::steady_clock::now() + updateInterval;
+
     while (true) {
         if (trackEosCount >= mTracks.size()) {
             break;
@@ -239,11 +264,26 @@ media_status_t MediaSampleWriter::runWriterLoop() NO_THREAD_SAFETY_ANALYSIS {
         {
             std::unique_lock lock(mMutex);
             while (mSampleQueue.empty() && mState == STARTED) {
-                mSampleSignal.wait(lock);
+                if (mHeartBeatIntervalUs <= 0) {
+                    mSampleSignal.wait(lock);
+                    continue;
+                }
+
+                if (mSampleSignal.wait_until(lock, nextUpdateTime) == std::cv_status::timeout) {
+                    // Send heart-beat if there is any progress since last update time.
+                    if (progressSinceLastReport) {
+                        if (auto callbacks = mCallbacks.lock()) {
+                            callbacks->onHeartBeat(this);
+                        }
+                        progressSinceLastReport = false;
+                    }
+                    nextUpdateTime += updateInterval;
+                }
             }
 
-            if (mState != STARTED) {
-                return AMEDIA_ERROR_UNKNOWN;  // TODO(lnilsson): Custom error code.
+            if (mState == STOPPED) {
+                *wasStopped = true;
+                return AMEDIA_OK;
             }
 
             auto& topEntry = mSampleQueue.top();
@@ -303,6 +343,7 @@ media_status_t MediaSampleWriter::runWriterLoop() NO_THREAD_SAFETY_ANALYSIS {
                 lastProgressUpdate = progress;
             }
         }
+        progressSinceLastReport = true;
     }
 
     return AMEDIA_OK;

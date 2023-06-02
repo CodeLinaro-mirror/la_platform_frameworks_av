@@ -18,9 +18,10 @@
 #define LOG_TAG "VideoTrackTranscoder"
 
 #include <android-base/logging.h>
+#include <android-base/properties.h>
 #include <media/NdkCommon.h>
 #include <media/VideoTrackTranscoder.h>
-#include <utils/AndroidThreads.h>
+#include <sys/prctl.h>
 
 using namespace AMediaFormatUtils;
 
@@ -39,11 +40,18 @@ static constexpr int32_t kColorFormatSurface = 0x7f000789;
 // Default key frame interval in seconds.
 static constexpr float kDefaultKeyFrameIntervalSeconds = 1.0f;
 // Default codec operating rate.
-static constexpr int32_t kDefaultCodecOperatingRate = 240;
+static int32_t kDefaultCodecOperatingRate720P = base::GetIntProperty(
+        "debug.media.transcoding.codec_max_operating_rate_720P", /*default*/ 480);
+static int32_t kDefaultCodecOperatingRate1080P = base::GetIntProperty(
+        "debug.media.transcoding.codec_max_operating_rate_1080P", /*default*/ 240);
 // Default codec priority.
 static constexpr int32_t kDefaultCodecPriority = 1;
 // Default bitrate, in case source estimation fails.
 static constexpr int32_t kDefaultBitrateMbps = 10 * 1000 * 1000;
+// Default frame rate.
+static constexpr int32_t kDefaultFrameRate = 30;
+// Default codec complexity
+static constexpr int32_t kDefaultCodecComplexity = 1;
 
 template <typename T>
 void VideoTrackTranscoder::BlockingQueue<T>::push(T const& value, bool front) {
@@ -139,12 +147,12 @@ struct AsyncCodecCallbackDispatch {
         VideoTrackTranscoder::CodecWrapper* wrapper =
                 static_cast<VideoTrackTranscoder::CodecWrapper*>(userdata);
         if (auto transcoder = wrapper->getTranscoder()) {
-            const char* kCodecName = (codec == transcoder->mDecoder ? "Decoder" : "Encoder");
-            LOG(DEBUG) << kCodecName << " format changed: " << AMediaFormat_toString(format);
-            if (codec == transcoder->mEncoder->getCodec()) {
-                transcoder->mCodecMessageQueue.push(
-                        [transcoder, format] { transcoder->updateTrackFormat(format); });
-            }
+            const bool isDecoder = codec == transcoder->mDecoder;
+            const char* kCodecName = (isDecoder ? "Decoder" : "Encoder");
+            LOG(INFO) << kCodecName << " format changed: " << AMediaFormat_toString(format);
+            transcoder->mCodecMessageQueue.push([transcoder, format, isDecoder] {
+                transcoder->updateTrackFormat(format, isDecoder);
+            });
         }
     }
 
@@ -156,19 +164,17 @@ struct AsyncCodecCallbackDispatch {
                 static_cast<VideoTrackTranscoder::CodecWrapper*>(userdata);
         if (auto transcoder = wrapper->getTranscoder()) {
             transcoder->mCodecMessageQueue.push(
-                    [transcoder, error] {
-                        transcoder->mStatus = error;
-                        transcoder->mStopRequested = true;
-                    },
-                    true);
+                    [transcoder, error] { transcoder->mStatus = error; }, true);
         }
     }
 };
 
 // static
 std::shared_ptr<VideoTrackTranscoder> VideoTrackTranscoder::create(
-        const std::weak_ptr<MediaTrackTranscoderCallback>& transcoderCallback) {
-    return std::shared_ptr<VideoTrackTranscoder>(new VideoTrackTranscoder(transcoderCallback));
+        const std::weak_ptr<MediaTrackTranscoderCallback>& transcoderCallback, pid_t pid,
+        uid_t uid) {
+    return std::shared_ptr<VideoTrackTranscoder>(
+            new VideoTrackTranscoder(transcoderCallback, pid, uid));
 }
 
 VideoTrackTranscoder::~VideoTrackTranscoder() {
@@ -179,6 +185,25 @@ VideoTrackTranscoder::~VideoTrackTranscoder() {
     if (mSurface != nullptr) {
         ANativeWindow_release(mSurface);
     }
+}
+
+// Search the default operating rate based on resolution.
+static int32_t getDefaultOperatingRate(AMediaFormat* encoderFormat) {
+    int32_t width, height;
+    if (AMediaFormat_getInt32(encoderFormat, AMEDIAFORMAT_KEY_WIDTH, &width) && (width > 0) &&
+        AMediaFormat_getInt32(encoderFormat, AMEDIAFORMAT_KEY_HEIGHT, &height) && (height > 0)) {
+        if ((width == 1280 && height == 720) || (width == 720 && height == 1280)) {
+            return kDefaultCodecOperatingRate720P;
+        } else if ((width == 1920 && height == 1080) || (width == 1080 && height == 1920)) {
+            return kDefaultCodecOperatingRate1080P;
+        } else {
+            LOG(WARNING) << "Could not find default operating rate: " << width << " " << height;
+            // Don't set operating rate if the correct dimensions are not found.
+        }
+    } else {
+        LOG(ERROR) << "Failed to get default operating rate due to missing resolution";
+    }
+    return -1;
 }
 
 // Creates and configures the codecs.
@@ -197,29 +222,43 @@ media_status_t VideoTrackTranscoder::configureDestinationFormat(
         return AMEDIA_ERROR_INVALID_PARAMETER;
     }
 
-    int32_t bitrate;
-    if (!AMediaFormat_getInt32(encoderFormat, AMEDIAFORMAT_KEY_BIT_RATE, &bitrate)) {
-        status = mMediaSampleReader->getEstimatedBitrateForTrack(mTrackIndex, &bitrate);
+    if (!AMediaFormat_getInt32(encoderFormat, AMEDIAFORMAT_KEY_BIT_RATE, &mConfiguredBitrate)) {
+        status = mMediaSampleReader->getEstimatedBitrateForTrack(mTrackIndex, &mConfiguredBitrate);
         if (status != AMEDIA_OK) {
             LOG(ERROR) << "Unable to estimate bitrate. Using default " << kDefaultBitrateMbps;
-            bitrate = kDefaultBitrateMbps;
+            mConfiguredBitrate = kDefaultBitrateMbps;
         }
 
-        LOG(INFO) << "Configuring bitrate " << bitrate;
-        AMediaFormat_setInt32(encoderFormat, AMEDIAFORMAT_KEY_BIT_RATE, bitrate);
+        LOG(INFO) << "Configuring bitrate " << mConfiguredBitrate;
+        AMediaFormat_setInt32(encoderFormat, AMEDIAFORMAT_KEY_BIT_RATE, mConfiguredBitrate);
     }
 
     SetDefaultFormatValueFloat(AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, encoderFormat,
                                kDefaultKeyFrameIntervalSeconds);
-    SetDefaultFormatValueInt32(AMEDIAFORMAT_KEY_OPERATING_RATE, encoderFormat,
-                               kDefaultCodecOperatingRate);
-    SetDefaultFormatValueInt32(AMEDIAFORMAT_KEY_PRIORITY, encoderFormat, kDefaultCodecPriority);
 
+    int32_t operatingRate = getDefaultOperatingRate(encoderFormat);
+
+    if (operatingRate != -1) {
+        float tmpf;
+        int32_t tmpi;
+        if (!AMediaFormat_getFloat(encoderFormat, AMEDIAFORMAT_KEY_OPERATING_RATE, &tmpf) &&
+            !AMediaFormat_getInt32(encoderFormat, AMEDIAFORMAT_KEY_OPERATING_RATE, &tmpi)) {
+            AMediaFormat_setInt32(encoderFormat, AMEDIAFORMAT_KEY_OPERATING_RATE, operatingRate);
+        }
+    }
+
+    SetDefaultFormatValueInt32(AMEDIAFORMAT_KEY_PRIORITY, encoderFormat, kDefaultCodecPriority);
+    SetDefaultFormatValueInt32(AMEDIAFORMAT_KEY_FRAME_RATE, encoderFormat, kDefaultFrameRate);
+    SetDefaultFormatValueInt32(AMEDIAFORMAT_KEY_COMPLEXITY, encoderFormat, kDefaultCodecComplexity);
     AMediaFormat_setInt32(encoderFormat, AMEDIAFORMAT_KEY_COLOR_FORMAT, kColorFormatSurface);
 
     // Always encode without rotation. The rotation degree will be transferred directly to
     // MediaSampleWriter track format, and MediaSampleWriter will call AMediaMuxer_setOrientationHint.
     AMediaFormat_setInt32(encoderFormat, AMEDIAFORMAT_KEY_ROTATION, 0);
+
+    // Request encoder to use background priorities by default.
+    SetDefaultFormatValueInt32(TBD_AMEDIACODEC_PARAMETER_KEY_BACKGROUND_MODE, encoderFormat,
+                               1 /* true */);
 
     mDestinationFormat = std::shared_ptr<AMediaFormat>(encoderFormat, &AMediaFormat_delete);
 
@@ -232,13 +271,21 @@ media_status_t VideoTrackTranscoder::configureDestinationFormat(
         return AMEDIA_ERROR_INVALID_PARAMETER;
     }
 
-    AMediaCodec* encoder = AMediaCodec_createEncoderByType(destinationMime);
+#define __TRANSCODING_MIN_API__ 31
+
+    AMediaCodec* encoder;
+    if (__builtin_available(android __TRANSCODING_MIN_API__, *)) {
+        encoder = AMediaCodec_createEncoderByTypeForClient(destinationMime, mPid, mUid);
+    } else {
+        encoder = AMediaCodec_createEncoderByType(destinationMime);
+    }
     if (encoder == nullptr) {
         LOG(ERROR) << "Unable to create encoder for type " << destinationMime;
         return AMEDIA_ERROR_UNSUPPORTED;
     }
     mEncoder = std::make_shared<CodecWrapper>(encoder, shared_from_this());
 
+    LOG(INFO) << "Configuring encoder with: " << AMediaFormat_toString(mDestinationFormat.get());
     status = AMediaCodec_configure(mEncoder->getCodec(), mDestinationFormat.get(),
                                    NULL /* surface */, NULL /* crypto */,
                                    AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
@@ -261,7 +308,11 @@ media_status_t VideoTrackTranscoder::configureDestinationFormat(
         return AMEDIA_ERROR_INVALID_PARAMETER;
     }
 
-    mDecoder = AMediaCodec_createDecoderByType(sourceMime);
+    if (__builtin_available(android __TRANSCODING_MIN_API__, *)) {
+        mDecoder = AMediaCodec_createDecoderByTypeForClient(sourceMime, mPid, mUid);
+    } else {
+        mDecoder = AMediaCodec_createDecoderByType(sourceMime);
+    }
     if (mDecoder == nullptr) {
         LOG(ERROR) << "Unable to create decoder for type " << sourceMime;
         return AMEDIA_ERROR_UNSUPPORTED;
@@ -274,23 +325,50 @@ media_status_t VideoTrackTranscoder::configureDestinationFormat(
         return AMEDIA_ERROR_INVALID_PARAMETER;
     }
 
+    // Request decoder to convert HDR content to SDR.
+    const bool sourceIsHdr = VideoIsHdr(mSourceFormat.get());
+    if (sourceIsHdr) {
+        AMediaFormat_setInt32(decoderFormat.get(),
+                              TBD_AMEDIACODEC_PARAMETER_KEY_COLOR_TRANSFER_REQUEST,
+                              COLOR_TRANSFER_SDR_VIDEO);
+    }
+
     // Prevent decoder from overwriting frames that the encoder has not yet consumed.
     AMediaFormat_setInt32(decoderFormat.get(), TBD_AMEDIACODEC_PARAMETER_KEY_ALLOW_FRAME_DROP, 0);
 
     // Copy over configurations that apply to both encoder and decoder.
-    static const EntryCopier kEncoderEntriesToCopy[] = {
+    static const std::vector<EntryCopier> kEncoderEntriesToCopy{
             ENTRY_COPIER2(AMEDIAFORMAT_KEY_OPERATING_RATE, Float, Int32),
             ENTRY_COPIER(AMEDIAFORMAT_KEY_PRIORITY, Int32),
+            ENTRY_COPIER(TBD_AMEDIACODEC_PARAMETER_KEY_BACKGROUND_MODE, Int32),
     };
-    const size_t entryCount = sizeof(kEncoderEntriesToCopy) / sizeof(kEncoderEntriesToCopy[0]);
-    CopyFormatEntries(mDestinationFormat.get(), decoderFormat.get(), kEncoderEntriesToCopy,
-                      entryCount);
+    CopyFormatEntries(mDestinationFormat.get(), decoderFormat.get(), kEncoderEntriesToCopy);
 
+    LOG(INFO) << "Configuring decoder with: " << AMediaFormat_toString(decoderFormat.get());
     status = AMediaCodec_configure(mDecoder, decoderFormat.get(), mSurface, NULL /* crypto */,
                                    0 /* flags */);
     if (status != AMEDIA_OK) {
         LOG(ERROR) << "Unable to configure video decoder: " << status;
         return status;
+    }
+
+    if (sourceIsHdr) {
+        bool supported = false;
+        AMediaFormat* inputFormat = AMediaCodec_getInputFormat(mDecoder);
+
+        if (inputFormat != nullptr) {
+            int32_t transferFunc;
+            supported = AMediaFormat_getInt32(inputFormat,
+                                              TBD_AMEDIACODEC_PARAMETER_KEY_COLOR_TRANSFER_REQUEST,
+                                              &transferFunc) &&
+                        transferFunc == COLOR_TRANSFER_SDR_VIDEO;
+            AMediaFormat_delete(inputFormat);
+        }
+
+        if (!supported) {
+            LOG(ERROR) << "HDR to SDR conversion unsupported by the codec";
+            return AMEDIA_ERROR_UNSUPPORTED;
+        }
     }
 
     // Configure codecs to run in async mode.
@@ -354,6 +432,10 @@ void VideoTrackTranscoder::enqueueInputSample(int32_t bufferIndex) {
             mStatus = status;
             return;
         }
+
+        if (mSampleInfo.size) {
+            ++mInputFrameCount;
+        }
     } else {
         LOG(DEBUG) << "EOS from source.";
         mEosFromSource = true;
@@ -403,19 +485,47 @@ void VideoTrackTranscoder::dequeueOutputSample(int32_t bufferIndex,
         sample->info.flags = bufferInfo.flags;
         sample->info.presentationTimeUs = bufferInfo.presentationTimeUs;
 
+        if (bufferInfo.size > 0 && (bufferInfo.flags & SAMPLE_FLAG_CODEC_CONFIG) == 0) {
+            ++mOutputFrameCount;
+        }
         onOutputSampleAvailable(sample);
-    } else if (bufferIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
-        AMediaFormat* newFormat = AMediaCodec_getOutputFormat(mEncoder->getCodec());
-        LOG(DEBUG) << "Encoder output format changed: " << AMediaFormat_toString(newFormat);
+
+        mLastSampleWasSync = sample->info.flags & SAMPLE_FLAG_SYNC_SAMPLE;
     }
 
     if (bufferInfo.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) {
         LOG(DEBUG) << "EOS from encoder.";
         mEosFromEncoder = true;
+
+        if (mInputFrameCount != mOutputFrameCount) {
+            LOG(WARNING) << "Input / Output frame count mismatch: " << mInputFrameCount << " vs "
+                         << mOutputFrameCount;
+            if (mInputFrameCount > 0 && mOutputFrameCount == 0) {
+                LOG(ERROR) << "Encoder did not produce any output frames.";
+                mStatus = AMEDIA_ERROR_UNKNOWN;
+            }
+        }
     }
 }
 
-void VideoTrackTranscoder::updateTrackFormat(AMediaFormat* outputFormat) {
+void VideoTrackTranscoder::updateTrackFormat(AMediaFormat* outputFormat, bool fromDecoder) {
+    if (fromDecoder) {
+        static const std::vector<AMediaFormatUtils::EntryCopier> kValuesToCopy{
+                ENTRY_COPIER(AMEDIAFORMAT_KEY_COLOR_RANGE, Int32),
+                ENTRY_COPIER(AMEDIAFORMAT_KEY_COLOR_STANDARD, Int32),
+                ENTRY_COPIER(AMEDIAFORMAT_KEY_COLOR_TRANSFER, Int32),
+        };
+        AMediaFormat* params = AMediaFormat_new();
+        if (params != nullptr) {
+            AMediaFormatUtils::CopyFormatEntries(outputFormat, params, kValuesToCopy);
+            if (AMediaCodec_setParameters(mEncoder->getCodec(), params) != AMEDIA_OK) {
+                LOG(WARNING) << "Unable to update encoder with color information";
+            }
+            AMediaFormat_delete(params);
+        }
+        return;
+    }
+
     if (mActualOutputFormat != nullptr) {
         LOG(WARNING) << "Ignoring duplicate format change.";
         return;
@@ -479,12 +589,13 @@ void VideoTrackTranscoder::updateTrackFormat(AMediaFormat* outputFormat) {
     // TODO: transfer other fields as required.
 
     mActualOutputFormat = std::shared_ptr<AMediaFormat>(formatCopy, &AMediaFormat_delete);
+    LOG(INFO) << "Actual output format: " << AMediaFormat_toString(formatCopy);
 
     notifyTrackFormatAvailable();
 }
 
-media_status_t VideoTrackTranscoder::runTranscodeLoop() {
-    androidSetThreadPriority(0 /* tid (0 = current) */, ANDROID_PRIORITY_VIDEO);
+media_status_t VideoTrackTranscoder::runTranscodeLoop(bool* stopped) {
+    prctl(PR_SET_NAME, (unsigned long)"VideTranscodTrd", 0, 0, 0);
 
     // Push start decoder and encoder as two messages, so that these are subject to the
     // stop request as well. If the session is cancelled (or paused) immediately after start,
@@ -507,25 +618,31 @@ media_status_t VideoTrackTranscoder::runTranscodeLoop() {
     });
 
     // Process codec events until EOS is reached, transcoding is stopped or an error occurs.
-    while (!mStopRequested && !mEosFromEncoder && mStatus == AMEDIA_OK) {
+    while (mStopRequest != STOP_NOW && !mEosFromEncoder && mStatus == AMEDIA_OK) {
         std::function<void()> message = mCodecMessageQueue.pop();
         message();
+
+        if (mStopRequest == STOP_ON_SYNC && mLastSampleWasSync) {
+            break;
+        }
     }
 
     mCodecMessageQueue.abort();
     AMediaCodec_stop(mDecoder);
 
-    // Return error if transcoding was stopped before it finished.
-    if (mStopRequested && !mEosFromEncoder && mStatus == AMEDIA_OK) {
-        mStatus = AMEDIA_ERROR_UNKNOWN;  // TODO: Define custom error codes?
+    // Signal if transcoding was stopped before it finished.
+    if (mStopRequest != NONE && !mEosFromEncoder && mStatus == AMEDIA_OK) {
+        *stopped = true;
     }
 
     return mStatus;
 }
 
 void VideoTrackTranscoder::abortTranscodeLoop() {
-    // Push abort message to the front of the codec event queue.
-    mCodecMessageQueue.push([this] { mStopRequested = true; }, true /* front */);
+    if (mStopRequest == STOP_NOW) {
+        // Wake up transcoder thread.
+        mCodecMessageQueue.push([] {}, true /* front */);
+    }
 }
 
 std::shared_ptr<AMediaFormat> VideoTrackTranscoder::getOutputFormat() const {

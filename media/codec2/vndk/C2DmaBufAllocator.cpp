@@ -16,11 +16,13 @@
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "C2DmaBufAllocator"
+
 #include <BufferAllocator/BufferAllocator.h>
 #include <C2Buffer.h>
 #include <C2Debug.h>
 #include <C2DmaBufAllocator.h>
 #include <C2ErrnoUtils.h>
+
 #include <linux/ion.h>
 #include <sys/mman.h>
 #include <unistd.h>  // getpagesize, size_t, close, dup
@@ -28,14 +30,16 @@
 
 #include <list>
 
-#ifdef __ANDROID_APEX__
 #include <android-base/properties.h>
-#endif
+#include <media/stagefright/foundation/Mutexed.h>
 
 namespace android {
 
 namespace {
-constexpr size_t USAGE_LRU_CACHE_SIZE = 1024;
+    constexpr size_t USAGE_LRU_CACHE_SIZE = 1024;
+
+    // max padding after ion/dmabuf allocations in bytes
+    constexpr uint32_t MAX_PADDING = 0x8000; // 32KB
 }
 
 /* =========================== BUFFER HANDLE =========================== */
@@ -108,8 +112,27 @@ class C2DmaBufAllocation : public C2LinearAllocation {
     virtual bool equals(const std::shared_ptr<C2LinearAllocation>& other) const override;
 
     // internal methods
-    C2DmaBufAllocation(BufferAllocator& alloc, size_t size, C2String heap_name, unsigned flags,
-                       C2Allocator::id_t id);
+
+    /**
+      * Constructs an allocation via a new allocation.
+      *
+      * @param alloc     allocator
+      * @param allocSize size used for the allocator
+      * @param capacity  capacity advertised to the client
+      * @param heap_name name of the dmabuf heap (device)
+      * @param flags     flags
+      * @param id        allocator id
+      */
+    C2DmaBufAllocation(BufferAllocator& alloc, size_t allocSize, size_t capacity,
+                       C2String heap_name, unsigned flags, C2Allocator::id_t id);
+
+    /**
+      * Constructs an allocation by wrapping an existing allocation.
+      *
+      * @param size    capacity advertised to the client
+      * @param shareFd dmabuf fd of the wrapped allocation
+      * @param id      allocator id
+      */
     C2DmaBufAllocation(size_t size, int shareFd, C2Allocator::id_t id);
 
     c2_status_t status() const;
@@ -139,7 +162,7 @@ class C2DmaBufAllocation : public C2LinearAllocation {
         size_t alignmentBytes;
         size_t size;
     };
-    std::list<Mapping> mMappings;
+    Mutexed<std::list<Mapping>> mMappings;
 
     // TODO: we could make this encapsulate shared_ptr and copiable
     C2_DO_NOT_COPY(C2DmaBufAllocation);
@@ -149,7 +172,7 @@ c2_status_t C2DmaBufAllocation::map(size_t offset, size_t size, C2MemoryUsage us
                                     void** addr) {
     (void)fence;  // TODO: wait for fence
     *addr = nullptr;
-    if (!mMappings.empty()) {
+    if (!mMappings.lock()->empty()) {
         ALOGV("multiple map");
         // TODO: technically we should return DUPLICATE here, but our block views
         // don't actually unmap, so we end up remapping the buffer multiple times.
@@ -177,17 +200,18 @@ c2_status_t C2DmaBufAllocation::map(size_t offset, size_t size, C2MemoryUsage us
     c2_status_t err =
             mapInternal(mapSize, mapOffset, alignmentBytes, prot, flags, &(map.addr), addr);
     if (map.addr) {
-        mMappings.push_back(map);
+        mMappings.lock()->push_back(map);
     }
     return err;
 }
 
 c2_status_t C2DmaBufAllocation::unmap(void* addr, size_t size, C2Fence* fence) {
-    if (mMappings.empty()) {
+    Mutexed<std::list<Mapping>>::Locked mappings(mMappings);
+    if (mappings->empty()) {
         ALOGD("tried to unmap unmapped buffer");
         return C2_NOT_FOUND;
     }
-    for (auto it = mMappings.begin(); it != mMappings.end(); ++it) {
+    for (auto it = mappings->begin(); it != mappings->end(); ++it) {
         if (addr != (uint8_t*)it->addr + it->alignmentBytes ||
             size + it->alignmentBytes != it->size) {
             continue;
@@ -200,7 +224,7 @@ c2_status_t C2DmaBufAllocation::unmap(void* addr, size_t size, C2Fence* fence) {
         if (fence) {
             *fence = C2Fence();  // not using fences
         }
-        (void)mMappings.erase(it);
+        (void)mappings->erase(it);
         ALOGV("successfully unmapped: %d", mHandle.bufferFd());
         return C2_OK;
     }
@@ -231,9 +255,10 @@ const C2Handle* C2DmaBufAllocation::handle() const {
 }
 
 C2DmaBufAllocation::~C2DmaBufAllocation() {
-    if (!mMappings.empty()) {
+    Mutexed<std::list<Mapping>>::Locked mappings(mMappings);
+    if (!mappings->empty()) {
         ALOGD("Dangling mappings!");
-        for (const Mapping& map : mMappings) {
+        for (const Mapping& map : *mappings) {
             int err = munmap(map.addr, map.size);
             if (err) ALOGD("munmap failed");
         }
@@ -243,16 +268,19 @@ C2DmaBufAllocation::~C2DmaBufAllocation() {
     }
 }
 
-C2DmaBufAllocation::C2DmaBufAllocation(BufferAllocator& alloc, size_t size, C2String heap_name,
-                                       unsigned flags, C2Allocator::id_t id)
-    : C2LinearAllocation(size), mHandle(-1, 0) {
+C2DmaBufAllocation::C2DmaBufAllocation(BufferAllocator& alloc, size_t allocSize, size_t capacity,
+                                       C2String heap_name, unsigned flags, C2Allocator::id_t id)
+    : C2LinearAllocation(capacity), mHandle(-1, 0) {
     int bufferFd = -1;
     int ret = 0;
 
-    bufferFd = alloc.Alloc(heap_name, size, flags);
-    if (bufferFd < 0) ret = bufferFd;
+    bufferFd = alloc.Alloc(heap_name, allocSize, flags);
+    if (bufferFd < 0) {
+        ret = bufferFd;
+    }
 
-    mHandle = C2HandleBuf(bufferFd, size);
+    // this may be a non-working handle if bufferFd is negative
+    mHandle = C2HandleBuf(bufferFd, capacity);
     mId = id;
     mInit = c2_status_t(c2_map_errno<ENOMEM, EACCES, EINVAL>(ret));
 }
@@ -315,8 +343,8 @@ c2_status_t C2DmaBufAllocator::mapUsage(C2MemoryUsage usage, size_t capacity, C2
         if (mUsageMapper) {
             res = mUsageMapper(usage, capacity, heap_name, flags);
         } else {
-            // No system-uncached yet, so disabled for now
-            if (0 && !(usage.expected & (C2MemoryUsage::CPU_READ | C2MemoryUsage::CPU_WRITE)))
+            if (C2DmaBufAllocator::system_uncached_supported() &&
+                !(usage.expected & (C2MemoryUsage::CPU_READ | C2MemoryUsage::CPU_WRITE)))
                 *heap_name = "system-uncached";
             else
                 *heap_name = "system";
@@ -360,8 +388,22 @@ c2_status_t C2DmaBufAllocator::newLinearAllocation(
         return ret;
     }
 
+    // TODO: should we pad before mapping usage?
+
+    // NOTE: read this property directly from the property as this code has to run on
+    // Android Q, but the sysprop was only introduced in Android S.
+    static size_t sPadding =
+        base::GetUintProperty("media.c2.dmabuf.padding", (uint32_t)0, MAX_PADDING);
+    if (sPadding > SIZE_MAX - capacity) {
+        // size would overflow
+        ALOGD("dmabuf_alloc: size #%x cannot accommodate padding #%zx", capacity, sPadding);
+        return C2_NO_MEMORY;
+    }
+
+    size_t allocSize = (size_t)capacity + sPadding;
+    // TODO: should we align allocation size to mBlockSize to reflect the true allocation size?
     std::shared_ptr<C2DmaBufAllocation> alloc = std::make_shared<C2DmaBufAllocation>(
-            mBufferAllocator, capacity, heap_name, flags, getId());
+            mBufferAllocator, allocSize, allocSize - sPadding, heap_name, flags, getId());
     ret = alloc->status();
     if (ret == C2_OK) {
         *allocation = alloc;

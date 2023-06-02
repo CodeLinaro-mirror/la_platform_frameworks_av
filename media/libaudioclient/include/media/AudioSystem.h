@@ -19,13 +19,18 @@
 
 #include <sys/types.h>
 
+#include <android/media/AudioVibratorInfo.h>
 #include <android/media/BnAudioFlingerClient.h>
+#include <android/media/BnAudioPolicyServiceClient.h>
+#include <android/media/INativeSpatializerCallback.h>
+#include <android/media/ISpatializer.h>
+#include <android/content/AttributionSourceState.h>
+#include <media/AidlConversionUtil.h>
 #include <media/AudioDeviceTypeAddr.h>
 #include <media/AudioPolicy.h>
 #include <media/AudioProductStrategy.h>
 #include <media/AudioVolumeGroup.h>
 #include <media/AudioIoDescriptor.h>
-#include <media/IAudioPolicyServiceClient.h>
 #include <media/MicrophoneInfo.h>
 #include <set>
 #include <system/audio.h>
@@ -35,7 +40,26 @@
 #include <utils/Mutex.h>
 #include <vector>
 
+using android::content::AttributionSourceState;
+
 namespace android {
+
+struct record_client_info {
+    audio_unique_id_t riid;
+    uid_t uid;
+    audio_session_t session;
+    audio_source_t source;
+    audio_port_handle_t port_id;
+    bool silenced;
+};
+
+typedef struct record_client_info record_client_info_t;
+
+// AIDL conversion functions.
+ConversionResult<record_client_info_t>
+aidl2legacy_RecordClientInfo_record_client_info_t(const media::RecordClientInfo& aidl);
+ConversionResult<media::RecordClientInfo>
+legacy2aidl_record_client_info_t_RecordClientInfo(const record_client_info_t& legacy);
 
 typedef void (*audio_error_callback)(status_t err);
 typedef void (*dynamic_policy_callback)(int event, String8 regId, int val);
@@ -47,10 +71,14 @@ typedef void (*record_config_callback)(int event,
                                        std::vector<effect_descriptor_t> effects,
                                        audio_patch_handle_t patchHandle,
                                        audio_source_t source);
+typedef void (*routing_callback)();
 
 class IAudioFlinger;
-class IAudioPolicyService;
 class String8;
+
+namespace media {
+class IAudioPolicyService;
+}
 
 class AudioSystem
 {
@@ -120,6 +148,12 @@ public:
 
     static void setDynPolicyCallback(dynamic_policy_callback cb);
     static void setRecordConfigCallback(record_config_callback);
+    static void setRoutingCallback(routing_callback cb);
+
+    // Sets the binder to use for accessing the AudioFlinger service. This enables the system server
+    // to grant specific isolated processes access to the audio system. Currently used only for the
+    // HotwordDetectionService.
+    static void setAudioFlingerBinder(const sp<IBinder>& audioFlinger);
 
     // helper function to obtain AudioFlinger service handle
     static const sp<IAudioFlinger> get_audio_flinger();
@@ -193,6 +227,9 @@ public:
     // Indicate JAVA services are ready (scheduling, power management ...)
     static status_t systemReady();
 
+    // Indicate audio policy service is ready
+    static status_t audioPolicyReady();
+
     // Returns the number of frames per audio HAL buffer.
     // Corresponds to audio_stream->get_buffer_size()/audio_stream_in_frame_size() for input.
     // See also getFrameCount().
@@ -239,8 +276,7 @@ public:
                                      audio_io_handle_t *output,
                                      audio_session_t session,
                                      audio_stream_type_t *stream,
-                                     pid_t pid,
-                                     uid_t uid,
+                                     const AttributionSourceState& attributionSource,
                                      const audio_config_t *config,
                                      audio_output_flags_t flags,
                                      audio_port_handle_t *selectedDeviceId,
@@ -256,9 +292,7 @@ public:
                                     audio_io_handle_t *input,
                                     audio_unique_id_t riid,
                                     audio_session_t session,
-                                    pid_t pid,
-                                    uid_t uid,
-                                    const String16& opPackageName,
+                                     const AttributionSourceState& attributionSource,
                                     const audio_config_base_t *config,
                                     audio_input_flags_t flags,
                                     audio_port_handle_t *selectedDeviceId,
@@ -288,7 +322,7 @@ public:
 
     static status_t getMinVolumeIndexForAttributes(const audio_attributes_t &attr, int &index);
 
-    static uint32_t getStrategyForStream(audio_stream_type_t stream);
+    static product_strategy_t getStrategyForStream(audio_stream_type_t stream);
     static audio_devices_t getDevicesForStream(audio_stream_type_t stream);
     static status_t getDevicesForAttributes(const AudioAttributes &aa,
                                             AudioDeviceTypeAddrVector *devices);
@@ -296,7 +330,7 @@ public:
     static audio_io_handle_t getOutputForEffect(const effect_descriptor_t *desc);
     static status_t registerEffect(const effect_descriptor_t *desc,
                                     audio_io_handle_t io,
-                                    uint32_t strategy,
+                                    product_strategy_t strategy,
                                     audio_session_t session,
                                     int id);
     static status_t unregisterEffect(int id);
@@ -307,7 +341,7 @@ public:
     // and output configuration cache (gOutputs)
     static void clearAudioConfigCache();
 
-    static const sp<IAudioPolicyService> get_audio_policy_service();
+    static const sp<media::IAudioPolicyService> get_audio_policy_service();
 
     // helpers for android.media.AudioManager.getProperty(), see description there for meaning
     static uint32_t getPrimaryOutputSamplingRate();
@@ -317,11 +351,12 @@ public:
 
     static status_t setSupportedSystemUsages(const std::vector<audio_usage_t>& systemUsages);
 
-    static status_t setAllowedCapturePolicy(uid_t uid, audio_flags_mask_t flags);
+    static status_t setAllowedCapturePolicy(uid_t uid, audio_flags_mask_t capturePolicy);
 
-    // Check if hw offload is possible for given format, stream type, sample rate,
-    // bit rate, duration, video and streaming or offload property is enabled
-    static bool isOffloadSupported(const audio_offload_info_t& info);
+    // Indicate if hw offload is possible for given format, stream type, sample rate,
+    // bit rate, duration, video and streaming or offload property is enabled and when possible
+    // if gapless transitions are supported.
+    static audio_offload_mode_t getOffloadSupport(const audio_offload_info_t& info);
 
     // check presence of audio flinger service.
     // returns NO_ERROR if binding to service succeeds, DEAD_OBJECT otherwise
@@ -331,11 +366,11 @@ public:
     static status_t listAudioPorts(audio_port_role_t role,
                                    audio_port_type_t type,
                                    unsigned int *num_ports,
-                                   struct audio_port *ports,
+                                   struct audio_port_v7 *ports,
                                    unsigned int *generation);
 
     /* Get attributes for a given audio port */
-    static status_t getAudioPort(struct audio_port *port);
+    static status_t getAudioPort(struct audio_port_v7 *port);
 
     /* Create an audio patch between several source and sink ports */
     static status_t createAudioPatch(const struct audio_patch *patch,
@@ -393,27 +428,30 @@ public:
     // populated. The actual number of surround formats should be returned at numSurroundFormats.
     static status_t getSurroundFormats(unsigned int *numSurroundFormats,
                                        audio_format_t *surroundFormats,
-                                       bool *surroundFormatsEnabled,
-                                       bool reported);
+                                       bool *surroundFormatsEnabled);
+    static status_t getReportedSurroundFormats(unsigned int *numSurroundFormats,
+                                               audio_format_t *surroundFormats);
     static status_t setSurroundFormatEnabled(audio_format_t audioFormat, bool enabled);
 
     static status_t setAssistantUid(uid_t uid);
+    static status_t setHotwordDetectionServiceUid(uid_t uid);
     static status_t setA11yServicesUids(const std::vector<uid_t>& uids);
     static status_t setCurrentImeUid(uid_t uid);
 
     static bool     isHapticPlaybackSupported();
 
     static status_t listAudioProductStrategies(AudioProductStrategyVector &strategies);
-    static status_t getProductStrategyFromAudioAttributes(const AudioAttributes &aa,
-                                                        product_strategy_t &productStrategy);
+    static status_t getProductStrategyFromAudioAttributes(
+            const AudioAttributes &aa, product_strategy_t &productStrategy,
+            bool fallbackOnDefault = true);
 
     static audio_attributes_t streamTypeToAttributes(audio_stream_type_t stream);
     static audio_stream_type_t attributesToStreamType(const audio_attributes_t &attr);
 
     static status_t listAudioVolumeGroups(AudioVolumeGroupVector &groups);
 
-    static status_t getVolumeGroupFromAudioAttributes(const AudioAttributes &aa,
-                                                      volume_group_t &volumeGroup);
+    static status_t getVolumeGroupFromAudioAttributes(
+            const AudioAttributes &aa, volume_group_t &volumeGroup, bool fallbackOnDefault = true);
 
     static status_t setRttEnabled(bool enabled);
 
@@ -452,6 +490,49 @@ public:
     static status_t getDeviceForStrategy(product_strategy_t strategy,
             AudioDeviceTypeAddr &device);
 
+
+    /**
+     * If a spatializer stage effect is present on the platform, this will return an
+     * ISpatializer interface to control this feature.
+     * If no spatializer stage is present, a null interface is returned.
+     * The INativeSpatializerCallback passed must not be null.
+     * Only one ISpatializer interface can exist at a given time. The native audio policy
+     * service will reject the request if an interface was already acquired and previous owner
+     * did not die or call ISpatializer.release().
+     * @param callback in: the callback to receive state updates if the ISpatializer
+     *        interface is acquired.
+     * @param spatializer out: the ISpatializer interface made available to control the
+     *        platform spatializer
+     * @return NO_ERROR in case of success, DEAD_OBJECT, NO_INIT, PERMISSION_DENIED, BAD_VALUE
+     *         in case of error.
+     */
+    static status_t getSpatializer(const sp<media::INativeSpatializerCallback>& callback,
+                                        sp<media::ISpatializer>* spatializer);
+
+    /**
+     * Queries if some kind of spatialization will be performed if the audio playback context
+     * described by the provided arguments is present.
+     * The context is made of:
+     * - The audio attributes describing the playback use case.
+     * - The audio configuration describing the audio format, channels, sampling rate ...
+     * - The devices describing the sink audio device selected for playback.
+     * All arguments are optional and only the specified arguments are used to match against
+     * supported criteria. For instance, supplying no argument will tell if spatialization is
+     * supported or not in general.
+     * @param attr audio attributes describing the playback use case
+     * @param config audio configuration describing the audio format, channels, sampling rate...
+     * @param devices the sink audio device selected for playback
+     * @param canBeSpatialized out: true if spatialization is enabled for this context,
+     *        false otherwise
+     * @return NO_ERROR in case of success, DEAD_OBJECT, NO_INIT, BAD_VALUE
+     *         in case of error.
+     */
+    static status_t canBeSpatialized(const audio_attributes_t *attr,
+                                     const audio_config_t *config,
+                                     const AudioDeviceTypeAddrVector &devices,
+                                     bool *canBeSpatialized);
+
+
     // A listener for capture state changes.
     class CaptureStateListener : public RefBase {
     public:
@@ -464,11 +545,11 @@ public:
         virtual ~CaptureStateListener() = default;
     };
 
-    // Regiseters a listener for sound trigger capture state changes.
+    // Registers a listener for sound trigger capture state changes.
     // There may only be one such listener registered at any point.
-    // The listener onStateChanged() method will be invoked sychronously from
+    // The listener onStateChanged() method will be invoked synchronously from
     // this call with the initial value.
-    // The listener onServiceDied() method will be invoked sychronously from
+    // The listener onServiceDied() method will be invoked synchronously from
     // this call if initial attempt to register failed.
     // If the audio policy service cannot be reached, this method will return
     // PERMISSION_DENIED and will not invoke the callback, otherwise, it will
@@ -529,6 +610,8 @@ public:
 
     static audio_port_handle_t getDeviceIdForIo(audio_io_handle_t audioIo);
 
+    static status_t setVibratorInfos(const std::vector<media::AudioVibratorInfo>& vibratorInfos);
+
 private:
 
     class AudioFlingerClient: public IBinder::DeathRecipient, public media::BnAudioFlingerClient
@@ -579,7 +662,7 @@ private:
     };
 
     class AudioPolicyServiceClient: public IBinder::DeathRecipient,
-                                    public BnAudioPolicyServiceClient
+                                    public media::BnAudioPolicyServiceClient
     {
     public:
         AudioPolicyServiceClient() {
@@ -597,18 +680,21 @@ private:
         virtual void binderDied(const wp<IBinder>& who);
 
         // IAudioPolicyServiceClient
-        virtual void onAudioPortListUpdate();
-        virtual void onAudioPatchListUpdate();
-        virtual void onAudioVolumeGroupChanged(volume_group_t group, int flags);
-        virtual void onDynamicPolicyMixStateUpdate(String8 regId, int32_t state);
-        virtual void onRecordingConfigurationUpdate(int event,
-                                                    const record_client_info_t *clientInfo,
-                                                    const audio_config_base_t *clientConfig,
-                                                    std::vector<effect_descriptor_t> clientEffects,
-                                                    const audio_config_base_t *deviceConfig,
-                                                    std::vector<effect_descriptor_t> effects,
-                                                    audio_patch_handle_t patchHandle,
-                                                    audio_source_t source);
+        binder::Status onAudioVolumeGroupChanged(int32_t group, int32_t flags) override;
+        binder::Status onAudioPortListUpdate() override;
+        binder::Status onAudioPatchListUpdate() override;
+        binder::Status onDynamicPolicyMixStateUpdate(const std::string& regId,
+                                                     int32_t state) override;
+        binder::Status onRecordingConfigurationUpdate(
+                int32_t event,
+                const media::RecordClientInfo& clientInfo,
+                const media::AudioConfigBase& clientConfig,
+                const std::vector<media::EffectDescriptor>& clientEffects,
+                const media::AudioConfigBase& deviceConfig,
+                const std::vector<media::EffectDescriptor>& effects,
+                int32_t patchHandle,
+                media::AudioSourceType source) override;
+        binder::Status onRoutingUpdated();
 
     private:
         Mutex                               mLock;
@@ -635,6 +721,7 @@ private:
     static std::set<audio_error_callback> gAudioErrorCallbacks;
     static dynamic_policy_callback gDynPolicyCallback;
     static record_config_callback gRecordConfigCallback;
+    static routing_callback gRoutingCallback;
 
     static size_t gInBuffSize;
     // previous parameters for recording buffer size queries
@@ -642,7 +729,7 @@ private:
     static audio_format_t gPrevInFormat;
     static audio_channel_mask_t gPrevInChannelMask;
 
-    static sp<IAudioPolicyService> gAudioPolicyService;
+    static sp<media::IAudioPolicyService> gAudioPolicyService;
 };
 
 };  // namespace android

@@ -23,7 +23,7 @@
 class TrackBase : public ExtendedAudioBufferProvider, public RefBase {
 
 public:
-    enum track_state {
+    enum track_state : int32_t {
         IDLE,
         FLUSHED,        // for PlaybackTracks only
         STOPPED,
@@ -106,6 +106,9 @@ public:
             bool        isTerminated() const { return mTerminated; }
 
     audio_attributes_t  attributes() const { return mAttr; }
+
+            bool canBeSpatialized() const { return mIsOut && (mAttr.flags
+                    & (AUDIO_FLAG_CONTENT_SPATIALIZED | AUDIO_FLAG_NEVER_SPATIALIZE)) == 0; }
 
 #ifdef TEE_SINK
            void         dumpTee(int fd, const std::string &reason) const {
@@ -253,11 +256,25 @@ public:
     // Called to tally underrun frames in playback.
     virtual void tallyUnderrunFrames(size_t /* frames */) {}
 
+    audio_channel_mask_t channelMask() const { return mChannelMask; }
+
+    /** @return true if the track has changed (metadata or volume) since
+     *          the last time this function was called,
+     *          true if this function was never called since the track creation,
+     *          false otherwise.
+     *  Thread safe.
+     */
+    bool readAndClearHasChanged() { return !mChangeNotified.test_and_set(); }
+
+    /** Set that a metadata has changed and needs to be notified to backend. Thread safe. */
+    void setMetadataHasChanged() { mChangeNotified.clear(); }
+
 protected:
     DISALLOW_COPY_AND_ASSIGN(TrackBase);
 
     void releaseCblk() {
         if (mCblk != nullptr) {
+            mState.clear();
             mCblk->~audio_track_cblk_t();   // destroy our shared-structure.
             if (mClient == 0) {
                 free(mCblk);
@@ -277,8 +294,6 @@ protected:
     uint32_t channelCount() const { return mChannelCount; }
 
     size_t frameSize() const { return mFrameSize; }
-
-    audio_channel_mask_t channelMask() const { return mChannelMask; }
 
     virtual uint32_t sampleRate() const { return mSampleRate; }
 
@@ -344,7 +359,7 @@ protected:
                                     // except for OutputTrack when it is in local memory
     size_t              mBufferSize; // size of mBuffer in bytes
     // we don't really need a lock for these
-    track_state         mState;
+    MirroredVariable<track_state>  mState;
     const audio_attributes_t mAttr;
     const uint32_t      mSampleRate;    // initial sample rate only; for tracks which
                         // support dynamic rates, the current value is in control block
@@ -391,6 +406,9 @@ protected:
     std::atomic<FrameTime> mKernelFrameTime{};     // last frame time on kernel side.
     const pid_t         mCreatorPid;  // can be different from mclient->pid() for instance
                                       // when created by NuPlayer on behalf of a client
+
+    // If the last track change was notified to the client with readAndClearHasChanged
+    std::atomic_flag    mChangeNotified = ATOMIC_FLAG_INIT;
 };
 
 // PatchProxyBufferProvider interface is implemented by PatchTrack and PatchRecord.

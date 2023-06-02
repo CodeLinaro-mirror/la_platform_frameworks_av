@@ -557,12 +557,14 @@ inline static const char *asString_DolbyVisionLevel(int32_t i, const char *def =
 }
 
 constexpr int32_t BITRATE_MODE_CBR = 2;
+constexpr int32_t BITRATE_MODE_CBR_FD = 3;
 constexpr int32_t BITRATE_MODE_CQ = 0;
 constexpr int32_t BITRATE_MODE_VBR = 1;
 
 inline static const char *asString_BitrateMode(int32_t i, const char *def = "??") {
     switch (i) {
         case BITRATE_MODE_CBR:  return "CBR";
+        case BITRATE_MODE_CBR_FD: return "CBR_FD";
         case BITRATE_MODE_CQ:   return "CQ";
         case BITRATE_MODE_VBR:  return "VBR";
         default:                return def;
@@ -619,6 +621,7 @@ constexpr int32_t COLOR_FormatYUV422Planar            = 22;
 constexpr int32_t COLOR_FormatYUV422SemiPlanar        = 24;
 constexpr int32_t COLOR_FormatYUV444Flexible          = 0x7F444888;
 constexpr int32_t COLOR_FormatYUV444Interleaved       = 29;
+constexpr int32_t COLOR_FormatYUVP010                 = 54;
 constexpr int32_t COLOR_QCOM_FormatYUV420SemiPlanar   = 0x7fa30c00;
 constexpr int32_t COLOR_TI_FormatYUV420PackedSemiPlanar = 0x7f000100;
 
@@ -683,6 +686,7 @@ inline static const char *asString_ColorFormat(int32_t i, const char *def = "??"
 constexpr char FEATURE_AdaptivePlayback[]       = "adaptive-playback";
 constexpr char FEATURE_IntraRefresh[] = "intra-refresh";
 constexpr char FEATURE_PartialFrame[] = "partial-frame";
+constexpr char FEATURE_QpBounds[] = "qp-bounds";
 constexpr char FEATURE_SecurePlayback[]         = "secure-playback";
 constexpr char FEATURE_TunneledPlayback[]       = "tunneled-playback";
 
@@ -752,7 +756,7 @@ constexpr char KEY_CA_SESSION_ID[] = "ca-session-id";
 constexpr char KEY_CA_SYSTEM_ID[] = "ca-system-id";
 constexpr char KEY_CA_PRIVATE_DATA[] = "ca-private-data";
 constexpr char KEY_CAPTURE_RATE[] = "capture-rate";
-constexpr char KEY_CHANNEL_COUNT[] = "channel-count";
+constexpr char KEY_CHANNEL_COUNT[] = "channel-count";   // value N, eq to range 1..N
 constexpr char KEY_CHANNEL_MASK[] = "channel-mask";
 constexpr char KEY_COLOR_FORMAT[] = "color-format";
 constexpr char KEY_COLOR_RANGE[] = "color-range";
@@ -785,6 +789,7 @@ constexpr char KEY_MAX_BIT_RATE[] = "max-bitrate";
 constexpr char KEY_MAX_FPS_TO_ENCODER[] = "max-fps-to-encoder";
 constexpr char KEY_MAX_HEIGHT[] = "max-height";
 constexpr char KEY_MAX_INPUT_SIZE[] = "max-input-size";
+constexpr char KEY_MAX_OUTPUT_CHANNEL_COUNT[] = "max-output-channel-count";
 constexpr char KEY_MAX_PTS_GAP_TO_ENCODER[] = "max-pts-gap-to-encoder";
 constexpr char KEY_MAX_WIDTH[] = "max-width";
 constexpr char KEY_MIME[] = "mime";
@@ -793,7 +798,7 @@ constexpr char KEY_OUTPUT_REORDER_DEPTH[] = "output-reorder-depth";
 constexpr char KEY_PCM_ENCODING[] = "pcm-encoding";
 constexpr char KEY_PIXEL_ASPECT_RATIO_HEIGHT[] = "sar-height";
 constexpr char KEY_PIXEL_ASPECT_RATIO_WIDTH[] = "sar-width";
-constexpr char KEY_PREPEND_HEADERS_TO_SYNC_FRAMES[] = "prepend-sps-pps-to-idr-frames";
+constexpr char KEY_PREPEND_HEADER_TO_SYNC_FRAMES[] = "prepend-sps-pps-to-idr-frames";
 constexpr char KEY_PRIORITY[] = "priority";
 constexpr char KEY_PROFILE[] = "profile";
 constexpr char KEY_PUSH_BLANK_BUFFERS_ON_STOP[] = "push-blank-buffers-on-shutdown";
@@ -807,6 +812,14 @@ constexpr char KEY_TEMPORAL_LAYERING[] = "ts-schema";
 constexpr char KEY_TILE_HEIGHT[] = "tile-height";
 constexpr char KEY_TILE_WIDTH[] = "tile-width";
 constexpr char KEY_TRACK_ID[] = "track-id";
+constexpr char KEY_VIDEO_QP_B_MAX[] = "video-qp-b-max";
+constexpr char KEY_VIDEO_QP_B_MIN[] = "video-qp-b-min";
+constexpr char KEY_VIDEO_QP_I_MAX[] = "video-qp-i-max";
+constexpr char KEY_VIDEO_QP_I_MIN[] = "video-qp-i-min";
+constexpr char KEY_VIDEO_QP_MAX[] = "video-qp-max";
+constexpr char KEY_VIDEO_QP_MIN[] = "video-qp-min";
+constexpr char KEY_VIDEO_QP_P_MAX[] = "video-qp-p-max";
+constexpr char KEY_VIDEO_QP_P_MIN[] = "video-qp-p-min";
 constexpr char KEY_WIDTH[] = "width";
 
 // from MediaCodec.java
@@ -848,9 +861,9 @@ constexpr char PARAMETER_KEY_OFFSET_TIME[] = "time-offset-us";
 constexpr char PARAMETER_KEY_REQUEST_SYNC_FRAME[] = "request-sync";
 constexpr char PARAMETER_KEY_SUSPEND[] = "drop-input-frames";
 constexpr char PARAMETER_KEY_SUSPEND_TIME[] = "drop-start-time-us";
+constexpr char PARAMETER_KEY_TUNNEL_PEEK[] =  "tunnel-peek";
 constexpr char PARAMETER_KEY_VIDEO_BITRATE[] = "video-bitrate";
 
 }
 
 #endif  // MEDIA_CODEC_CONSTANTS_H_
-

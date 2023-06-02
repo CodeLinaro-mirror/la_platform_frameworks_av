@@ -18,7 +18,6 @@
 #include <stdlib.h>
 #include "LVPSA.h"
 #include "LVPSA_Private.h"
-#include "InstAlloc.h"
 
 /************************************************************************************/
 /*                                                                                  */
@@ -49,10 +48,7 @@ LVPSA_RETURN LVPSA_Init(pLVPSA_Handle_t* phInstance, LVPSA_InitParams_t* pInitPa
     LVM_UINT32 BufferLength = 0;
 
     /* Set the instance handle if not already initialised */
-    *phInstance = calloc(1, sizeof(*pLVPSA_Inst));
-    if (*phInstance == LVM_NULL) {
-        return LVPSA_ERROR_NULLADDRESS;
-    }
+    *phInstance = new LVPSA_InstancePr_t{};
     pLVPSA_Inst = (LVPSA_InstancePr_t*)*phInstance;
 
     pLVPSA_Inst->pScratch = pScratch;
@@ -108,19 +104,9 @@ LVPSA_RETURN LVPSA_Init(pLVPSA_Handle_t* phInstance, LVPSA_InitParams_t* pInitPa
     if (pLVPSA_Inst->pBPFiltersPrecision == LVM_NULL) {
         return LVPSA_ERROR_NULLADDRESS;
     }
-    pLVPSA_Inst->pBP_Instances = (Biquad_FLOAT_Instance_t*)calloc(
-            pInitParams->nBands, sizeof(*(pLVPSA_Inst->pBP_Instances)));
-    if (pLVPSA_Inst->pBP_Instances == LVM_NULL) {
-        return LVPSA_ERROR_NULLADDRESS;
-    }
     pLVPSA_Inst->pQPD_States =
             (QPD_FLOAT_State_t*)calloc(pInitParams->nBands, sizeof(*(pLVPSA_Inst->pQPD_States)));
     if (pLVPSA_Inst->pQPD_States == LVM_NULL) {
-        return LVPSA_ERROR_NULLADDRESS;
-    }
-    pLVPSA_Inst->pBP_Taps = (Biquad_1I_Order2_FLOAT_Taps_t*)calloc(
-            pInitParams->nBands, sizeof(*(pLVPSA_Inst->pBP_Taps)));
-    if (pLVPSA_Inst->pBP_Taps == LVM_NULL) {
         return LVPSA_ERROR_NULLADDRESS;
     }
     pLVPSA_Inst->pQPD_Taps =
@@ -193,22 +179,14 @@ void LVPSA_DeInit(pLVPSA_Handle_t* phInstance) {
         free(pLVPSA_Inst->pBPFiltersPrecision);
         pLVPSA_Inst->pBPFiltersPrecision = LVM_NULL;
     }
-    if (pLVPSA_Inst->pBP_Instances != LVM_NULL) {
-        free(pLVPSA_Inst->pBP_Instances);
-        pLVPSA_Inst->pBP_Instances = LVM_NULL;
-    }
     if (pLVPSA_Inst->pQPD_States != LVM_NULL) {
         free(pLVPSA_Inst->pQPD_States);
         pLVPSA_Inst->pQPD_States = LVM_NULL;
-    }
-    if (pLVPSA_Inst->pBP_Taps != LVM_NULL) {
-        free(pLVPSA_Inst->pBP_Taps);
-        pLVPSA_Inst->pBP_Taps = LVM_NULL;
     }
     if (pLVPSA_Inst->pQPD_Taps != LVM_NULL) {
         free(pLVPSA_Inst->pQPD_Taps);
         pLVPSA_Inst->pQPD_Taps = LVM_NULL;
     }
-    free(pLVPSA_Inst);
+    delete pLVPSA_Inst;
     *phInstance = LVM_NULL;
 }
