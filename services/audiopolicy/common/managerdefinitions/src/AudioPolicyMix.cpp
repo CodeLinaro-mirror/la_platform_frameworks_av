@@ -13,6 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+* Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+* Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+* SPDX-License-Identifier: BSD-3-Clause-Clear
+*/
 
 #define LOG_TAG "APM_AudioPolicyMix"
 // #define LOG_NDEBUG 0
@@ -370,14 +375,17 @@ bool AudioPolicyMixCollection::mixMatch(const AudioMix* mix, size_t mixIndex,
                 return false;
             }
         }
-
-        // Permit match only if requested format and mix format are PCM and can be format
-        // adapted by the mixer, or are the same (compressed) format.
-        if (!is_mix_loopback(mix->mRouteFlags) &&
-            !((audio_is_linear_pcm(config.format) && audio_is_linear_pcm(mix->mFormat.format)) ||
-              (config.format == mix->mFormat.format)) &&
-              config.format != AUDIO_CONFIG_BASE_INITIALIZER.format) {
-            return false;
+        // if alert usage is using mp3 format skip below check
+        if (!(attributes.usage >= AUDIO_USAGE_EMERGENCY && config.format == AUDIO_FORMAT_MP3)) {
+            // Permit match only if requested format and mix format are PCM and can be format
+            // adapted by the mixer, or are the same (compressed) format.
+            if (!is_mix_loopback(mix->mRouteFlags) &&
+                !((audio_is_linear_pcm(config.format) &&
+                audio_is_linear_pcm(mix->mFormat.format)) ||
+                (config.format == mix->mFormat.format)) &&
+                config.format != AUDIO_CONFIG_BASE_INITIALIZER.format) {
+                    return false;
+            }
         }
 
         // if there is an address match, prioritize that match
