@@ -39,6 +39,8 @@
 #include <media/stagefright/Utils.h>
 #include <media/CharacterEncodingDetector.h>
 
+#include <stagefright/AVExtensions.h>
+
 namespace android {
 
 StagefrightMetadataRetriever::StagefrightMetadataRetriever()
@@ -90,6 +92,7 @@ status_t StagefrightMetadataRetriever::setDataSource(
     fd = dup(fd);
 
     ALOGV("setDataSource(%d, %" PRId64 ", %" PRId64 ")", fd, offset, length);
+    AVUtils::get()->printFileName(fd);
 
     clearMetadata();
     mSource = new PlayerServiceFileSource(fd, offset, length);
