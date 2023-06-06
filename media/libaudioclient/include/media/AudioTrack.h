@@ -690,7 +690,6 @@ public:
      */
             static const char * convertTransferToText(transfer_type transferType);
 
-public:
     /* Returns a handle on the audio output used by this AudioTrack.
      *
      * Parameters:
@@ -1390,7 +1389,6 @@ private:
     MediaMetrics mMediaMetrics;
     std::string mMetricsId;  // GUARDED_BY(mLock), could change in createTrack_l().
     std::string mCallerName; // for example "aaudio"
-    bool                    mTrackOffloaded;
 
     // report error to mediametrics.
     void reportError(status_t status, const char *event, const char *message) const;

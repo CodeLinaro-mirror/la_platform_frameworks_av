@@ -50,11 +50,6 @@
 // TODO : Remove the defines once mainline media is built against NDK >= 31.
 // The mp4 extractor is part of mainline and builds against NDK 29 as of
 // writing. These keys are available only from NDK 31:
-
-#ifndef __NO_AVEXTENSIONS__
-#include <stagefright/AVExtensions.h>
-#endif
-
 #define AMEDIAFORMAT_KEY_MPEGH_PROFILE_LEVEL_INDICATION \
   "mpegh-profile-level-indication"
 #define AMEDIAFORMAT_KEY_MPEGH_REFERENCE_CHANNEL_LAYOUT \
@@ -1509,9 +1504,6 @@ status_t convertMetaDataToMessage(
         msg->setBuffer("csd-0", buffer);
     }
 
-#ifndef __NO_AVEXTENSIONS__
-    AVUtils::get()->convertMetaDataToMessage(meta, &msg);
-#endif
     if (meta->findData(kKeyDVCC, &type, &data, &size)) {
         const uint8_t *ptr = (const uint8_t *)data;
         ALOGV("DV: calling parseDolbyVisionProfileLevelFromDvcc with data size %zu", size);
@@ -2059,9 +2051,6 @@ status_t convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
         }
     }
     // XXX TODO add whatever other keys there are
-#ifndef __NO_AVEXTENSIONS__
-	AVUtils::get()->convertMessageToMetaData(msg, meta);
-#endif
 
 #if 0
     ALOGI("converted %s to:", msg->debugString(0).c_str());
@@ -2096,10 +2085,6 @@ status_t sendMetaDataToHal(sp<MediaPlayerBase::AudioSink>& sink,
     if (meta->findInt32(kKeyEncoderPadding, &paddingSamples)) {
         param.addInt(String8(AUDIO_OFFLOAD_CODEC_PADDING_SAMPLES), paddingSamples);
     }
-
-#ifndef __NO_AVEXTENSIONS__
-	AVUtils::get()->sendMetaDataToHal(meta, &param);
-#endif
 
     ALOGV("sendMetaDataToHal: bitRate %d, sampleRate %d, chanMask %d,"
           "delaySample %d, paddingSample %d", bitRate, sampleRate,
@@ -2141,11 +2126,8 @@ const struct mime_conv_t* p = &mimeLookup[0];
         }
         ++p;
     }
-#ifndef __NO_AVEXTENSIONS__
-	return AVUtils::get()->mapMimeToAudioFormat(format, mime);
-#else
+
     return BAD_VALUE;
-#endif
 }
 
 struct aac_format_conv_t {
@@ -2201,34 +2183,17 @@ status_t getAudioOffloadInfo(const sp<MetaData>& meta, bool hasVideo,
         ALOGV("Mime type \"%s\" mapped to audio_format %d", mime, info->format);
     }
 
-#ifndef __NO_AVEXTENSIONS__
-	info->format  = AVUtils::get()->updateAudioFormat(info->format, meta);
-#endif
-
     if (AUDIO_FORMAT_INVALID == info->format) {
         // can't offload if we don't know what the source format is
         ALOGE("mime type \"%s\" not a known audio format", mime);
         return BAD_VALUE;
     }
 
-#ifndef __NO_AVEXTENSIONS__
-	if (AVUtils::get()->canOffloadStream(meta) != true) {
-		return false;
-	}
-#endif
-
     // Redefine aac format according to its profile
     // Offloading depends on audio DSP capabilities.
     int32_t aacaot = -1;
     if (meta->findInt32(kKeyAACAOT, &aacaot)) {
-	bool isADTSSupported = false;
-#ifndef __NO_AVEXTENSIONS__
-	isADTSSupported = AVUtils::get()->mapAACProfileToAudioFormat(meta, info->format,
-				(OMX_AUDIO_AACPROFILETYPE) aacaot);
-#endif
-	if (!isADTSSupported) {
-        	mapAACProfileToAudioFormat(info->format,(OMX_AUDIO_AACPROFILETYPE) aacaot);
-	}
+        mapAACProfileToAudioFormat(info->format,(OMX_AUDIO_AACPROFILETYPE) aacaot);
     }
 
     int32_t srate = -1;

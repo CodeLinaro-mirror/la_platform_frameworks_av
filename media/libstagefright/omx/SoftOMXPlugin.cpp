@@ -25,7 +25,6 @@
 #include <media/stagefright/foundation/AString.h>
 
 #include <dlfcn.h>
-#define QTI_FLAC_DECODER
 
 namespace android {
 
@@ -62,9 +61,6 @@ static const struct {
     { "OMX.google.flac.decoder", "flacdec", "audio_decoder.flac" },
     { "OMX.google.flac.encoder", "flacenc", "audio_encoder.flac" },
     { "OMX.google.gsm.decoder", "gsmdec", "audio_decoder.gsm" },
-#ifdef QTI_FLAC_DECODER
-    { "OMX.qti.audio.decoder.flac", "qtiflacdec", "audio_decoder.flac" },
-#endif
 };
 
 static const size_t kNumComponents =

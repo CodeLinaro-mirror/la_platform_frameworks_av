@@ -44,7 +44,6 @@
 #include <cutils/properties.h>
 
 #include <algorithm>
-#include <stagefright/AVExtensions.h>
 #include <regex>
 
 namespace android {

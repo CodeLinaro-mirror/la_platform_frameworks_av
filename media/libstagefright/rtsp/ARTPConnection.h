@@ -65,7 +65,6 @@ struct ARTPConnection : public AHandler {
 protected:
     virtual ~ARTPConnection();
     virtual void onMessageReceived(const sp<AMessage> &msg);
-    virtual void onAddStream(const sp<AMessage> &msg);
 
 private:
     enum {
@@ -96,6 +95,7 @@ private:
 
     int32_t mCumulativeBytes;
 
+    void onAddStream(const sp<AMessage> &msg);
     void onSeekStream(const sp<AMessage> &msg);
     void onRemoveStream(const sp<AMessage> &msg);
     void onPollStreams();

@@ -1943,11 +1943,7 @@ int64_t MediaPlayerService::AudioOutput::getPlayedOutDurationUs(int64_t nowUs) c
         //        numFramesPlayed, (long long)numFramesPlayedAtUs);
     } else {                         // case 3: transitory at new track or audio fast tracks.
         res = mTrack->getPosition(&numFramesPlayed);
-        if (res != OK) {
-            // return with invalid duration to indicate playback position should
-            // be queried from MediaClock using system clock
-            return -1;
-        }
+        CHECK_EQ(res, (status_t)OK);
         numFramesPlayedAtUs = nowUs;
         numFramesPlayedAtUs += 1000LL * mTrack->latency() / 2; /* XXX */
         //ALOGD("getPosition: %u %lld", numFramesPlayed, (long long)numFramesPlayedAtUs);

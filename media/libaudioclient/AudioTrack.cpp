@@ -39,8 +39,6 @@
 #include <media/AudioSystem.h>
 #include <media/MediaMetricsItem.h>
 #include <media/TypeConverter.h>
-#include <binder/MemoryDealer.h>
-#include "media/AVMediaExtensions.h"
 
 #define WAIT_PERIOD_MS                  10
 #define WAIT_STREAM_END_TIMEOUT_SEC     120
@@ -250,7 +248,7 @@ AudioTrack::AudioTrack(const AttributionSourceState& attributionSource)
     mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
     mAttributes.usage = AUDIO_USAGE_UNKNOWN;
     mAttributes.flags = AUDIO_FLAG_NONE;
-    strlcpy(mAttributes.tags, "", AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
+    strcpy(mAttributes.tags, "");
 }
 
 AudioTrack::AudioTrack(
@@ -309,7 +307,6 @@ AudioTrack::AudioTrack(
       mPreviousSchedulingGroup(SP_DEFAULT),
       mPausedPosition(0),
       mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
-      mTrackOffloaded(false),
       mAudioTrackCallback(new AudioTrackCallback())
 {
     mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
@@ -527,10 +524,6 @@ status_t AudioTrack::set(
             goto error;
         }
         mOriginalStreamType = streamType;
-        mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
-        mAttributes.usage = AUDIO_USAGE_UNKNOWN;
-        mAttributes.flags = AUDIO_FLAG_NONE;
-        strlcpy(mAttributes.tags, "", AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
     } else {
         mOriginalStreamType = AUDIO_STREAM_DEFAULT;
     }
@@ -624,13 +617,9 @@ status_t AudioTrack::set(
     if (uid == -1 || (callingPid != myPid)) {
         mClientAttributionSource.uid = VALUE_OR_FATAL(legacy2aidl_uid_t_int32_t(
             IPCThreadState::self()->getCallingUid()));
-    } else {
-        mClientAttributionSource.uid = attributionSource.uid;
     }
     if (pid == (pid_t)-1 || (callingPid != myPid)) {
         mClientAttributionSource.pid = VALUE_OR_FATAL(legacy2aidl_uid_t_int32_t(callingPid));
-    } else {
-        mClientAttributionSource.pid = attributionSource.pid;
     }
     mAuxEffectId = 0;
     mCbf = cbf;
@@ -1310,12 +1299,6 @@ status_t AudioTrack::setPlaybackRate(const AudioPlaybackRate &playbackRate)
                 AMEDIAMETRICS_PROP_PLAYBACK_PITCH, (double)playbackRateTemp.mPitch)
         .record();
 
-
-    if (mTrackOffloaded &&
-        !isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
-        ALOGD("invalidate track-offloaded track on setPlaybackRate");
-        android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
-    }
     return NO_ERROR;
 }
 
@@ -1568,7 +1551,6 @@ status_t AudioTrack::getPosition(uint32_t *position)
     // There may be some latency differences between the HAL position and the proxy position.
     if (isOffloadedOrDirect_l() && !isPurePcmData_l()) {
         uint32_t dspFrames = 0;
-        status_t status;
 
         if (isOffloaded_l() && ((mState == STATE_PAUSED) || (mState == STATE_PAUSED_STOPPING))) {
             ALOGV("%s(%d): called in paused state, return cached position %u",
@@ -1579,11 +1561,8 @@ status_t AudioTrack::getPosition(uint32_t *position)
 
         if (mOutput != AUDIO_IO_HANDLE_NONE) {
             uint32_t halFrames; // actually unused
-            status = AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames);
-            if (status != NO_ERROR) {
-                ALOGW("failed to getRenderPosition for offload session");
-                return INVALID_OPERATION;
-            }
+            (void) AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames);
+            // FIXME: on getRenderPosition() error, we return OK with frame position 0.
         }
         // FIXME: dspFrames may not be zero in (mState == STATE_STOPPED || mState == STATE_FLUSHED)
         // due to hardware latency. We leave this behavior for now.
@@ -1804,12 +1783,6 @@ status_t AudioTrack::createTrack_l()
             input.clientInfo.clientTid = mAudioTrackThread->getTid();
         }
     }
-    // Set offload_info to defaults if track not already offloaded but can be offloaded
-    if (mOffloadInfo == NULL &&
-        audio_is_linear_pcm(mFormat) &&
-        isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
-        input.config.offload_info = AUDIO_INFO_INITIALIZER;
-    }
     input.sharedBuffer = mSharedBuffer;
     input.notificationsPerBuffer = mNotificationsPerBufferReq;
     input.speed = 1.0;
@@ -1844,7 +1817,6 @@ status_t AudioTrack::createTrack_l()
     }
     ALOG_ASSERT(output.audioTrack != 0);
 
-    mTrackOffloaded = AVMediaUtils::get()->AudioTrackIsTrackOffloaded(output.outputId);
     mFrameCount = output.frameCount;
     mNotificationFramesAct = (uint32_t)output.notificationFrameCount;
     mRoutedDeviceId = output.selectedDeviceId;
@@ -2771,19 +2743,11 @@ status_t AudioTrack::restoreTrack_l(const char *from)
     // output parameters and new IAudioFlinger in createTrack_l()
     AudioSystem::clearAudioConfigCache();
 
-    if (isOffloadedOrDirect_l() || mDoNotReconnect ||
-        (mOrigFlags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) {
+    if (isOffloadedOrDirect_l() || mDoNotReconnect) {
         // FIXME re-creation of offloaded and direct tracks is not yet implemented;
         // reconsider enabling for linear PCM encodings when position can be preserved.
-
-        // Tear down sink only for non-internal invalidation.
-        // Since new track could again have invalidation on setPlayback rate causing
-        // continuous creation and tear down.
-        if (!mTrackOffloaded ||
-              isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
-            result = DEAD_OBJECT;
-            return result;
-        }
+        result = DEAD_OBJECT;
+        return result;
     }
 
     // Save so we can return count since creation.
@@ -3104,7 +3068,7 @@ status_t AudioTrack::getTimestamp_l(AudioTimestamp& timestamp)
     // To avoid a race, read the presented frames first.  This ensures that presented <= consumed.
 
     status_t status;
-    if (isOffloadedOrDirect_l() || mTrackOffloaded) {
+    if (isOffloadedOrDirect_l()) {
         // use Binder to get timestamp
         media::AudioTimestampInternal ts;
         mAudioTrack->getTimestamp(&ts, &status);

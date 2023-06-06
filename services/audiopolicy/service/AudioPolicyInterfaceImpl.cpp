@@ -422,16 +422,6 @@ Status AudioPolicyService::startOutput(int32_t portIdAidl)
         return binderStatusFromStatusT(NO_INIT);
     }
     ALOGV("startOutput()");
-    mOutputCommandThread->startOutputCommand(portId);
-    return Status::ok();
-}
-
-status_t AudioPolicyService::doStartOutput(audio_port_handle_t portId)
-{
-    if (mAudioPolicyManager == NULL) {
-        return NO_INIT;
-    }
-    ALOGV("doStartOutput()");
     sp<AudioPlaybackClient> client;
     sp<AudioPolicyEffects>audioPolicyEffects;
 
@@ -451,7 +441,7 @@ status_t AudioPolicyService::doStartOutput(audio_port_handle_t portId)
     if (status == NO_ERROR) {
         client->active = true;
     }
-    return status;
+    return binderStatusFromStatusT(status);
 }
 
 Status AudioPolicyService::stopOutput(int32_t portIdAidl)

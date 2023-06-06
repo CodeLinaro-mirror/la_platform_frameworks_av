@@ -1014,7 +1014,7 @@ public:
                     return mMixerChannelMask;
                 }
 
-    virtual     status_t    getTimestamp_l(AudioTimestamp& timestamp);
+                status_t    getTimestamp_l(AudioTimestamp& timestamp);
 
                 void        addPatchTrack(const sp<PatchTrack>& track);
                 void        deletePatchTrack(const sp<PatchTrack>& track);
@@ -1528,10 +1528,6 @@ protected:
     float                   mMasterBalanceLeft = 1.f;
     float                   mMasterBalanceRight = 1.f;
 
-    uint64_t                mFramesWrittenAtStandby;// used to reset frames on track reset
-    uint64_t                mFramesWrittenForSleep; // used to reset frames on track removal
-                                                    // or underrun before entering standby
-
 public:
     virtual     bool        hasFastMixer() const { return false; }
 
@@ -1553,7 +1549,6 @@ public:
                     }
                     return INVALID_OPERATION;
                 }
-    virtual     status_t    getTimestamp_l(AudioTimestamp& timestamp) override;
 };
 
 class OffloadThread : public DirectOutputThread {
@@ -2051,26 +2046,6 @@ class MmapThread : public ThreadBase
 
     virtual     bool        isStreamInitialized() { return false; }
 
-                void        setClientSilencedState_l(audio_port_handle_t portId, bool silenced) {
-                                mClientSilencedStates[portId] = silenced;
-                            }
-
-                size_t      eraseClientSilencedState_l(audio_port_handle_t portId) {
-                                return mClientSilencedStates.erase(portId);
-                            }
-
-                bool        isClientSilenced_l(audio_port_handle_t portId) const {
-                                const auto it = mClientSilencedStates.find(portId);
-                                return it != mClientSilencedStates.end() ? it->second : false;
-                            }
-
-                void        setClientSilencedIfExists_l(audio_port_handle_t portId, bool silenced) {
-                                const auto it = mClientSilencedStates.find(portId);
-                                if (it != mClientSilencedStates.end()) {
-                                    it->second = silenced;
-                                }
-                            }
-
  protected:
                 void        dumpInternals_l(int fd, const Vector<String16>& args) override;
                 void        dumpTracks_l(int fd, const Vector<String16>& args) override;
@@ -2090,7 +2065,6 @@ class MmapThread : public ThreadBase
                 AudioHwDevice* const    mAudioHwDev;
                 ActiveTracks<MmapTrack> mActiveTracks;
                 float                   mHalVolFloat;
-                std::map<audio_port_handle_t, bool> mClientSilencedStates;
 
                 int32_t                 mNoCallbackWarningCount;
      static     constexpr int32_t       kMaxNoCallbackWarnings = 5;

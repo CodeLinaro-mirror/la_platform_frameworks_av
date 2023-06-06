@@ -76,7 +76,7 @@ struct LiveSession : public AHandler {
     void setBufferingSettings(const BufferingSettings &buffering);
 
     int64_t calculateMediaTimeUs(int64_t firstTimeUs, int64_t timeUs, int32_t discontinuitySeq);
-    virtual status_t dequeueAccessUnit(StreamType stream, sp<ABuffer> *accessUnit);
+    status_t dequeueAccessUnit(StreamType stream, sp<ABuffer> *accessUnit);
 
     status_t getStreamFormatMeta(StreamType stream, sp<MetaData> *meta);
 
@@ -120,6 +120,7 @@ protected:
 
     virtual void onMessageReceived(const sp<AMessage> &msg);
 
+private:
     friend struct PlaylistFetcher;
 
     enum {
@@ -252,10 +253,10 @@ protected:
     KeyedVector<size_t, int64_t> mDiscontinuityAbsStartTimesUs;
     KeyedVector<size_t, int64_t> mDiscontinuityOffsetTimesUs;
 
-    virtual sp<PlaylistFetcher> addFetcher(const char *uri);
+    sp<PlaylistFetcher> addFetcher(const char *uri);
 
     void onConnect(const sp<AMessage> &msg);
-    virtual void onMasterPlaylistFetched(const sp<AMessage> &msg);
+    void onMasterPlaylistFetched(const sp<AMessage> &msg);
     void onSeek(const sp<AMessage> &msg);
 
     bool UriIsSameAsIndex( const AString &uri, int32_t index, bool newUri);
@@ -270,7 +271,7 @@ protected:
     float getAbortThreshold(
             ssize_t currentBWIndex, ssize_t targetBWIndex) const;
     void addBandwidthMeasurement(size_t numBytes, int64_t delayUs);
-    virtual size_t getBandwidthIndex(int32_t bandwidthBps);
+    size_t getBandwidthIndex(int32_t bandwidthBps);
     ssize_t getLowestValidBandwidthIndex() const;
     HLSTime latestMediaSegmentStartTime() const;
 
@@ -285,7 +286,7 @@ protected:
     void onChangeConfiguration2(const sp<AMessage> &msg);
     void onChangeConfiguration3(const sp<AMessage> &msg);
 
-    virtual void swapPacketSource(StreamType stream);
+    void swapPacketSource(StreamType stream);
     void tryToFinishBandwidthSwitch(const AString &oldUri);
     void cancelBandwidthSwitch(bool resume = false);
     bool checkSwitchProgress(
@@ -297,7 +298,7 @@ protected:
     void schedulePollBuffering();
     void cancelPollBuffering();
     void restartPollBuffering();
-    virtual void onPollBuffering();
+    void onPollBuffering();
     bool checkBuffering(bool &underflow, bool &ready, bool &down, bool &up);
     void startBufferingIfNecessary();
     void stopBufferingIfNecessary();
@@ -305,7 +306,7 @@ protected:
 
     void finishDisconnect();
 
-    virtual void postPrepared(status_t err);
+    void postPrepared(status_t err);
     void postError(status_t err);
 
     DISALLOW_EVIL_CONSTRUCTORS(LiveSession);

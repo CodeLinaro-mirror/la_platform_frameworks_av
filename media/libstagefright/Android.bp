@@ -181,7 +181,6 @@ cc_library_static {
         "-Werror",
         "-Wno-error=deprecated-declarations",
         "-Wall",
-        "-D__NO_AVEXTENSIONS__",
     ],
 
     sanitize: {
@@ -312,7 +311,6 @@ cc_library {
         "libcodec2",
         "libcodec2_vndk",
         "libcutils",
-        "libcrypto",
         "libdatasource",
         "libdl",
         "libdl_android",
@@ -337,7 +335,6 @@ cc_library {
         "libhidlbase",
         "libhidlmemory",
         "android.hidl.allocator@1.0",
-        "android.hidl.memory@1.0",
         "android.hardware.cas.native@1.0",
         "android.hardware.drm@1.0",
         "android.hardware.media.omx@1.0",
@@ -360,10 +357,6 @@ cc_library {
         "libmedia_ndkformatpriv",
     ],
 
-    whole_static_libs: [
-        "libavextensions"
-    ],
-
     header_libs:[
         "libmediadrm_headers",
         "libnativeloader-headers",
@@ -382,13 +375,6 @@ cc_library {
 
     export_include_dirs: [
         "include",
-
-    ],
-
-    include_dirs: [
-        "frameworks/av/media/libavextensions",
-        "frameworks/av/media/libmediaextractor",
-        "frameworks/av/media/libstagefright/mpeg2ts",
     ],
 
     cflags: [

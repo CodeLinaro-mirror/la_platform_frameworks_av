@@ -108,11 +108,8 @@ struct ACodec : public AHierarchicalStateMachine, public CodecBase {
 
 protected:
     virtual ~ACodec();
-    virtual status_t setupCustomCodec(
-        status_t err, const char *mime, const sp<AMessage> &msg);
-    virtual status_t GetVideoCodingTypeFromMime(
-        const char *mime, OMX_VIDEO_CODINGTYPE *codingType);
 
+private:
     struct BaseState;
     struct UninitializedState;
     struct LoadedState;
@@ -157,9 +154,7 @@ protected:
 
     enum {
         kPortIndexInput  = 0,
-        kPortIndexOutput = 1,
-        kPortIndexInputExtradata = 2,
-        kPortIndexOutputExtradata = 3
+        kPortIndexOutput = 1
     };
 
     enum {
@@ -248,7 +243,7 @@ protected:
     sp<IOMX> mOMX;
     sp<IOMXNode> mOMXNode;
     int32_t mNodeGeneration;
-    sp<TAllocator> mAllocator[4];
+    sp<TAllocator> mAllocator[2];
 
     bool mUsingNativeWindow;
     sp<ANativeWindow> mNativeWindow;
@@ -267,7 +262,7 @@ protected:
     sp<AMessage> mBaseOutputFormat;
 
     FrameRenderTracker mRenderTracker; // render information for buffers rendered by ACodec
-    Vector<BufferInfo> mBuffers[4];
+    Vector<BufferInfo> mBuffers[2];
     bool mPortEOS[2];
     status_t mInputEOSResult;
 
@@ -326,8 +321,8 @@ protected:
     } mVendorExtensionsStatus;
 
     status_t setCyclicIntraMacroblockRefresh(const sp<AMessage> &msg, int32_t mode);
-    virtual status_t allocateBuffersOnPort(OMX_U32 portIndex);
-    virtual status_t freeBuffersOnPort(OMX_U32 portIndex);
+    status_t allocateBuffersOnPort(OMX_U32 portIndex);
+    status_t freeBuffersOnPort(OMX_U32 portIndex);
     status_t freeBuffer(OMX_U32 portIndex, size_t i);
 
     status_t handleSetSurface(const sp<Surface> &surface);
@@ -340,7 +335,7 @@ protected:
             OMX_U32 *nBufferCount, OMX_U32 *nBufferSize,
             OMX_U32 *nMinUndequeuedBuffers, bool preregister);
     status_t allocateOutputMetadataBuffers();
-    virtual status_t submitOutputMetadataBuffer();
+    status_t submitOutputMetadataBuffer();
     void signalSubmitOutputMetadataBufferIfEOS_workaround();
     status_t allocateOutputBuffersFromNativeWindow();
     status_t cancelBufferToNativeWindow(BufferInfo *info);
@@ -363,7 +358,7 @@ protected:
 
     status_t setComponentRole(bool isEncoder, const char *mime);
 
-    virtual status_t configureCodec(const char *mime, const sp<AMessage> &msg);
+    status_t configureCodec(const char *mime, const sp<AMessage> &msg);
 
     status_t configureTunneledVideoPlayback(int32_t audioHwSync,
             const sp<ANativeWindow> &nativeWindow);
@@ -376,11 +371,11 @@ protected:
 
     status_t setSupportedOutputFormat(bool getLegacyFlexibleFormat);
 
-    virtual status_t setupVideoDecoder(
+    status_t setupVideoDecoder(
             const char *mime, const sp<AMessage> &msg, bool usingNativeBuffers, bool haveSwRenderer,
             sp<AMessage> &outputformat);
 
-    virtual status_t setupVideoEncoder(
+    status_t setupVideoEncoder(
             const char *mime, const sp<AMessage> &msg,
             sp<AMessage> &outputformat, sp<AMessage> &inputformat);
 
@@ -551,7 +546,7 @@ protected:
             OMX_VIDEO_CONTROLRATETYPE bitrateMode, int32_t bitrate, int32_t quality = 0);
     void configureEncoderLatency(const sp<AMessage> &msg);
 
-    virtual status_t setupErrorCorrectionParameters();
+    status_t setupErrorCorrectionParameters();
 
     // Returns true iff all buffers on the given port have status
     // OWNED_BY_US or OWNED_BY_NATIVE_WINDOW.
@@ -593,14 +588,14 @@ protected:
     void addKeyFormatChangesToRenderBufferNotification(sp<AMessage> &notify);
     void sendFormatChange();
 
-    virtual status_t getPortFormat(OMX_U32 portIndex, sp<AMessage> &notify);
+    status_t getPortFormat(OMX_U32 portIndex, sp<AMessage> &notify);
 
     void signalError(
             OMX_ERRORTYPE error = OMX_ErrorUndefined,
             status_t internalError = UNKNOWN_ERROR);
 
     status_t requestIDRFrame();
-    virtual status_t setParameters(const sp<AMessage> &params);
+    status_t setParameters(const sp<AMessage> &params);
 
     // set vendor extension parameters specified in params that are supported by the codec
     status_t setVendorParameters(const sp<AMessage> &params);
@@ -614,14 +609,6 @@ protected:
 
     // Force EXEC->IDLE->LOADED shutdown sequence if not stale.
     void forceStateTransition(int generation);
-
-    virtual void setBFrames(OMX_VIDEO_PARAM_MPEG4TYPE *mpeg4type __unused) {}
-
-    virtual bool getDSModeHint(const sp<AMessage>& msg __unused, int64_t timeUs __unused) {
-       return false;
-    }
-
-    sp<IOMXObserver> createObserver();
 
     DISALLOW_EVIL_CONSTRUCTORS(ACodec);
 };

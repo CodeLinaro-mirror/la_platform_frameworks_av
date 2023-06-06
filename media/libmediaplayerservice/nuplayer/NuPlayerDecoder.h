@@ -54,6 +54,7 @@ protected:
     virtual void onShutdown(bool notifyComplete);
     virtual bool doRequestBuffers();
 
+private:
     enum {
         kWhatCodecNotify         = 'cdcN',
         kWhatRenderBuffer        = 'rndr',
@@ -120,7 +121,7 @@ protected:
             size_t size,
             int64_t timeUs,
             int32_t flags);
-    virtual void handleOutputFormatChange(const sp<AMessage> &format);
+    void handleOutputFormatChange(const sp<AMessage> &format);
 
     void releaseAndResetMediaBuffers();
     void requestCodecNotification();
