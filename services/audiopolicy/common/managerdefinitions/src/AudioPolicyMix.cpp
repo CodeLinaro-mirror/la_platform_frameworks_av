@@ -229,14 +229,16 @@ AudioPolicyMixCollection::MixMatchStatus AudioPolicyMixCollection::mixMatch(
                 return MixMatchStatus::NO_MATCH;
             }
         }
-
-        // Permit match only if requested format and mix format are PCM and can be format
-        // adapted by the mixer, or are the same (compressed) format.
-        if (!is_mix_loopback(mix->mRouteFlags) &&
-            !((audio_is_linear_pcm(config.format) && audio_is_linear_pcm(mix->mFormat.format)) ||
-              (config.format == mix->mFormat.format)) &&
-              config.format != AUDIO_CONFIG_BASE_INITIALIZER.format) {
+        // if alert usage is using mp3 format skip below check
+        if(!(attributes.usage >= AUDIO_USAGE_EMERGENCY && config.format == AUDIO_FORMAT_MP3)) {
+           // Permit match only if requested format and mix format are PCM and can be format
+           // adapted by the mixer, or are the same (compressed) format.
+           if (!is_mix_loopback(mix->mRouteFlags) &&
+               !((audio_is_linear_pcm(config.format) && audio_is_linear_pcm(mix->mFormat.format)) ||
+               (config.format == mix->mFormat.format)) &&
+                config.format != AUDIO_CONFIG_BASE_INITIALIZER.format) {
             return MixMatchStatus::NO_MATCH;
+           }
         }
 
         int userId = (int) multiuser_get_user_id(uid);
