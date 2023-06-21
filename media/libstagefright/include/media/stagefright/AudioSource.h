@@ -50,8 +50,6 @@ struct AudioSource : public MediaSource,
         audio_microphone_direction_t selectedMicDirection = MIC_DIRECTION_UNSPECIFIED,
         float selectedMicFieldDimension = MIC_FIELD_DIMENSION_NORMAL);
 
-    /* a default constructor for non-pcm format */
-    AudioSource() {}
     status_t initCheck() const;
 
     virtual status_t start(MetaData *params = NULL);
