@@ -163,7 +163,7 @@ int main(int argc __unused, char **argv)
         ALOGI("ServiceManager: %p", sm.get());
         AudioFlinger::instantiate();
         AudioPolicyService::instantiate();
-        instantiateVRAudioServer();
+        //instantiateVRAudioServer();
 
         // AAudioService should only be used in OC-MR1 and later.
         // And only enable the AAudioService if the system MMAP policy explicitly allows it.
