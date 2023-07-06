@@ -72,6 +72,7 @@ int main(int argc __unused, char **argv)
 #else
     bool doLog = (bool) property_get_bool("ro.test_harness", 0);
 #endif
+    bool enable1GLowMem = (bool) property_get_bool("ro.product.1G.enable", 1);
 
     uint32_t timeOutMs = (uint32_t)property_get_int32("vendor.audio.hal.boot.timeout.ms", TimeCheck::kDefaultTimeOutMs);
 
@@ -163,7 +164,12 @@ int main(int argc __unused, char **argv)
         ALOGI("ServiceManager: %p", sm.get());
         AudioFlinger::instantiate();
         AudioPolicyService::instantiate();
-        //instantiateVRAudioServer();
+        ALOGI("ServiceManager: AudioPolicyService instantiate done %p", sm.get());
+
+        if (enable1GLowMem){
+        instantiateVRAudioServer();
+        ALOGI("ServiceManager: VRAudioServer instantiate done %p", sm.get());
+        }
 
         // AAudioService should only be used in OC-MR1 and later.
         // And only enable the AAudioService if the system MMAP policy explicitly allows it.

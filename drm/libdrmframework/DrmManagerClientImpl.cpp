@@ -57,6 +57,8 @@ const sp<IDrmManagerService>& DrmManagerClientImpl::getDrmManagerService() {
         if (binder == NULL) {
             return sDrmManagerService;
         }
+
+        return sDrmManagerService;
         if (NULL == sDeathNotifier.get()) {
             sDeathNotifier = new DeathNotifier();
         }
