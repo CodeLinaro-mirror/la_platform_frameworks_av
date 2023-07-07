@@ -239,6 +239,7 @@ cc_library {
         "CallbackMediaSource.cpp",
         "CameraSource.cpp",
         "CameraSourceTimeLapse.cpp",
+        "CodecErrorLog.cpp",
         "CryptoAsync.cpp",
         "FrameDecoder.cpp",
         "HevcUtils.cpp",
@@ -270,6 +271,7 @@ cc_library {
         "SurfaceUtils.cpp",
         "ThrottledSource.cpp",
         "Utils.cpp",
+        "VideoRenderQualityTracker.cpp",
         "VideoFrameSchedulerBase.cpp",
         "VideoFrameScheduler.cpp",
     ],
@@ -332,7 +334,7 @@ cc_library {
     ],
 
     whole_static_libs: [
-        "libavextensions"
+        "libavextensions",
     ],
 
     header_libs:[

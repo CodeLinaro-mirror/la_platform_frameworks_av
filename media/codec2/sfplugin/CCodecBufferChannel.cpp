@@ -153,6 +153,8 @@ CCodecBufferChannel::CCodecBufferChannel(
       mCCodecCallback(callback),
       mFrameIndex(0u),
       mFirstValidFrameIndex(0u),
+      mIsSurfaceToDisplay(false),
+      mHasPresentFenceTimes(false),
       mMetaMode(MODE_NONE),
       mInputMetEos(false),
       mLastInputBufferAvailableTs(0u),
@@ -436,7 +438,8 @@ status_t CCodecBufferChannel::attachEncryptedBuffer(
         size_t offset,
         const CryptoPlugin::SubSample *subSamples,
         size_t numSubSamples,
-        const sp<MediaCodecBuffer> &buffer) {
+        const sp<MediaCodecBuffer> &buffer,
+        AString* errorDetailMsg) {
     static const C2MemoryUsage kSecureUsage{C2MemoryUsage::READ_PROTECTED, 0};
     static const C2MemoryUsage kDefaultReadWriteUsage{
         C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
@@ -466,7 +469,6 @@ status_t CCodecBufferChannel::attachEncryptedBuffer(
     ssize_t result = -1;
     ssize_t codecDataOffset = 0;
     if (mCrypto) {
-        AString errorDetailMsg;
         int32_t heapSeqNum = getHeapSeqNum(memory);
         hardware::drm::V1_0::SharedBuffer src{(uint32_t)heapSeqNum, offset, size};
         hardware::drm::V1_0::DestinationBuffer dst;
@@ -480,7 +482,7 @@ status_t CCodecBufferChannel::attachEncryptedBuffer(
         }
         result = mCrypto->decrypt(
                 key, iv, mode, pattern, src, 0, subSamples, numSubSamples,
-                dst, &errorDetailMsg);
+                dst, errorDetailMsg);
         if (result < 0) {
             ALOGI("[%s] attachEncryptedBuffer: decrypt failed: result = %zd", mName, result);
             return result;
@@ -525,7 +527,9 @@ status_t CCodecBufferChannel::attachEncryptedBuffer(
                     result = (ssize_t)_bytesWritten;
                     detailedError = _detailedError;
                 });
-
+        if (errorDetailMsg) {
+            errorDetailMsg->setTo(detailedError.c_str(), detailedError.size());
+        }
         if (!returnVoid.isOk() || status != CasStatus::OK || result < 0) {
             ALOGI("[%s] descramble failed, trans=%s, status=%d, result=%zd",
                     mName, returnVoid.description().c_str(), status, result);
@@ -1044,20 +1048,36 @@ status_t CCodecBufferChannel::renderOutputBuffer(
 
     int64_t mediaTimeUs = 0;
     (void)buffer->meta()->findInt64("timeUs", &mediaTimeUs);
-    trackReleasedFrame(qbo, mediaTimeUs, timestampNs);
-    processRenderedFrames(qbo.frameTimestamps);
+    if (mIsSurfaceToDisplay) {
+        trackReleasedFrame(qbo, mediaTimeUs, timestampNs);
+        processRenderedFrames(qbo.frameTimestamps);
+    } else {
+        // When the surface is an intermediate surface, onFrameRendered is triggered immediately
+        // when the frame is queued to the non-display surface
+        mCCodecCallback->onOutputFramesRendered(mediaTimeUs, timestampNs);
+    }
 
     return OK;
 }
 
 void CCodecBufferChannel::initializeFrameTrackingFor(ANativeWindow * window) {
+    mTrackedFrames.clear();
+
+    int isSurfaceToDisplay = 0;
+    window->query(window, NATIVE_WINDOW_QUEUES_TO_WINDOW_COMPOSER, &isSurfaceToDisplay);
+    mIsSurfaceToDisplay = isSurfaceToDisplay == 1;
+    // No frame tracking is needed if we're not sending frames to the display
+    if (!mIsSurfaceToDisplay) {
+        // Return early so we don't call into SurfaceFlinger (requiring permissions)
+        return;
+    }
+
     int hasPresentFenceTimes = 0;
     window->query(window, NATIVE_WINDOW_FRAME_TIMESTAMPS_SUPPORTS_PRESENT, &hasPresentFenceTimes);
     mHasPresentFenceTimes = hasPresentFenceTimes == 1;
-    if (mHasPresentFenceTimes) {
+    if (!mHasPresentFenceTimes) {
         ALOGI("Using latch times for frame rendered signals - present fences not supported");
     }
-    mTrackedFrames.clear();
 }
 
 void CCodecBufferChannel::trackReleasedFrame(const IGraphicBufferProducer::QueueBufferOutput& qbo,
@@ -1863,8 +1883,6 @@ void CCodecBufferChannel::flush(const std::list<std::unique_ptr<C2Work>> &flushe
             output->buffers->flushStash();
         }
     }
-    // reset the frames that are being tracked for onFrameRendered callbacks
-    mTrackedFrames.clear();
 }
 
 void CCodecBufferChannel::onWorkDone(
@@ -2169,7 +2187,10 @@ bool CCodecBufferChannel::handleWork(
     // csd cannot be re-ordered and will always arrive first.
     if (initData != nullptr) {
         Mutexed<Output>::Locked output(mOutput);
-        if (output->buffers && outputFormat) {
+        if (!output->buffers) {
+            return false;
+        }
+        if (outputFormat) {
             output->buffers->updateSkipCutBuffer(outputFormat);
             output->buffers->setFormat(outputFormat);
         }
@@ -2178,7 +2199,7 @@ bool CCodecBufferChannel::handleWork(
         }
         size_t index;
         sp<MediaCodecBuffer> outBuffer;
-        if (output->buffers && output->buffers->registerCsd(initData, &index, &outBuffer) == OK) {
+        if (output->buffers->registerCsd(initData, &index, &outBuffer) == OK) {
             outBuffer->meta()->setInt64("timeUs", timestamp.peek());
             outBuffer->meta()->setInt32("flags", BUFFER_FLAG_CODEC_CONFIG);
             ALOGV("[%s] onWorkDone: csd index = %zu [%p]", mName, index, outBuffer.get());
@@ -2186,7 +2207,11 @@ bool CCodecBufferChannel::handleWork(
                 ALOGD("[%s] sending CSD : output format changed to %s",
                       mName, outputFormat->debugString().c_str());
             }
-            output.unlock();
+
+            // TRICKY: we want popped buffers reported in order, so sending
+            // the callback while holding the lock here. This assumes that
+            // onOutputBufferAvailable() does not block. onOutputBufferAvailable()
+            // callbacks are always sent with the Output lock held.
             mCallback->onOutputBufferAvailable(index, outBuffer);
         } else {
             ALOGD("[%s] onWorkDone: unable to register csd", mName);
@@ -2278,7 +2303,10 @@ void CCodecBufferChannel::sendOutputBuffers() {
         case OutputBuffers::DISCARD:
             break;
         case OutputBuffers::NOTIFY_CLIENT:
-            output.unlock();
+            // TRICKY: we want popped buffers reported in order, so sending
+            // the callback while holding the lock here. This assumes that
+            // onOutputBufferAvailable() does not block. onOutputBufferAvailable()
+            // callbacks are always sent with the Output lock held.
             mCallback->onOutputBufferAvailable(index, outBuffer);
             break;
         case OutputBuffers::REALLOCATE:

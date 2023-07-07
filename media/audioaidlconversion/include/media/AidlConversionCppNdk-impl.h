@@ -190,6 +190,9 @@ ConversionResult<audio_devices_t> aidl2legacy_AudioDeviceDescription_audio_devic
 ConversionResult<media::audio::common::AudioDeviceDescription>
 legacy2aidl_audio_devices_t_AudioDeviceDescription(audio_devices_t legacy);
 
+media::audio::common::AudioDeviceAddress::Tag suggestDeviceAddressTag(
+        const media::audio::common::AudioDeviceDescription& description);
+
 ::android::status_t aidl2legacy_AudioDevice_audio_device(
         const media::audio::common::AudioDevice& aidl, audio_devices_t* legacyType,
         char* legacyAddress);
@@ -204,6 +207,8 @@ ConversionResult<media::audio::common::AudioDevice> legacy2aidl_audio_device_Aud
         audio_devices_t legacyType, const char* legacyAddress);
 ConversionResult<media::audio::common::AudioDevice> legacy2aidl_audio_device_AudioDevice(
         audio_devices_t legacyType, const ::android::String8& legacyAddress);
+ConversionResult<media::audio::common::AudioDevice> legacy2aidl_audio_device_AudioDevice(
+        audio_devices_t legacyType, const std::string& legacyAddress);
 
 ConversionResult<audio_extra_audio_descriptor>
 aidl2legacy_ExtraAudioDescriptor_audio_extra_audio_descriptor(
@@ -282,6 +287,11 @@ ConversionResult<audio_output_flags_t>
 aidl2legacy_AudioOutputFlags_audio_output_flags_t(media::audio::common::AudioOutputFlags aidl);
 ConversionResult<media::audio::common::AudioOutputFlags>
 legacy2aidl_audio_output_flags_t_AudioOutputFlags(audio_output_flags_t legacy);
+
+ConversionResult<audio_stream_type_t>
+aidl2legacy_AudioStreamType_audio_stream_type_t(media::audio::common::AudioStreamType aidl);
+ConversionResult<media::audio::common::AudioStreamType>
+legacy2aidl_audio_stream_type_t_AudioStreamType(audio_stream_type_t legacy);
 
 // This type is unnamed in the original definition, thus we name it here.
 using audio_port_config_mix_ext_usecase = decltype(audio_port_config_mix_ext::usecase);
