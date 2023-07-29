@@ -1007,7 +1007,7 @@ void AudioPolicyManager::setPhoneState(audio_mode_t state)
                 ALOGD("voice_conc:calling closeOutput on call mode for DSD COMPRESS output");
                 closeOutput(mOutputs.keyAt(i));
                 // call invalidate for music, so that DSD compress will fallback to deep-buffer.
-                mpClientInterface->invalidateStream(AUDIO_STREAM_MUSIC);
+                invalidateStreams({AUDIO_STREAM_MUSIC});
             }
         }
     }
@@ -1642,8 +1642,8 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
 
     status_t status = getOutputForAttrInt(&resultAttr, output, session, attr, stream, uid,
             &directConfig, flags, selectedDeviceId, &isRequestedDeviceForExclusiveUse,
-            secondaryOutputs != nullptr ? &secondaryMixes : nullptr, outputType, isSpatialized);
-//            isBitPerfect);
+            secondaryOutputs != nullptr ? &secondaryMixes : nullptr, outputType, isSpatialized,
+            isBitPerfect);
     if (status != NO_ERROR) {
         return status;
     }
