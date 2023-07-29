@@ -12,6 +12,9 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #define LOG_TAG "APM_Config"
@@ -27,6 +30,10 @@
 #include <system/audio.h>
 #include <system/audio_config.h>
 #include <utils/Log.h>
+
+#define VALUEADD_AOSP_SUPPORT_PROPERTY "ro.vendor.qti.va_aosp.support"
+static char g_audio_framework[100];
+#define VA_AUDIO_POLICY_CONFIG_PATH_AR "/vendor/etc/audio_ar/audio_policy_configuration.xml"
 
 namespace android {
 
@@ -198,8 +205,18 @@ sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmAidlConfigWithFallback
 // static
 sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmXmlConfigWithFallback(
         const std::string& xmlFilePath) {
+    std::string audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH_AR;
+    bool va_aosp_support = property_get_bool(VALUEADD_AOSP_SUPPORT_PROPERTY, false);
+    if (va_aosp_support) {
+        property_get("ro.boot.audio", g_audio_framework, NULL);
+        if (strstr(g_audio_framework, "audioreach") != NULL)
+            audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH_AR;
+        else
+            audioPolicyXmlConfigFile = audio_get_audio_policy_config_file();
+    }
     const std::string filePath =
-            xmlFilePath.empty() ? audio_get_audio_policy_config_file() : xmlFilePath;
+            va_aosp_support ? audioPolicyXmlConfigFile :
+            (xmlFilePath.empty() ? audio_get_audio_policy_config_file() : xmlFilePath);
     auto config = sp<AudioPolicyConfig>::make();
     if (status_t status = config->loadFromXml(filePath, false /*forVts*/); status == NO_ERROR) {
         return config;
