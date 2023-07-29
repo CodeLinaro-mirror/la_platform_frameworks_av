@@ -66,11 +66,11 @@ cc_library_static {
     ],
     include_dirs: [
         "frameworks/av/media/libmediaextractor",
-        "frameworks/av/media/libstagefright/mpeg2ts",
+        "frameworks/av/media/module/mpeg2ts",
         "frameworks/av/media/libavextensions",
         "external/flac/include",
         "frameworks/av/media/libstagefright/omx/include/media/stagefright",
-        "frameworks/av/media/libstagefright/mpeg2ts/include",
+        "frameworks/av/media/module/mpeg2ts/include",
     ],
     cflags: [
         "-Wno-multichar",
