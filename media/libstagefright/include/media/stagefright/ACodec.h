@@ -273,7 +273,7 @@ protected:
     sp<AMessage> mBaseOutputFormat;
 
     FrameRenderTracker mRenderTracker; // render information for buffers rendered by ACodec
-    Vector<BufferInfo> mBuffers[4];
+    std::vector<BufferInfo> mBuffers[4];
     bool mPortEOS[2];
     status_t mInputEOSResult;
     std::set<int64_t> mDecodeOnlyTimesUs;

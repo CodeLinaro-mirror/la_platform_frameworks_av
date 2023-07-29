@@ -20,6 +20,7 @@
 
 #include <media/MediaMetricsItem.h>
 #include <media/MediaRecorderBase.h>
+#include <media/stagefright/AudioSource.h>
 #include <camera/CameraParameters.h>
 #include <utils/String8.h>
 
@@ -120,6 +121,7 @@ protected:
     audio_encoder mAudioEncoder;
     video_encoder mVideoEncoder;
     bool mUse64BitFileOffset;
+    bool mEnabledCompressAudioRecording;
     int32_t mVideoWidth, mVideoHeight;
     int32_t mFrameRate;
     int32_t mVideoBitRate;
@@ -216,7 +218,7 @@ protected:
 
     // Encoding parameter handling utilities
     status_t setParameter(const String8 &key, const String8 &value);
-    status_t setParamAudioEncodingBitRate(int32_t bitRate);
+    virtual status_t setParamAudioEncodingBitRate(int32_t bitRate);
     status_t setParamAudioNumberOfChannels(int32_t channles);
     status_t setParamAudioSamplingRate(int32_t sampleRate);
     status_t setParamAudioTimeScale(int32_t timeScale);
@@ -266,6 +268,8 @@ protected:
     virtual status_t handleCustomAudioSource(sp<AMessage> /*format*/) {return UNKNOWN_ERROR;}
     virtual status_t handleCustomAudioEncoder() {return UNKNOWN_ERROR;}
     virtual sp<MediaSource> setPCMRecording() {return NULL;}
+    virtual bool isCompressAudioRecordingSupported() { return false; }
+    virtual sp<AudioSource> setCompressAudioRecording() { return nullptr; }
 
     StagefrightRecorder(const StagefrightRecorder &);
     StagefrightRecorder &operator=(const StagefrightRecorder &);

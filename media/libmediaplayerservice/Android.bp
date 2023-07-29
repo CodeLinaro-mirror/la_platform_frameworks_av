@@ -102,7 +102,7 @@ cc_library {
         "frameworks/av/media/libstagefright/webm",
         "frameworks/av/media/libavextensions",
         "frameworks/av/media/libmediaextractor",
-        "frameworks/av/media/libstagefright/mpeg2ts",
+        "frameworks/av/media/module/mpeg2ts",
     ],
 
     local_include_dirs: ["include"],

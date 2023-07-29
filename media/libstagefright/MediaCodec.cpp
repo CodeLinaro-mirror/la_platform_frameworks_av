@@ -1849,11 +1849,7 @@ sp<CodecBase> MediaCodec::GetCodecBase(const AString &name, const char *owner) {
         return CreateCCodec();
     } else if (name.startsWithIgnoreCase("omx.")) {
         // at this time only ACodec specifies a mime type.
-        return AVFactory::get()->createACodec();
-    } else if (name.startsWithIgnoreCase("android.filter.qti")) {
-        return AVFactory::get()->createMediaFilter();
-    } else if (name.startsWithIgnoreCase("android.filter")) {
-	return new MediaFilter;
+        return new ACodec;
     } else {
         return NULL;
     }

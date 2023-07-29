@@ -363,45 +363,6 @@ AudioTrack::AudioTrack(
                           doNotReconnect, maxRequiredSpeed, AUDIO_PORT_HANDLE_NONE}};
 }
 
-AudioTrack::AudioTrack(
-        audio_stream_type_t streamType,
-        uint32_t sampleRate,
-        audio_format_t format,
-        audio_channel_mask_t channelMask,
-        const sp<IMemory>& sharedBuffer,
-        audio_output_flags_t flags,
-        legacy_callback_t callback,
-        void* user,
-        int32_t notificationFrames,
-        audio_session_t sessionId,
-        transfer_type transferType,
-        const audio_offload_info_t *offloadInfo,
-        const AttributionSourceState& attributionSource,
-        const audio_attributes_t* pAttributes,
-        bool doNotReconnect,
-        float maxRequiredSpeed)
-    : mStatus(NO_INIT),
-      mState(STATE_STOPPED),
-      mPreviousPriority(ANDROID_PRIORITY_NORMAL),
-      mPreviousSchedulingGroup(SP_DEFAULT),
-      mPausedPosition(0),
-      mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
-      mTrackOffloaded(false),
-      mAudioTrackCallback(new AudioTrackCallback())
-{
-    mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
-    if (callback) {
-        mLegacyCallbackWrapper = sp<LegacyCallbackWrapper>::make(callback, user);
-    } else if (user) {
-        LOG_ALWAYS_FATAL("Callback data provided without callback pointer!");
-    }
-    mSetParams = std::unique_ptr<SetParams>{new SetParams{
-            streamType, sampleRate, format, channelMask, 0 /*frameCount*/, flags,
-            mLegacyCallbackWrapper, notificationFrames, sharedBuffer, false /*threadCanCallJava*/,
-            sessionId, transferType, offloadInfo, attributionSource, pAttributes, doNotReconnect,
-            maxRequiredSpeed, AUDIO_PORT_HANDLE_NONE}};
-}
-
 void AudioTrack::onFirstRef() {
     if (mSetParams) {
         set(*mSetParams);
@@ -1681,8 +1642,6 @@ status_t AudioTrack::getPosition(uint32_t *position)
     // as we do not know the capability of the HAL for pcm position support and standby.
     // There may be some latency differences between the HAL position and the proxy position.
     if (isOffloadedOrDirect_l() && !isPurePcmData_l()) {
-        uint32_t dspFrames = 0;
-        status_t status;
 
         if (isOffloaded_l() && ((mState == STATE_PAUSED) || (mState == STATE_PAUSED_STOPPING))) {
             ALOGV("%s(%d): called in paused state, return cached position %u",
@@ -1694,8 +1653,7 @@ status_t AudioTrack::getPosition(uint32_t *position)
         uint32_t dspFrames = 0;
         if (mOutput != AUDIO_IO_HANDLE_NONE) {
             uint32_t halFrames; // actually unused
-            status = AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames);
-            if (status != NO_ERROR) {
+            if (AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames) != NO_ERROR) {
                 ALOGW("failed to getRenderPosition for offload session");
                 return INVALID_OPERATION;
             }

@@ -6638,7 +6638,7 @@ bool ACodec::BaseState::onOMXFillBufferDone(
 	    sp<AMessage> updatedFormat = mCodec->mOutputFormat;
 	    if (mCodec->mIsVideo && (flags & OMX_BUFFERFLAG_EXTRADATA)) {
 		updatedFormat = AVUtils::get()->fillExtradata(
-			mCodec->mBuffers[kPortIndexOutputExtradata].editItemAt(index).mCodecData,
+			mCodec->mBuffers[kPortIndexOutputExtradata][index].mCodecData,
 			mCodec->mOutputFormat);
 	    }
             buffer->setFormat(updatedFormat);
