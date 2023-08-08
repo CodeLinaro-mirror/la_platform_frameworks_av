@@ -1915,8 +1915,11 @@ status_t StagefrightRecorder::setupMediaSource(
     ATRACE_CALL();
     if (mVideoSource == VIDEO_SOURCE_DEFAULT
             || mVideoSource == VIDEO_SOURCE_CAMERA) {
+        nsecs_t setupStartedTime = systemTime(SYSTEM_TIME_REALTIME);
         sp<CameraSource> cameraSource;
         status_t err = setupCameraSource(&cameraSource);
+        nsecs_t setupFinishedTime = systemTime(SYSTEM_TIME_REALTIME);
+        ALOGI("Time taken by setupMediaSource : %" PRId64 "ms" , (setupFinishedTime - setupStartedTime)/1000000);
         if (err != OK) {
             return err;
         }
@@ -2025,6 +2028,10 @@ status_t StagefrightRecorder::setupVideoEncoder(
             format->setString("mime", MEDIA_MIMETYPE_VIDEO_DOLBY_VISION);
             break;
 
+        case VIDEO_ENCODER_AV1:
+            format->setString("mime", MEDIA_MIMETYPE_VIDEO_AV1);
+            break;
+
         default:
             CHECK(!"Should not be here, unsupported video encoding.");
             break;
@@ -2069,6 +2076,10 @@ status_t StagefrightRecorder::setupVideoEncoder(
             format->setDouble("time-lapse-fps", mCaptureFps);
         }
     }
+    uid_t uid = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_uid_t(mAttributionSource.uid));
+    pid_t pid = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_pid_t(mAttributionSource.pid));
+    format->setInt32("calling-uid", uid);
+    format->setInt32("calling-pid", pid);
 
     setupCustomVideoEncoderParams(cameraSource, format);
     if (mOutputFormat == OUTPUT_FORMAT_RTP_AVP) {

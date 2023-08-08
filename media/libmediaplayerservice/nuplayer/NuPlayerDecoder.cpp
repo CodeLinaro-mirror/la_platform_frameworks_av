@@ -299,6 +299,8 @@ void NuPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
     mIsAudio = !strncasecmp("audio/", mime.c_str(), 6);
     mIsVideoAVC = !strcasecmp(MEDIA_MIMETYPE_VIDEO_AVC, mime.c_str());
 
+    logLatencyBegin(mIsAudio ? "audioStart" : "videoStart");
+
     mComponentName = mime;
     mComponentName.append(" decoder");
     ALOGV("[%s] onConfigure (surface=%p)", mComponentName.c_str(), mSurface.get());
@@ -366,9 +368,21 @@ void NuPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
     }
     rememberCodecSpecificData(format);
 
-    // the following should work in configured state
-    CHECK_EQ((status_t)OK, mCodec->getOutputFormat(&mOutputFormat));
-    CHECK_EQ((status_t)OK, mCodec->getInputFormat(&mInputFormat));
+    // Do not assume mCodec is in configured state. There are some race conditions which will
+    // move mCodec to error state after configure() has returned success.
+    // As a temporary fix, handle the error case cleanly, without assert check.
+    err = mCodec->getOutputFormat(&mOutputFormat);
+    if (err == OK) {
+        err = mCodec->getInputFormat(&mInputFormat);
+    }
+    if (err != OK) {
+        ALOGE("Failed to get input/output format from [%s] decoder (err=%d)",
+                mComponentName.c_str(), err);
+        mCodec->release();
+        mCodec.clear();
+        handleError(err);
+        return;
+    }
 
     {
         Mutex::Autolock autolock(mStatsLock);
@@ -402,6 +416,7 @@ void NuPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
 
     mPaused = false;
     mResumePending = false;
+    logLatencyEnd(mIsAudio ? "audioStart" : "videoStart");
 }
 
 void NuPlayer::Decoder::onSetParameters(const sp<AMessage> &params) {
