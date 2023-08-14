@@ -1110,6 +1110,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                                                   primaryMix->mDeviceAddress,
                                                   AUDIO_FORMAT_DEFAULT);
         sp<SwAudioOutputDescriptor> policyDesc = primaryMix->getOutput();
+	if (deviceDesc != nullptr) {
         bool requestOffloadOrDirect =
             (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) || (*flags & AUDIO_OUTPUT_FLAG_DIRECT);
         sp<IOProfile> profile = getProfileForOutput(DeviceVector(deviceDesc),
@@ -1125,8 +1126,6 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                 (profile != 0) && (requestOffloadOrDirect)) {
             ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
                 deviceDesc->type());
-            if (deviceDesc != nullptr
-                    && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
                 audio_io_handle_t newOutput;
                 status = openDirectOutput(
                         *stream, session, config,
