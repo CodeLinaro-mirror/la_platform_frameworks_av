@@ -12,6 +12,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ *
+ * Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #define LOG_TAG "audioserver"
@@ -23,6 +28,7 @@
 #include <sys/prctl.h>
 #include <sys/wait.h>
 #include <cutils/properties.h>
+#include <dlfcn.h>
 
 #include <android/media/audio/common/AudioMMapPolicy.h>
 #include <android/media/audio/common/AudioMMapPolicyInfo.h>
@@ -47,6 +53,24 @@ using namespace android;
 using android::media::audio::common::AudioMMapPolicy;
 using android::media::audio::common::AudioMMapPolicyInfo;
 using android::media::audio::common::AudioMMapPolicyType;
+
+void registerIHalAdapterVendorExtension() {
+    constexpr char kLibPath[] = "libaudiohalvendorextn.so";
+    void *libHandle = dlopen(kLibPath, RTLD_NOW | RTLD_NODELETE);
+    if (libHandle == nullptr) {
+        ALOGE("Failed to load library: %s (%s)", kLibPath, dlerror());
+        return;
+    }
+
+    auto registerInterface =
+        reinterpret_cast<void (*)()>(dlsym(libHandle, "registerInterface"));
+    if (registerInterface == nullptr) {
+        ALOGE("Failed to find symbol(registerInterface): error (%s)",
+              dlerror());
+        return;
+    }
+    registerInterface();
+}
 
 int main(int argc __unused, char **argv)
 {
@@ -150,6 +174,9 @@ int main(int argc __unused, char **argv)
         // Ensure threads for possible callbacks.  Note that get_audio_flinger() does
         // this automatically when called from AudioPolicy, but we do this anyways here.
         ProcessState::self()->startThreadPool();
+
+        // Making sure this service is registered before the flinger.
+        registerIHalAdapterVendorExtension();
 
         // Instantiating AudioFlinger (making it public, e.g. through ::initialize())
         // and then instantiating AudioPolicy (and making it public)
