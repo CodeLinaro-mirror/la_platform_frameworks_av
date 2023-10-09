@@ -1917,7 +1917,6 @@ void AudioPolicyService::OpRecordAudioMonitor::onFirstRef()
     // since it controls the mic permission for legacy apps.
     mAppOpsManager.startWatchingMode(mAppOp, VALUE_OR_FATAL(aidl2legacy_string_view_String16(
         mAttributionSource.packageName.value_or(""))),
-        AppOpsManager::WATCH_FOREGROUND_CHANGES,
         mOpCallback);
 }
 
@@ -2036,6 +2035,19 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                             data->mVolume);
                     mLock.unlock();
                     command->mStatus = AudioSystem::setVoiceVolume(data->mVolume);
+                    mLock.lock();
+                    }break;
+                case START_OUTPUT: {
+                    StartOutputData *data = (StartOutputData *)command->mParam.get();
+                    ALOGV("AudioCommandThread() processing start output portId %d",
+                            data->mPortId);
+                    svc = mService.promote();
+                    if (svc == 0) {
+                        command->mStatus = UNKNOWN_ERROR;
+                        break;
+                    }
+                    mLock.unlock();
+                    command->mStatus = svc->doStartOutput(data->mPortId);
                     mLock.lock();
                     }break;
                 case STOP_OUTPUT: {
@@ -2359,6 +2371,18 @@ status_t AudioPolicyService::AudioCommandThread::voiceVolumeCommand(float volume
     command->mWaitStatus = true;
     ALOGV("AudioCommandThread() adding set voice volume volume %f", volume);
     return sendCommand(command, delayMs);
+}
+
+status_t AudioPolicyService::AudioCommandThread::startOutputCommand(audio_port_handle_t portId)
+{
+    sp<AudioCommand> command = new AudioCommand();
+    command->mCommand = START_OUTPUT;
+    sp<StartOutputData> data = new StartOutputData();
+    data->mPortId = portId;
+    command->mParam = data;
+    command->mWaitStatus = true;
+    ALOGV("AudioCommandThread() adding start output portId %d", portId);
+    return sendCommand(command);
 }
 
 void AudioPolicyService::AudioCommandThread::setEffectSuspendedCommand(int effectId,

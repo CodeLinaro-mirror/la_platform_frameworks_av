@@ -108,6 +108,7 @@ cc_defaults {
             ],
             cflags: [
                 "-DNO_IMEMORY",
+                "-D__ANDROID_VNDK__",
             ],
         },
         host: {
@@ -136,12 +137,27 @@ cc_defaults {
 
 cc_library {
     name: "libstagefright_foundation",
+    vendor_available: true,
+    vndk: {
+	enabled: true,
+    },
     defaults: ["libstagefright_foundation_defaults"],
     min_sdk_version: "29",
     apex_available: [
         "//apex_available:platform",
         "com.android.media",
         "com.android.media.swcodec",
+    ],
+    target: {
+	vendor: {
+		cflags: ["-D__ANDROID_VNDK__"],
+	},
+    },
+
+    cflags: [
+	"-Wno-multichar",
+	"-Werror",
+	"-Wall",
     ],
 }
 

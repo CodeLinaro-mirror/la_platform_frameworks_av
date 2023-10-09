@@ -60,7 +60,6 @@ public:
                                     //    frames to be read
                                     // on input to releaseBuffer() it is currently ignored
 
-    private:
         size_t      mSize;          // input/output in bytes == frameCount * frameSize
                                     // on input to obtainBuffer() it is ignored
                                     // on output from obtainBuffer() it is the number of available
@@ -582,6 +581,11 @@ public:
 
     /* Get the flags */
             audio_input_flags_t getFlags() const { AutoMutex _l(mLock); return mFlags; }
+
+    /* Set parameters - Must be used with direct input */
+            status_t    setParameters(const String8& keyValuePairs);
+    /* Get parameters */
+            String8     getParameters(const String8& keys);
 
     /* Get active microphones. A empty vector of MicrophoneInfoFw will be passed as a parameter,
      * the data will be filled when querying the hal.

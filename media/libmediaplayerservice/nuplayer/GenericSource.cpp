@@ -45,6 +45,7 @@
 #include <media/stagefright/Utils.h>
 #include <mpeg2ts/AnotherPacketSource.h>
 
+#include "mediaplayerservice/AVNuExtensions.h"
 namespace android {
 
 static const int kInitialMarkMs        = 5000;  // 5secs
