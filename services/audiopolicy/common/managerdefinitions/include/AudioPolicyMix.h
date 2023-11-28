@@ -129,6 +129,9 @@ private:
                             const audio_attributes_t& attributes,
                             const audio_config_base_t& config,
                             uid_t uid);
+    MixMatchStatus BtmixMatch(const AudioMix* mix, size_t mixIndex,
+                              const audio_attributes_t& attributes,
+                              uid_t uid);
 };
 
 } // namespace android
