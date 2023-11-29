@@ -7047,7 +7047,7 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::OffloadThread::prepareTr
             }
         }
         // compute volume for this track
-        if (track->isReady()) {  // check ready to prevent premature start.
+        if (track->isReady() && !track->isPaused()) {  // check ready to prevent premature start.
             processVolume_l(track, last);
         }
     }
