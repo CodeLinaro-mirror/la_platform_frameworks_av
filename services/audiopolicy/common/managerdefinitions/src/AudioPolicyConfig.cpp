@@ -44,7 +44,7 @@ sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmXmlConfigWithFallback(
     bool va_aosp_support = property_get_bool(VALUEADD_AOSP_SUPPORT_PROPERTY, false);
     if (va_aosp_support) {
         property_get("ro.boot.audio", g_audio_framework, NULL);
-        if (!strcmp(g_audio_framework, "audioreach"))
+        if (strstr(g_audio_framework, "audioreach") != NULL)
             audioPolicyXmlConfigFile = audio_get_audio_policy_config_file();
     }
     const std::string filePath =
