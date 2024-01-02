@@ -284,7 +284,7 @@ protected:
     // format updates. This will equal to mOutputFormat until the first actual frame is received.
     sp<AMessage> mBaseOutputFormat;
 
-    std::vector<BufferInfo> mBuffers[2];
+    std::vector<BufferInfo> mBuffers[4];
     bool mPortEOS[2];
     status_t mInputEOSResult;
     std::set<int64_t> mDecodeOnlyTimesUs;
