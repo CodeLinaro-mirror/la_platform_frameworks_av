@@ -331,6 +331,8 @@ protected:
     int64_t getDurationUsIfPlayedAtSampleRate(uint32_t numFrames);
 
     DISALLOW_EVIL_CONSTRUCTORS(Renderer);
+private:
+    float mVideoRenderFps;
 };
 
 } // namespace android
