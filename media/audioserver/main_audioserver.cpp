@@ -81,6 +81,7 @@ int main(int argc __unused, char **argv)
 #else
     bool doLog = (bool) property_get_bool("ro.test_harness", 0);
 #endif
+    bool enable1GLowMem = (bool) property_get_bool("ro.product.1G.enable", 1);
 
     pid_t childPid;
     // FIXME The advantage of making the process containing media.log service the parent process of
@@ -168,7 +169,10 @@ int main(int argc __unused, char **argv)
         ALOGI("ServiceManager: AudioFlinger instantiate done %p", sm.get());
         AudioPolicyService::instantiate();
         ALOGI("ServiceManager: AudioPolicyService instantiate done %p", sm.get());
-        instantiateVRAudioServer();
+        if (!enable1GLowMem){
+            instantiateVRAudioServer();
+            ALOGI("ServiceManager: VRAudioServer instantiate done %p", sm.get());
+        }
 
         // AAudioService should only be used in OC-MR1 and later.
         // And only enable the AAudioService if the system MMAP policy explicitly allows it.
