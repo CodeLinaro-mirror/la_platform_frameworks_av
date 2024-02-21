@@ -1314,6 +1314,7 @@ void NuPlayer::Renderer::onNewAudioMediaTime(int64_t mediaTimeUs) {
             int64_t nowMediaUs = mediaTimeUs - getPendingAudioPlayoutDurationUs(nowUs);
             mMediaClock->updateAnchor(nowMediaUs, nowUs, mediaTimeUs);
             mAnchorTimeMediaUs = mediaTimeUs;
+            mAnchorNumFramesWritten = mNumFramesWritten;
             mUseVirtualAudioSink = false;
             mNextAudioClockUpdateTimeUs = nowUs + kMinimumAudioClockUpdatePeriodUs;
         }
@@ -1332,10 +1333,10 @@ void NuPlayer::Renderer::onNewAudioMediaTime(int64_t mediaTimeUs) {
             ALOGW("AudioSink stuck. ARE YOU CONNECTED TO AUDIO OUT? Switching to system clock.");
             mMediaClock->updateAnchor(mAudioFirstAnchorTimeMediaUs, nowUs, mediaTimeUs);
             mAnchorTimeMediaUs = mediaTimeUs;
+            mAnchorNumFramesWritten = mNumFramesWritten;
             mUseVirtualAudioSink = true;
         }
     }
-    mAnchorNumFramesWritten = mNumFramesWritten;
 }
 
 // Called without mLock acquired.
@@ -1387,7 +1388,7 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
     {
         Mutex::Autolock autoLock(mLock);
         if (mAnchorTimeMediaUs < 0) {
-            mMediaClock->updateAnchor(mediaTimeUs, nowUs, mediaTimeUs);
+            mMediaClock->updateAnchor(mediaTimeUs, nowUs, -1);
             mAnchorTimeMediaUs = mediaTimeUs;
         }
     }
