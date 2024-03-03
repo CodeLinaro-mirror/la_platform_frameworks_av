@@ -31,6 +31,7 @@
 
 static char g_audio_framework[100];
 #define VA_AUDIO_POLICY_CONFIG_PATH "/vendor/etc/audio/audio_policy_configuration.xml"
+#define VA_AUDIO_POLICY_CONFIG_PATH_AR "/vendor/etc/audio_ar/audio_policy_configuration.xml"
 
 #include <algorithm>
 #include <inttypes.h>
@@ -1266,7 +1267,6 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                     policyDesc = nullptr;
                 } else {
                     policyDesc = mOutputs.valueFor(newOutput);
-                    primaryMix->setOutput(policyDesc);
                 }
             }
         }
@@ -5868,7 +5868,7 @@ static status_t deserializeAudioPolicyXmlConfig(AudioPolicyConfig &config) {
     std::string audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH;
     property_get("ro.boot.audio", g_audio_framework, NULL);
     if (!strcmp(g_audio_framework, "audioreach"))
-         audioPolicyXmlConfigFile = audio_get_audio_policy_config_file();
+         audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH_AR;
     else
          audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH;
 
