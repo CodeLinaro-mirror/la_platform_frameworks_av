@@ -720,13 +720,6 @@ status_t AudioTrack::set(
         // so no need to check for specific PCM formats here
     }
 
-    // sampling rate must be specified for direct outputs
-    if (sampleRate == 0 && (mFlags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) {
-        errorMessage = StringPrintf(
-                "%s: sample rate must be specified for direct outputs", __func__);
-        status = BAD_VALUE;
-        goto error;
-    }
     // 1.0 <= mMaxRequiredSpeed <= AUDIO_TIMESTRETCH_SPEED_MAX
     mMaxRequiredSpeed = min(max(maxRequiredSpeed, 1.0f), AUDIO_TIMESTRETCH_SPEED_MAX);
 
