@@ -43,6 +43,7 @@
 #include <C2AllocatorGralloc.h>
 #include <C2BlockInternal.h>
 #include <C2Debug.h>
+#include <Codec2BufferUtils.h>
 
 #include "Codec2Buffer.h"
 
