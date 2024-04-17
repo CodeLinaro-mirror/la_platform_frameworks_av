@@ -522,6 +522,15 @@ bool MediaCodecList::codecHandlesFormat(
             }
         }
 
+         // skip profile/level check for 'c2.v4l2.xxx.decoder'
+        AString componentName = info->getCodecName();
+        if (property_get_bool("debug.stagefright.c2-v4l2-decoder-skip-profile-level-check", false)
+            && info->isEncoder() == 0
+            && strncmp(componentName.c_str(), "c2.v4l2.", strlen("c2.v4l2.")) == 0) {
+            ALOGV("skip profile/level check for codec '%s' ", componentName.c_str());
+            return true;
+        }
+
         int32_t profile = -1;
         if (format->findInt32(KEY_PROFILE, &profile)) {
             Vector<MediaCodecInfo::ProfileLevel> profileLevels;
