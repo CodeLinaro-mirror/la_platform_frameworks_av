@@ -3382,6 +3382,9 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
         if ((flags & AUDIO_INPUT_FLAG_MMAP_NOIRQ) != 0) {
             flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_MMAP_NOIRQ;
         }
+        else if ((flags & AUDIO_INPUT_FLAG_FAST) != 0) {
+            flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_FAST;
+        }
         else {
             flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
         }
