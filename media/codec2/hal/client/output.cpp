@@ -408,11 +408,13 @@ status_t OutputBufferQueue::outputBuffer(
 
         status_t status = attachToBufferQueue(
                 block, outputIgbp, outputGeneration, &bqSlot, syncMem);
-
         if (status != OK) {
             LOG(WARNING) << "outputBuffer -- attaching failed.";
             return INVALID_OPERATION;
         }
+
+        /* Notify about buffer update */
+        block.sync();
 
         auto syncVar = syncMem ? syncMem->mem() : nullptr;
         if(syncVar) {

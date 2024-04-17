@@ -2036,7 +2036,7 @@ public:
      * \return a read view for this block.
      */
     C2Acquirable<const C2GraphicView> map() const;
-
+    void sync() const;
     /**
      * Returns a section of this block.
      *

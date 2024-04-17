@@ -1455,6 +1455,16 @@ C2Acquirable<const C2GraphicView> C2ConstGraphicBlock::map() const {
             mapping->error(), fence, GraphicViewBuddy(gvi, C2PlanarSection(*mImpl, crop())));
 }
 
+void C2ConstGraphicBlock::sync() const {
+    C2Fence fence;
+
+    /* Invocate map to synchronize memory with gpu host side. Writable
+     * attribute set to "true" because memory was updated by decoder.
+     * Otherwise virgl driver in minigbm will assume that memory was not
+     * changed and skip TRANSFER_TO_HOST invocation. */
+    mImpl->map(true, &fence);
+}
+
 C2ConstGraphicBlock C2ConstGraphicBlock::subBlock(const C2Rect &rect) const {
     return C2ConstGraphicBlock(mImpl, C2PlanarSection(*mImpl, crop().intersect(rect)), mFence);
 }
