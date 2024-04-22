@@ -87,6 +87,8 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
             break;
 
         case AAUDIO_PERFORMANCE_MODE_NONE:
+            flags = AUDIO_OUTPUT_FLAG_DIRECT;
+            break;
         default:
             // No flags. Use a normal mixer in front of the FAST mixer.
             flags = AUDIO_OUTPUT_FLAG_NONE;
@@ -309,6 +311,20 @@ aaudio_result_t AudioStreamTrack::requestStart_l() {
     if (mAudioTrack.get() == nullptr) {
         ALOGE("requestStart() no AudioTrack");
         return AAUDIO_ERROR_INVALID_STATE;
+    }
+    struct audio_port_v7 port = {};
+    float volume = 0.0;
+    if (mAudioTrack->getFlags() == AUDIO_OUTPUT_FLAG_DIRECT) {
+        port.id = BUS00_MEDIA_PORT_ID;
+        AudioSystem::getAudioPort(&port);
+        if (port.active_config.gain.values[0] <= MIN_VOLUME_VALUE_MB) {
+            volume = MIN_VOLUME_GAIN;
+        } else if (port.active_config.gain.values[0] >= MAX_VOLUME_VALUE_MB) {
+            volume = MAX_VOLUME_GAIN;
+        } else {
+            volume = pow(10.0, ((float)port.active_config.gain.values[0] / 2000));
+        }
+        mAudioTrack->setVolume(volume);
     }
     // Get current position so we can detect when the track is playing.
     status_t err = mAudioTrack->getPosition(&mPositionWhenStarting);

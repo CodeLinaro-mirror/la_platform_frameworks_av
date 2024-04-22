@@ -27,6 +27,11 @@
 #include "legacy/AAudioLegacy.h"
 #include "legacy/AudioStreamLegacy.h"
 #include "utility/FixedBlockReader.h"
+#define MIN_VOLUME_VALUE_MB -6000
+#define MAX_VOLUME_VALUE_MB 0
+#define MIN_VOLUME_GAIN 0.0f
+#define MAX_VOLUME_GAIN 1.0f
+#define BUS00_MEDIA_PORT_ID 2
 
 namespace aaudio {
 
