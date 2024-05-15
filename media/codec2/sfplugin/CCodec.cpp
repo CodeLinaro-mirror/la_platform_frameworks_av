@@ -55,7 +55,7 @@
 #include "CCodecConfig.h"
 #include "Codec2Mapper.h"
 #include "InputSurfaceWrapper.h"
-#define ALIGN(_sz, _align) (((_sz) + ((_align) - 1)) & ~(_align))
+#define ALIGN(_sz, _align) (((_sz) + ((_align) - 1)) & ~(_align - 1))
 
 extern "C" android::PersistentSurface *CreateInputSurface();
 
@@ -1331,7 +1331,7 @@ void CCodec::configure(const sp<AMessage> &msg) {
                     maxInputSize.value = csd->size();
                 }
             }
-            if (csd) {
+            if (csd && Config::IS_VIDEO) {
                 clientInputSize = ALIGN(clientInputSize, 256);
             }
         }
