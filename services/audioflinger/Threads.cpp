@@ -172,7 +172,7 @@ static const uint32_t kMaxNormalSinkBufferSizeMs = 24;
 
 // minimum capture buffer size in milliseconds to _not_ need a fast capture thread
 // FIXME This should be based on experimentally observed scheduling jitter
-static const uint32_t kMinNormalCaptureBufferSizeMs = 12;
+static const uint32_t kMinNormalCaptureBufferSizeMs = 30;
 
 // Offloaded output thread standby delay: allows track transition without going to standby
 static const nsecs_t kOffloadStandbyDelayNs = seconds(1);
@@ -7883,7 +7883,7 @@ AudioFlinger::RecordThread::RecordThread(const sp<AudioFlinger>& audioFlinger,
         break;
     case FastCapture_Static:
         initFastCapture = !mIsMsdDevice // Disable fast capture for MSD BUS devices.
-                && (mFrameCount * 1000) / mSampleRate < kMinNormalCaptureBufferSizeMs;
+                && (mFrameCount * 1000) / mSampleRate <= kMinNormalCaptureBufferSizeMs;
         ALOGV("%p kUseFastCapture = Static, (%lld * 1000) / %u vs %u, initFastCapture = %d "
                 "mIsMsdDevice = %d", this, (long long)mFrameCount, mSampleRate,
                 kMinNormalCaptureBufferSizeMs, initFastCapture, mIsMsdDevice);

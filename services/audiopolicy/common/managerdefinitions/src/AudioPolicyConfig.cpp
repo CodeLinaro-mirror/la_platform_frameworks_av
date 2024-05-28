@@ -30,6 +30,7 @@
 #define VALUEADD_AOSP_SUPPORT_PROPERTY "ro.vendor.qti.va_aosp.support"
 static char g_audio_framework[100];
 #define VA_AUDIO_POLICY_CONFIG_PATH "/vendor/etc/audio/audio_policy_configuration.xml"
+#define VA_AUDIO_POLICY_CONFIG_PATH_AR "/vendor/etc/audio_ar/audio_policy_configuration.xml"
 
 namespace android {
 
@@ -199,7 +200,7 @@ sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmXmlConfigWithFallback(
     if (va_aosp_support) {
         property_get("ro.boot.audio", g_audio_framework, NULL);
         if (strstr(g_audio_framework, "audioreach") != NULL)
-            audioPolicyXmlConfigFile = audio_get_audio_policy_config_file();
+            audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH_AR;
     }
     const std::string filePath =
             va_aosp_support ? audioPolicyXmlConfigFile :

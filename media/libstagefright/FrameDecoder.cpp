@@ -467,7 +467,11 @@ status_t FrameDecoder::extractInternal() {
                         break;
                     }
                     if (mSurface != nullptr) {
-                        mDecoder->renderOutputBufferAndRelease(index);
+                        if (!shouldDropOutput(ptsUs)) {
+                            mDecoder->renderOutputBufferAndRelease(index);
+                        } else {
+                            mDecoder->releaseOutputBuffer(index);
+                        }
                         err = onOutputReceived(videoFrameBuffer, mOutputFormat, ptsUs, &done);
                     } else {
                         err = onOutputReceived(videoFrameBuffer, mOutputFormat, ptsUs, &done);
@@ -558,11 +562,13 @@ sp<AMessage> VideoFrameDecoder::onGetFormatAndSeekOptions(
         videoFormat->setInt32("android._num-output-buffers", 1);
     }
 
-    if (isHDR(videoFormat)) {
+    // force surface-mode for all thumbnails
+    if (true /*isHDR(videoFormat)*/) {
         *window = initSurface();
         if (*window == NULL) {
             ALOGE("Failed to init surface control for HDR, fallback to non-hdr");
         } else {
+            ALOGI("using surface mode");
             videoFormat->setInt32("color-format", OMX_COLOR_FormatAndroidOpaque);
         }
     }
@@ -614,10 +620,9 @@ status_t VideoFrameDecoder::onOutputReceived(
         durationUs = *mSampleDurations.begin();
         mSampleDurations.erase(mSampleDurations.begin());
     }
-    bool shouldOutput = (mTargetTimeUs < 0LL) || (timeUs >= mTargetTimeUs);
 
     // If this is not the target frame, skip color convert.
-    if (!shouldOutput) {
+    if (shouldDropOutput(timeUs)) {
         *done = false;
         return OK;
     }
