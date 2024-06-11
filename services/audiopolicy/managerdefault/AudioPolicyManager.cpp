@@ -1242,6 +1242,12 @@ status_t AudioPolicyManager::getOutputForAttrInt(
 
     bool usePrimaryOutputFromPolicyMixes = false;
 
+    //Check for preferred devices in output devices list and if present, skip policy mixes
+    sp<DeviceDescriptor> preferredDevice = mAvailableOutputDevices.getFirstExistingDevice({
+                                            AUDIO_DEVICE_OUT_BLE_HEADSET,
+                                            AUDIO_DEVICE_OUT_BLE_SPEAKER,
+                                            AUDIO_DEVICE_OUT_BLE_BROADCAST});
+
     // The primary output is the explicit routing (eg. setPreferredDevice) if specified,
     //       otherwise, fallback to the dynamic policies, if none match, query the engine.
     // Secondary outputs are always found by dynamic policies as the engine do not support them
@@ -1263,7 +1269,12 @@ status_t AudioPolicyManager::getOutputForAttrInt(
         ALOGD("%s: rejecting request as secondary mixes only support pcm", __func__);
         return BAD_VALUE;
     }
-    if (usePrimaryOutputFromPolicyMixes) {
+
+    ALOGD("%s : use primary output from mix: %d, device preference: %s ",
+        __FUNCTION__, usePrimaryOutputFromPolicyMixes,
+        preferredDevice == nullptr ? "no" : "yes");
+
+    if (usePrimaryOutputFromPolicyMixes && (preferredDevice == nullptr)) {
         /* BUG 73287368: Support compress-offload playback with dynamic audio policy */
         sp<DeviceDescriptor> deviceDesc =
                 mAvailableOutputDevices.getDevice(primaryMix->mDeviceType,
