@@ -87,6 +87,8 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
             break;
 
         case AAUDIO_PERFORMANCE_MODE_NONE:
+            flags = AUDIO_OUTPUT_FLAG_DIRECT;
+            break;
         default:
             // No flags. Use a normal mixer in front of the FAST mixer.
             flags = AUDIO_OUTPUT_FLAG_NONE;

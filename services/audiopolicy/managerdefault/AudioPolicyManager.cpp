@@ -1296,7 +1296,6 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                     policyDesc = nullptr;
                 } else {
                     policyDesc = mOutputs.valueFor(newOutput);
-                    primaryMix->setOutput(policyDesc);
                 }
             }
         }
@@ -1713,11 +1712,15 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
     if (stream == AUDIO_STREAM_TTS) {
         *flags = AUDIO_OUTPUT_FLAG_TTS;
     } else if (stream == AUDIO_STREAM_VOICE_CALL &&
-               audio_is_linear_pcm(config->format) &&
-               (*flags & AUDIO_OUTPUT_FLAG_INCALL_MUSIC) == 0) {
-        *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX |
+               audio_is_linear_pcm(config->format)) {
+        if (*flags & AUDIO_OUTPUT_FLAG_FAST) {
+            ALOGV("Set Fast output flags for PCM format");
+        }
+        else if ((*flags & AUDIO_OUTPUT_FLAG_INCALL_MUSIC) == 0) {
+           *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX |
                                        AUDIO_OUTPUT_FLAG_DIRECT);
         ALOGV("Set VoIP and Direct output flags for PCM format");
+        }
     }
 
     // Attach the Ultrasound flag for the AUDIO_CONTENT_TYPE_ULTRASOUND
@@ -2999,6 +3002,9 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
                audio_is_linear_pcm(config->format)) {
         if ((flags & AUDIO_INPUT_FLAG_MMAP_NOIRQ) != 0) {
             flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_MMAP_NOIRQ;
+        }
+        else if ((flags & AUDIO_INPUT_FLAG_FAST) != 0) {
+            flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_FAST;
         }
         else {
             flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
