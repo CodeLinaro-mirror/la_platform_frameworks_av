@@ -82,6 +82,7 @@ int main(int argc __unused, char **argv)
 #else
     bool doLog = (bool) property_get_bool("ro.test_harness", 0);
 #endif
+    bool enableMemOptimize = (bool) property_get_bool("ro.product.memopt.enable",1);
 
     pid_t childPid;
     // FIXME The advantage of making the process containing media.log service the parent process of
@@ -188,7 +189,10 @@ int main(int argc __unused, char **argv)
 
         // Add AudioFlinger and AudioPolicy to ServiceManager.
         sp<IServiceManager> sm = defaultServiceManager();
-        instantiateVRAudioServer();
+        if (!enableMemOptimize) {
+            instantiateVRAudioServer();
+            ALOGD("%s: VRAudioServer instantiate done %p", __func__, sm.get());
+        }
         sm->addService(String16(IAudioFlinger::DEFAULT_SERVICE_NAME), afAdapter,
                 false /* allowIsolated */, IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT);
         sm->addService(String16(AudioPolicyService::getServiceName()), aps,
