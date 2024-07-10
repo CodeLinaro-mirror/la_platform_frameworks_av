@@ -99,9 +99,6 @@ int main(int argc __unused, char **argv __unused)
 
     signal(SIGPIPE, SIG_IGN);
 
-        // TODO whether it should be part of audioserver
-    instantiateVRAudioServer();
-
     // Make sure IHAVE is registered before AudioFlinger
     registerIHalAdapterVendorExtension();
 
@@ -138,6 +135,9 @@ int main(int argc __unused, char **argv __unused)
 
     // Add AudioFlinger and AudioPolicy to ServiceManager.
     sp<IServiceManager> sm = defaultServiceManager();
+#ifndef TARGET_QCOM_IOT_LOW_RAM
+        instantiateVRAudioServer();
+#endif
     sm->addService(String16(IAudioFlinger::DEFAULT_SERVICE_NAME), afAdapter,
             false /* allowIsolated */, IServiceManager::DUMP_FLAG_PRIORITY_DEFAULT);
     sm->addService(String16(AudioPolicyService::getServiceName()), aps,
