@@ -35,8 +35,7 @@ bool IsCodec2AidlHalSelected() {
     if (!com::android::media::codec::flags::provider_->aidl_hal() &&
         vendorVersion < kAndroidApi202404) {
         // Cannot select AIDL if not enabled
-        LOG(ERROR) << "IsCodec2AidlHalSelected hacking to true as AIDL not enabled";
-        return true;
+        return false;
     }
 #if 0
     // NOTE: due to dependency from mainline modules cannot use libsysprop
