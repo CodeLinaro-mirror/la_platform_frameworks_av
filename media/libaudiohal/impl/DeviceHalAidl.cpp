@@ -12,6 +12,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ *
  */
 
 #define LOG_TAG "DeviceHalAidl"
@@ -745,7 +750,20 @@ status_t DeviceHalAidl::setAudioPortConfig(const struct audio_port_config* confi
                     *config, isInput, 0 /*portId*/));
     AudioPortConfig portConfig;
     std::lock_guard l(mLock);
-    return mMapper.setPortConfig(requestedPortConfig, std::set<int32_t>(), &portConfig);
+    RETURN_STATUS_IF_ERROR(mMapper.setPortConfig(requestedPortConfig, std::set<int32_t>(), &portConfig));
+    if(requestedPortConfig.gain.has_value())
+    {
+        bool applied = false;
+        portConfig.gain = requestedPortConfig.gain;
+        requestedPortConfig = portConfig;
+        RETURN_STATUS_IF_ERROR(statusTFromBinderStatus(mModule->setAudioPortConfig(
+                            requestedPortConfig, &portConfig, &applied)));
+        if (!applied)
+        {
+            ALOGD("port config not created or updated %s::%s",portConfig.toString().c_str(), __func__);
+        }
+    }
+    return OK;
 }
 
 MicrophoneInfoProvider::Info const* DeviceHalAidl::getMicrophoneInfo() {
