@@ -2224,7 +2224,7 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
         if (samplingRate > SAMPLE_RATE_HZ_DEFAULT) {
             currentMatchCriteria[4] = outputDesc->getSamplingRate();
         }
-        if (flags & AUDIO_OUTPUT_FLAG_FAST && samplingRate <= SAMPLE_RATE_HZ_DEFAULT) {
+        if (flags & AUDIO_OUTPUT_FLAG_FAST && samplingRate <= SAMPLE_RATE_HZ_DEFAULT && (channelCount <= outputChannelCount)) {
             ALOGV("%s match criterion modifed for AUDIO_OUTPUT_FLAG_FAST, outputDesc->mSamplingRate=%d, samplingRate=%d",
                     __func__, outputDesc->getSamplingRate(), samplingRate);
             currentMatchCriteria[4] = (outputDesc->getSamplingRate() == samplingRate);
