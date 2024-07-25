@@ -385,7 +385,12 @@ enum {
      * power saving. When all queued data are played, the apps will be able to get callback
      * to feed more data.
      */
-    AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED
+    AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED,
+
+    /**
+     * reserve HD APTX mode for HD audio case.
+     */
+    AAUDIO_PERFORMANCE_MODE_HD_APTX
 };
 typedef int32_t aaudio_performance_mode_t;
 
