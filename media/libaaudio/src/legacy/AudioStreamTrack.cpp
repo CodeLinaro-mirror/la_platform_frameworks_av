@@ -85,7 +85,9 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
             // This uses a mixer that wakes up less often than the FAST mixer.
             flags = AUDIO_OUTPUT_FLAG_DEEP_BUFFER;
             break;
-
+        case AAUDIO_PERFORMANCE_MODE_HD_APTX:
+            flags = AUDIO_OUTPUT_FLAG_DIRECT;
+            break;
         case AAUDIO_PERFORMANCE_MODE_NONE:
         default:
             // No flags. Use a normal mixer in front of the FAST mixer.
