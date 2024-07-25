@@ -335,7 +335,12 @@ enum {
     /**
      * Reducing latency is more important than battery life.
      */
-    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY
+    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
+
+    /**
+     * reserve HD APTX mode for HD audio case.
+     */
+    AAUDIO_PERFORMANCE_MODE_HD_APTX
 };
 typedef int32_t aaudio_performance_mode_t;
 
