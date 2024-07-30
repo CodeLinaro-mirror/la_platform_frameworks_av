@@ -1069,6 +1069,10 @@ void CCodecBufferChannel::feedInputBufferIfAvailableInternal() {
             return;
         }
     }
+    if (android::media::codec::provider_->input_surface_throttle()
+            && mInputSurface != nullptr) {
+        mInputSurface->onInputBufferEmptied();
+    }
     size_t numActiveSlots = 0;
     while (!mPipelineWatcher.lock()->pipelineFull()) {
         sp<MediaCodecBuffer> inBuffer;
@@ -2784,7 +2788,16 @@ void CCodecBufferChannel::resetBuffersPixelFormat(bool isEncoder) {
 }
 
 void CCodecBufferChannel::setInfoBuffer(const std::shared_ptr<C2InfoBuffer> &buffer) {
-    mInfoBuffers.push_back(buffer);
+    if (mInputSurface == nullptr) {
+        mInfoBuffers.push_back(buffer);
+    } else {
+        std::list<std::unique_ptr<C2Work>> items;
+        std::unique_ptr<C2Work> work(new C2Work);
+        work->input.infoBuffers.emplace_back(*buffer);
+        work->worklets.emplace_back(new C2Worklet);
+        items.push_back(std::move(work));
+        c2_status_t err = mComponent->queue(&items);
+    }
 }
 
 status_t toStatusT(c2_status_t c2s, c2_operation_t c2op) {

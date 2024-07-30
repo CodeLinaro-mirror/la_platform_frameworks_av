@@ -30,6 +30,7 @@ cc_library_shared {
         "libaudiopolicyengine_config",
     ],
     shared_libs: [
+        "com.android.media.audioserver-aconfig-cc",
         "libaudio_aidl_conversion_common_cpp",
         "libaudiofoundation",
         "libaudiopolicy",
@@ -40,5 +41,8 @@ cc_library_shared {
         "libmedia_helper",
         "libutils",
         "libxml2",
+    ],
+    defaults: [
+        "aconfig_lib_cc_static_link.defaults",
     ],
 }

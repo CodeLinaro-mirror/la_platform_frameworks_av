@@ -63,6 +63,7 @@ using aidl::android::media::audio::common::MicrophoneInfo;
 using aidl::android::media::audio::IHalAdapterVendorExtension;
 using aidl::android::hardware::audio::common::getFrameSizeInBytes;
 using aidl::android::hardware::audio::common::isBitPositionFlagSet;
+using aidl::android::hardware::audio::common::kDumpFromAudioServerArgument;
 using aidl::android::hardware::audio::common::RecordTrackMetadata;
 using aidl::android::hardware::audio::core::sounddose::ISoundDose;
 using aidl::android::hardware::audio::core::AudioPatch;
@@ -391,7 +392,7 @@ class OutputStreamCallbackAidl : public StreamCallbackBase,
         return runCb([](CbRef cb) { cb->onWriteReady(); });
     }
     ndk::ScopedAStatus onError() override {
-        return runCb([](CbRef cb) { cb->onError(); });
+        return runCb([](CbRef cb) { cb->onError(true /*isHardError*/); });
     }
     ndk::ScopedAStatus onDrainReady() override {
         return runCb([](CbRef cb) { cb->onDrainReady(); });
@@ -464,13 +465,17 @@ status_t DeviceHalAidl::openOutputStream(
     args.portConfigId = mixPortConfig.id;
     const bool isOffload = isBitPositionFlagSet(
             aidlOutputFlags, AudioOutputFlags::COMPRESS_OFFLOAD);
+    const bool isHwAvSync = isBitPositionFlagSet(
+            aidlOutputFlags, AudioOutputFlags::HW_AV_SYNC);
     std::shared_ptr<OutputStreamCallbackAidl> streamCb;
     if (isOffload) {
         streamCb = ndk::SharedRefBase::make<OutputStreamCallbackAidl>(this);
     }
     auto eventCb = ndk::SharedRefBase::make<OutputStreamEventCallbackAidl>(this);
-    if (isOffload) {
+    if (isOffload || isHwAvSync) {
         args.offloadInfo = aidlConfig.offloadInfo;
+    }
+    if (isOffload) {
         args.callback = streamCb;
     }
     args.bufferSizeFrames = aidlConfig.frameCount;
@@ -931,7 +936,9 @@ error::Result<audio_hw_sync_t> DeviceHalAidl::getHwAvSync() {
 status_t DeviceHalAidl::dump(int fd, const Vector<String16>& args) {
     TIME_CHECK();
     if (mModule == nullptr) return NO_INIT;
-    return mModule->dump(fd, Args(args).args(), args.size());
+    Vector<String16> newArgs = args;
+    newArgs.push(String16(kDumpFromAudioServerArgument));
+    return mModule->dump(fd, Args(newArgs).args(), newArgs.size());
 }
 
 status_t DeviceHalAidl::supportsBluetoothVariableLatency(bool* supports) {

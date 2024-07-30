@@ -146,6 +146,11 @@ public:
         return mCameraServiceProxy->notifyCameraState(cameraSessionStats);
     }
 
+    virtual binder::Status notifyFeatureCombinationStats(
+            const hardware::CameraFeatureCombinationStats& featureCombStats) override {
+        return mCameraServiceProxy->notifyFeatureCombinationStats(featureCombStats);
+    }
+
     virtual binder::Status isCameraDisabled(int userId, bool *ret) override {
         if (mOverrideCameraDisabled) {
             *ret = mCameraDisabled;
@@ -230,7 +235,8 @@ TEST_F(CameraPermissionsTest, TestCameraDisabled) {
         binder::Status status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
                 android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false,
+                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 kDefaultDeviceId, /*devicePolicy*/0, &device);
         AutoDisconnectDevice autoDisconnect(device);
         ASSERT_TRUE(!status.isOk()) << "connectDevice returned OK status";
@@ -245,7 +251,8 @@ TEST_F(CameraPermissionsTest, TestCameraDisabled) {
         binder::Status status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
                 android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false,
+                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 kDefaultDeviceId, /*devicePolicy*/0, &device);
         AutoDisconnectDevice autoDisconnect(device);
         ASSERT_TRUE(status.isOk());
@@ -265,7 +272,8 @@ TEST_F(CameraPermissionsTest, TestConsecutiveConnections) {
         binder::Status status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
                 android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false,
+                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 kDefaultDeviceId, /*devicePolicy*/0, &deviceA);
         AutoDisconnectDevice autoDisconnectA(deviceA);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
@@ -273,7 +281,8 @@ TEST_F(CameraPermissionsTest, TestConsecutiveConnections) {
         status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
                 android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false,
+                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 kDefaultDeviceId, /*devicePolicy*/0, &deviceB);
         AutoDisconnectDevice autoDisconnectB(deviceB);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
@@ -295,7 +304,8 @@ TEST_F(CameraPermissionsTest, TestConflictingOomScoreOffset) {
         binder::Status status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
                 android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false,
+                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 kDefaultDeviceId, /*devicePolicy*/0, &deviceA);
         AutoDisconnectDevice autoDisconnectA(deviceA);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<
@@ -303,7 +313,8 @@ TEST_F(CameraPermissionsTest, TestConflictingOomScoreOffset) {
         status =
                 sCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
                 android::CameraService::USE_CALLING_UID, 1/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__, /*overrideToPortrait*/false,
+                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+                hardware::ICameraService::ROTATION_OVERRIDE_NONE,
                 kDefaultDeviceId, /*devicePolicy*/0, &deviceB);
         AutoDisconnectDevice autoDisconnectB(deviceB);
         ASSERT_TRUE(status.isOk()) << "Exception code " << status.exceptionCode() <<

@@ -84,6 +84,7 @@ cc_library_shared {
         "libui",
         "libutils",
         "server_configurable_flags",
+        "libaconfig_storage_read_api_cc",
     ],
 
     export_shared_lib_headers: [

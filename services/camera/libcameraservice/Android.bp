@@ -72,6 +72,7 @@ cc_defaults {
         "libsensorprivacy",
         "libstagefright",
         "libstagefright_foundation",
+        "libvendorsupport",
         "libxml2",
         "libyuv",
         "android.companion.virtual.virtualdevice_aidl-cpp",
@@ -87,6 +88,7 @@ cc_defaults {
         "android.hardware.common-V2-ndk",
         "android.hardware.common.fmq-V1-ndk",
         "camera_platform_flags_c_lib",
+        "com.android.window.flags.window-aconfig_flags_c_lib",
         "media_permission-aidl-cpp",
     ],
 
@@ -194,7 +196,6 @@ cc_library {
         "utils/SchedulingPolicyUtils.cpp",
         "utils/SessionConfigurationUtils.cpp",
         "utils/SessionConfigurationUtilsHidl.cpp",
-        "utils/SessionStatsBuilder.cpp",
         "utils/TagMonitor.cpp",
         "utils/LatencyHistogram.cpp",
         "utils/Utils.cpp",
@@ -246,6 +247,7 @@ cc_library_static {
         "device3/ZoomRatioMapper.cpp",
         "utils/ExifUtils.cpp",
         "utils/SessionConfigurationUtilsHost.cpp",
+        "utils/SessionStatsBuilder.cpp",
     ],
 
     header_libs: [

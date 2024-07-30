@@ -444,6 +444,10 @@ public:
         mNode->onInputBufferDone(index);
     }
 
+    void onInputBufferEmptied() override {
+        mNode->onInputBufferEmptied();
+    }
+
     android_dataspace getDataspace() override {
         return mNode->getDataspace();
     }
@@ -661,6 +665,10 @@ public:
 
     void onInputBufferDone(c2_cntr64_t index) override {
         mNode->onInputBufferDone(index);
+    }
+
+    void onInputBufferEmptied() override {
+        mNode->onInputBufferEmptied();
     }
 
     android_dataspace getDataspace() override {
@@ -2227,8 +2235,23 @@ void CCodec::stop(bool pushBlankBuffer) {
     // So we reverse their order for stopUseOutputSurface() to notify C2Fence waiters
     // prior to comp->stop().
     // See also b/300350761.
-    mChannel->stopUseOutputSurface(pushBlankBuffer);
-    status_t err = comp->stop();
+    //
+    // The workaround is no longer needed with fetchGraphicBlock & C2Fence changes.
+    // so we are reverting back to the logical sequence of the operations when
+    // AIDL HALs are selected.
+    // When the HIDL HALs are selected, we retained workaround(the reversed
+    // order) as default in order to keep legacy behavior.
+    bool stopHalBeforeSurface =
+            Codec2Client::IsAidlSelected() ||
+            property_get_bool("debug.codec2.stop_hal_before_surface", false);
+    status_t err = C2_OK;
+    if (stopHalBeforeSurface && android::media::codec::provider_->stop_hal_before_surface()) {
+        err = comp->stop();
+        mChannel->stopUseOutputSurface(pushBlankBuffer);
+    } else {
+        mChannel->stopUseOutputSurface(pushBlankBuffer);
+        err = comp->stop();
+    }
     if (err != C2_OK) {
         // TODO: convert err into status_t
         mCallback->onError(UNKNOWN_ERROR, ACTION_CODE_FATAL);
@@ -2323,8 +2346,22 @@ void CCodec::release(bool sendCallback, bool pushBlankBuffer) {
     // So we reverse their order for stopUseOutputSurface() to notify C2Fence waiters
     // prior to comp->release().
     // See also b/300350761.
-    mChannel->stopUseOutputSurface(pushBlankBuffer);
-    comp->release();
+    //
+    // The workaround is no longer needed with fetchGraphicBlock & C2Fence changes.
+    // so we are reverting back to the logical sequence of the operations when
+    // AIDL HALs are selected.
+    // When the HIDL HALs are selected, we retained workaround(the reversed
+    // order) as default in order to keep legacy behavior.
+    bool stopHalBeforeSurface =
+            Codec2Client::IsAidlSelected() ||
+            property_get_bool("debug.codec2.stop_hal_before_surface", false);
+    if (stopHalBeforeSurface && android::media::codec::provider_->stop_hal_before_surface()) {
+        comp->release();
+        mChannel->stopUseOutputSurface(pushBlankBuffer);
+    } else {
+        mChannel->stopUseOutputSurface(pushBlankBuffer);
+        comp->release();
+    }
 
     {
         Mutexed<State>::Locked state(mState);
@@ -2596,6 +2633,15 @@ void CCodec::signalSetParameters(const sp<AMessage> &msg) {
     if (config->mInputSurface == nullptr
             && (property_get_bool("debug.stagefright.ccodec_delayed_params", false)
                     || comp->getName().find("c2.android.") == 0)) {
+        std::vector<std::unique_ptr<C2Param>> localConfigUpdate;
+        for (const std::unique_ptr<C2Param> &param : configUpdate) {
+            if (param && param->coreIndex().coreIndex() == C2StreamSurfaceScalingInfo::CORE_INDEX) {
+                localConfigUpdate.push_back(C2Param::Copy(*param));
+            }
+        }
+        if (!localConfigUpdate.empty()) {
+            (void)config->setParameters(comp, localConfigUpdate, C2_MAY_BLOCK);
+        }
         mChannel->setParameters(configUpdate);
     } else {
         sp<AMessage> outputFormat = config->mOutputFormat;

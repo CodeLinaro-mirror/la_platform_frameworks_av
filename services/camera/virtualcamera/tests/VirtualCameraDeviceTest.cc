@@ -54,11 +54,9 @@ using ::testing::UnorderedElementsAreArray;
 using metadata_stream_t =
     camera_metadata_enum_android_scaler_available_stream_configurations_t;
 
-constexpr int kCameraId = 42;
+constexpr char kCameraId[] = "42";
 constexpr int kQvgaWidth = 320;
 constexpr int kQvgaHeight = 240;
-constexpr int k360pWidth = 640;
-constexpr int k360pHeight = 360;
 constexpr int kVgaWidth = 640;
 constexpr int kVgaHeight = 480;
 constexpr int kHdWidth = 1280;
@@ -361,6 +359,33 @@ TEST_F(VirtualCameraDeviceTest, thumbnailSizeWithCompatibleAspectRatio) {
   // characteristics, since it has same aspect ratio.
   EXPECT_THAT(getJpegAvailableThumbnailSizes(metadata),
               ElementsAre(Resolution(0, 0), Resolution(240, 180)));
+}
+
+TEST_F(VirtualCameraDeviceTest, dump) {
+  std::string expected = R"(  virtual_camera 42 belongs to virtual device 0
+  SupportedStreamConfiguration:
+    SupportedStreamConfiguration{width: 640, height: 480, pixelFormat: YUV_420_888, maxFps: 30})";
+  int expectedSize = expected.size() * sizeof(char);
+  char buffer[expectedSize];
+
+  // Create an in memory fd
+  int fd = memfd_create("tmpFile", 0);
+  mCamera->dump(fd, {}, 0);
+
+  // Check that we wrote the expected size
+  int dumpSize = lseek(fd, 0, SEEK_END);
+
+  // Rewind and read from the fd
+  lseek(fd, 0, SEEK_SET);
+  read(fd, buffer, expectedSize);
+  close(fd);
+
+  // Check the content of the dump
+  std::string name = std::string(buffer, expectedSize);
+  ASSERT_EQ(expected, name);
+  // Check the size after the content to display the string mismatch when a
+  // failure occurs
+  ASSERT_EQ(expectedSize, dumpSize);
 }
 
 }  // namespace
