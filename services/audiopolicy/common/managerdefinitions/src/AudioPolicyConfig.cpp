@@ -13,6 +13,39 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*Changes from Qualcomm Innovation Center are provided under the following license:
+ *Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted (subject to the limitations in the
+ * disclaimer below) provided that the following conditions are met:
+ *
+ *  * Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ *   * Redistributions in binary form must reproduce the above
+ *     copyright notice, this list of conditions and the following
+ *     disclaimer in the documentation and/or other materials provided
+ *     with the distribution.
+ *
+ *   * Neither the name of Qualcomm Innovation Center, Inc. nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
+ *
+ * NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE
+ * GRANTED BY THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT
+ * HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
+ * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
 
 #define LOG_TAG "APM_Config"
 
@@ -29,7 +62,6 @@
 
 #define VALUEADD_AOSP_SUPPORT_PROPERTY "ro.vendor.qti.va_aosp.support"
 static char g_audio_framework[100];
-#define VA_AUDIO_POLICY_CONFIG_PATH "/vendor/etc/audio/audio_policy_configuration.xml"
 #define VA_AUDIO_POLICY_CONFIG_PATH_AR "/vendor/etc/audio_ar/audio_policy_configuration.xml"
 
 namespace android {
@@ -195,12 +227,14 @@ sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmAidlConfigWithFallback
 // static
 sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmXmlConfigWithFallback(
         const std::string& xmlFilePath) {
-    std::string audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH;
+    std::string audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH_AR;
     bool va_aosp_support = property_get_bool(VALUEADD_AOSP_SUPPORT_PROPERTY, false);
     if (va_aosp_support) {
         property_get("ro.boot.audio", g_audio_framework, NULL);
         if (strstr(g_audio_framework, "audioreach") != NULL)
             audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH_AR;
+        else
+            audioPolicyXmlConfigFile = audio_get_audio_policy_config_file();
     }
     const std::string filePath =
             va_aosp_support ? audioPolicyXmlConfigFile :
