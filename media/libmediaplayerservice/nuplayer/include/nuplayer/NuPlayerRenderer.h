@@ -305,6 +305,7 @@ protected:
     DISALLOW_EVIL_CONSTRUCTORS(Renderer);
 private:
     float mVideoRenderFps;
+    bool mNeedVideoClearAnchor;
 };
 
 } // namespace android
