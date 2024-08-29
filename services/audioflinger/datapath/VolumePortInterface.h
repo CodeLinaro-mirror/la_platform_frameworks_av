@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,16 @@
  * limitations under the License.
  */
 
-#ifndef SCREENRECORD_SCREENRECORD_H
-#define SCREENRECORD_SCREENRECORD_H
+#pragma once
 
-#define kVersionMajor 1
-#define kVersionMinor 4
+#include <system/audio.h>
 
-#endif /*SCREENRECORD_SCREENRECORD_H*/
+namespace android {
+
+class VolumePortInterface : public virtual RefBase {
+public:
+    virtual void setPortVolume(float volume) = 0;
+    virtual float getPortVolume() const = 0;
+};
+
+}  // namespace android
