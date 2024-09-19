@@ -1900,16 +1900,6 @@ void CCodec::initiateReleaseIfStuck() {
         }
     }
     if (name.empty()) {
-        constexpr std::chrono::steady_clock::duration kWorkDurationThreshold = 3s;
-        std::chrono::steady_clock::duration elapsed = mChannel->elapsed();
-        if (elapsed >= kWorkDurationThreshold) {
-            name = "queue";
-        }
-        if (elapsed > 0s) {
-            pendingDeadline = true;
-        }
-    }
-    if (name.empty()) {
         // We're not stuck.
         if (pendingDeadline) {
             // If we are not stuck yet but still has deadline coming up,
@@ -1919,7 +1909,18 @@ void CCodec::initiateReleaseIfStuck() {
         return;
     }
 
-    ALOGW("previous call to %s exceeded timeout", name.c_str());
+    C2String compName;
+    {
+        Mutexed<State>::Locked state(mState);
+        if (!state->comp) {
+            ALOGE("previous call to %s exceeded timeout "
+                  "and the component is already released", name.c_str());
+            return;
+        }
+        compName = state->comp->getName();
+    }
+    ALOGW("[%s] previous call to %s exceeded timeout", compName.c_str(), name.c_str());
+
     initiateRelease(false);
     mCallback->onError(UNKNOWN_ERROR, ACTION_CODE_FATAL);
 }
