@@ -673,6 +673,15 @@ c2_status_t GraphicsTracker::_allocate(const std::shared_ptr<BufferCache> &cache
             ALOGW("BQ might not be ready for dequeueBuffer()");
             return C2_BLOCKING;
         }
+        bool cacheExpired = false;
+        {
+            std::unique_lock<std::mutex> l(mLock);
+            cacheExpired = (mBufferCache.get() != cache.get());
+        }
+        if (cacheExpired) {
+            ALOGW("a new BQ is configured. dequeueBuffer() error %d", (int)status);
+            return C2_BLOCKING;
+        }
         ALOGE("BQ in inconsistent status. dequeueBuffer() error %d", (int)status);
         return C2_CORRUPTED;
     }
@@ -815,6 +824,10 @@ c2_status_t GraphicsTracker::deallocate(uint64_t bid, const sp<Fence> &fence) {
     std::shared_ptr<BufferCache> cache;
     int slotId;
     sp<Fence> rFence;
+    if (mStopped.load() == true) {
+        ALOGE("cannot deallocate due to being stopped");
+        return C2_BAD_STATE;
+    }
     c2_status_t res = requestDeallocate(bid, fence, &completed, &updateDequeue,
                                         &cache, &slotId, &rFence);
     if (res != C2_OK) {
@@ -891,7 +904,10 @@ void GraphicsTracker::commitRender(const std::shared_ptr<BufferCache> &cache,
         cache->unblockSlot(buffer->mSlot);
         if (oldBuffer) {
             // migrated, register the new buffer to the cache.
-            cache->mBuffers.emplace(buffer->mSlot, buffer);
+            auto ret = cache->mBuffers.emplace(buffer->mSlot, buffer);
+            if (!ret.second) {
+                ret.first->second = buffer;
+            }
         }
     }
     mDeallocating.erase(origBid);
@@ -992,6 +1008,11 @@ void GraphicsTracker::onReleased(uint32_t generation) {
     {
         std::unique_lock<std::mutex> l(mLock);
         if (mBufferCache->mGeneration == generation) {
+            if (mBufferCache->mNumAttached > 0) {
+                ALOGV("one onReleased() ignored for each prior onAttached().");
+                mBufferCache->mNumAttached--;
+                return;
+            }
             if (!adjustDequeueConfLocked(&updateDequeue)) {
                 mDequeueable++;
                 writeIncDequeueableLocked(1);
@@ -1000,6 +1021,14 @@ void GraphicsTracker::onReleased(uint32_t generation) {
     }
     if (updateDequeue) {
         updateDequeueConf();
+    }
+}
+
+void GraphicsTracker::onAttached(uint32_t generation) {
+    std::unique_lock<std::mutex> l(mLock);
+    if (mBufferCache->mGeneration == generation) {
+        ALOGV("buffer attached");
+        mBufferCache->mNumAttached++;
     }
 }
 

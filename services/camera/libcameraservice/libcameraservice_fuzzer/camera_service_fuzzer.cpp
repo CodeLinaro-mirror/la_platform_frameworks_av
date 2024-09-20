@@ -22,13 +22,15 @@
 //#define LOG_NDEBUG 0
 
 #include <CameraService.h>
-#include <device3/Camera3StreamInterface.h>
+#include <android/content/AttributionSourceState.h>
 #include <android/hardware/BnCameraServiceListener.h>
-#include <android/hardware/camera2/BnCameraDeviceCallbacks.h>
 #include <android/hardware/ICameraServiceListener.h>
+#include <android/hardware/camera2/BnCameraDeviceCallbacks.h>
 #include <android/hardware/camera2/ICameraDeviceUser.h>
 #include <camera/CameraUtils.h>
 #include <camera/camera2/OutputConfiguration.h>
+#include <com_android_graphics_libgui_flags.h>
+#include <device3/Camera3StreamInterface.h>
 #include <gui/BufferItemConsumer.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/Surface.h>
@@ -219,7 +221,9 @@ void CameraFuzzer::getNumCameras() {
     } else {
         camType = kCamType[mFuzzedDataProvider->ConsumeBool()];
     }
-    mCameraService->getNumberOfCameras(camType, kDefaultDeviceId, /*devicePolicy*/0, &mNumCameras);
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    mCameraService->getNumberOfCameras(camType, clientAttribution, /*devicePolicy*/0, &mNumCameras);
 }
 
 void CameraFuzzer::getCameraInformation(int32_t cameraId) {
@@ -238,14 +242,17 @@ void CameraFuzzer::getCameraInformation(int32_t cameraId) {
     hardware::camera2::params::VendorTagDescriptorCache cache;
     mCameraService->getCameraVendorTagCache(&cache);
 
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+
     CameraInfo cameraInfo;
-    mCameraService->getCameraInfo(cameraId, ROTATION_OVERRIDE_NONE, kDefaultDeviceId,
+    mCameraService->getCameraInfo(cameraId, ROTATION_OVERRIDE_NONE, clientAttribution,
             /*devicePolicy*/0, &cameraInfo);
 
     CameraMetadata metadata;
     mCameraService->getCameraCharacteristics(cameraIdStr,
             /*targetSdkVersion*/__ANDROID_API_FUTURE__, ROTATION_OVERRIDE_NONE,
-            kDefaultDeviceId, /*devicePolicy*/0, &metadata);
+            clientAttribution, /*devicePolicy*/0, &metadata);
 }
 
 void CameraFuzzer::invokeCameraSound() {
@@ -327,13 +334,15 @@ void CameraFuzzer::invokeTorchAPIs(int32_t cameraId) {
     std::string cameraIdStr = std::to_string(cameraId);
     sp<IBinder> binder = new BBinder;
 
-    mCameraService->setTorchMode(cameraIdStr, true, binder, kDefaultDeviceId, /*devicePolicy*/0);
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    mCameraService->setTorchMode(cameraIdStr, true, binder, clientAttribution, /*devicePolicy*/0);
     ALOGV("Turned torch on.");
     int32_t torchStrength = rand() % 5 + 1;
     ALOGV("Changing torch strength level to %d", torchStrength);
     mCameraService->turnOnTorchWithStrengthLevel(cameraIdStr, torchStrength, binder,
-            kDefaultDeviceId, /*devicePolicy*/0);
-    mCameraService->setTorchMode(cameraIdStr, false, binder, kDefaultDeviceId, /*devicePolicy*/0);
+            clientAttribution, /*devicePolicy*/0);
+    mCameraService->setTorchMode(cameraIdStr, false, binder, clientAttribution, /*devicePolicy*/0);
     ALOGV("Turned torch off.");
 }
 
@@ -349,13 +358,15 @@ void CameraFuzzer::invokeCameraAPIs() {
     ::android::binder::Status rc;
     sp<ICamera> cameraDevice;
 
-    rc = mCameraService->connect(this, cameraId, std::string(),
-                                 android::CameraService::USE_CALLING_UID,
-                                 android::CameraService::USE_CALLING_PID,
+    AttributionSourceState clientAttribution;
+    clientAttribution.deviceId = kDefaultDeviceId;
+    clientAttribution.uid = android::CameraService::USE_CALLING_UID;
+    clientAttribution.pid = android::CameraService::USE_CALLING_PID;
+    rc = mCameraService->connect(this, cameraId,
                                  /*targetSdkVersion*/ __ANDROID_API_FUTURE__,
                                  ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
                                  /*forceSlowJpegMode*/false,
-                                 kDefaultDeviceId, /*devicePolicy*/0, &cameraDevice);
+                                 clientAttribution, /*devicePolicy*/0, &cameraDevice);
     if (!rc.isOk()) {
         // camera not connected
         return;
@@ -590,15 +601,37 @@ void Camera2Fuzzer::process() {
     for (auto s : statuses) {
         sp<TestCameraDeviceCallbacks> callbacks(new TestCameraDeviceCallbacks());
         sp<hardware::camera2::ICameraDeviceUser> device;
-        mCameraService->connectDevice(callbacks, s.cameraId, std::string(), {},
-                android::CameraService::USE_CALLING_UID, 0/*oomScoreDiff*/,
-                /*targetSdkVersion*/__ANDROID_API_FUTURE__,
+
+        AttributionSourceState clientAttribution;
+        clientAttribution.deviceId = kDefaultDeviceId;
+        clientAttribution.uid = android::CameraService::USE_CALLING_UID;
+        clientAttribution.pid = android::CameraService::USE_CALLING_PID;
+        mCameraService->connectDevice(callbacks, s.cameraId,
+                0/*oomScoreDiff*/, /*targetSdkVersion*/__ANDROID_API_FUTURE__,
                 ROTATION_OVERRIDE_OVERRIDE_TO_PORTRAIT,
-                kDefaultDeviceId, /*devicePolicy*/0, &device);
+                clientAttribution, /*devicePolicy*/0, &device);
         if (device == nullptr) {
             continue;
         }
         device->beginConfigure();
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+        sp<BufferItemConsumer> opaqueConsumer = new BufferItemConsumer(
+                GRALLOC_USAGE_SW_READ_NEVER, /*maxImages*/ 8, /*controlledByApp*/ true);
+        opaqueConsumer->setName(String8("Roger"));
+
+        // Set to VGA dimension for default, as that is guaranteed to be present
+        opaqueConsumer->setDefaultBufferSize(640, 480);
+        opaqueConsumer->setDefaultBufferFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED);
+
+        sp<Surface> surface = opaqueConsumer->getSurface();
+
+        std::string noPhysicalId;
+        size_t rotations = sizeof(kRotations) / sizeof(int32_t) - 1;
+        sp<IGraphicBufferProducer> igbp = surface->getIGraphicBufferProducer();
+        OutputConfiguration output(
+                igbp, kRotations[mFuzzedDataProvider->ConsumeIntegralInRange<size_t>(0, rotations)],
+                noPhysicalId);
+#else
         sp<IGraphicBufferProducer> gbProducer;
         sp<IGraphicBufferConsumer> gbConsumer;
         BufferQueue::createBufferQueue(&gbProducer, &gbConsumer);
@@ -617,6 +650,7 @@ void Camera2Fuzzer::process() {
         OutputConfiguration output(gbProducer,
                 kRotations[mFuzzedDataProvider->ConsumeIntegralInRange<size_t>(0, rotations)],
                 noPhysicalId);
+#endif  // COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
         int streamId;
         device->createStream(output, &streamId);
         CameraMetadata sessionParams;

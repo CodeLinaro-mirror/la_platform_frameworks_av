@@ -29,6 +29,14 @@ flag {
 }
 
 flag {
+    name: "fix_call_audio_patch"
+    namespace: "media_audio"
+    description:
+        "optimize creation and release of audio patches for call routing"
+    bug: "292492229"
+}
+
+flag {
     name: "fix_concurrent_playback_behavior_with_bit_perfect_client"
     namespace: "media_audio"
     description:
@@ -54,6 +62,22 @@ flag {
         "priority from the blocked thread to the blocking thread). "
         "This feature helps reduce audio glitching caused by low priority blocking threads."
     bug: "209491695"
+}
+
+flag {
+    name: "portid_volume_management"
+    namespace: "media_audio"
+    description:
+        "Allows to manage volume by port id within audio flinger instead of legacy stream type."
+    bug: "317212590"
+}
+
+flag {
+    name: "power_stats"
+    namespace: "media_audio"
+    description:
+        "Add power stats tracking and management."
+    bug: "350114693"
 }
 
 flag {

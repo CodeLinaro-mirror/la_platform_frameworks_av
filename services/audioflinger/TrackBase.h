@@ -333,6 +333,9 @@ protected:
                                     // true for Track, false for RecordTrack,
                                     // this could be a track type if needed later
 
+    void deferRestartIfDisabled();
+    virtual void restartIfDisabled() {}
+
     const wp<IAfThreadBase> mThread;
     const alloc_type     mAllocType;
     /*const*/ sp<Client> mClient;   // see explanation at ~TrackBase() why not const
@@ -344,7 +347,7 @@ protected:
     size_t              mBufferSize; // size of mBuffer in bytes
     // we don't really need a lock for these
     MirroredVariable<track_state>  mState;
-    const audio_attributes_t mAttr;
+    audio_attributes_t  mAttr;
     const uint32_t      mSampleRate;    // initial sample rate only; for tracks which
                         // support dynamic rates, the current value is in control block
     const audio_format_t mFormat;
