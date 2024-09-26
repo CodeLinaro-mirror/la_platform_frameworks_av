@@ -13,6 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
 
 #define LOG_TAG "APM_AudioPolicyManager"
 
@@ -1307,21 +1312,22 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                     policyDesc = nullptr;
                 } else {
                     policyDesc = mOutputs.valueFor(newOutput);
+                    mDirectOutput = policyDesc;
                 }
             }
-        }
-        if (policyDesc != nullptr) {
-            policyDesc->mPolicyMix = primaryMix;
-            *output = policyDesc->mIoHandle;
-            *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
+            if (policyDesc != nullptr) {
+                policyDesc->mPolicyMix = primaryMix;
+                *output = policyDesc->mIoHandle;
+                *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
 
-            ALOGV("getOutputForAttr() returns output %d", *output);
-            if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
-                *outputType = API_OUT_MIX_PLAYBACK;
-            } else {
-                *outputType = API_OUTPUT_LEGACY;
+                ALOGD("getOutputForAttr() returns output %d selectedDeviceId %d", *output, *selectedDeviceId);
+                if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+                    *outputType = API_OUT_MIX_PLAYBACK;
+                } else {
+                    *outputType = API_OUTPUT_LEGACY;
+                }
+                return NO_ERROR;
             }
-            return NO_ERROR;
         }
     }
     // Virtual sources must always be dynamicaly or explicitly routed
@@ -2224,7 +2230,7 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
         if (samplingRate > SAMPLE_RATE_HZ_DEFAULT) {
             currentMatchCriteria[4] = outputDesc->getSamplingRate();
         }
-        if (flags & AUDIO_OUTPUT_FLAG_FAST && samplingRate <= SAMPLE_RATE_HZ_DEFAULT) {
+        if (flags & AUDIO_OUTPUT_FLAG_FAST && samplingRate <= SAMPLE_RATE_HZ_DEFAULT && (channelCount <= outputChannelCount)) {
             ALOGV("%s match criterion modifed for AUDIO_OUTPUT_FLAG_FAST, outputDesc->mSamplingRate=%d, samplingRate=%d",
                     __func__, outputDesc->getSamplingRate(), samplingRate);
             currentMatchCriteria[4] = (outputDesc->getSamplingRate() == samplingRate);
@@ -3010,7 +3016,7 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             halInputSource = AUDIO_SOURCE_VOICE_RECOGNITION;
         }
     } else if (attributes.source == AUDIO_SOURCE_VOICE_COMMUNICATION &&
-               audio_is_linear_pcm(config->format)) {
+               audio_is_linear_pcm(config->format) && (((flags & AUDIO_INPUT_FLAG_FAST) == 0))) {
         if ((flags & AUDIO_INPUT_FLAG_MMAP_NOIRQ) != 0) {
             flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_MMAP_NOIRQ;
         }
@@ -3019,6 +3025,7 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
         }
         else {
             flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
+            ALOGV("Set VoIP flag for PCM format");
         }
     }
 
@@ -7451,6 +7458,12 @@ DeviceVector AudioPolicyManager::getNewOutputDevices(const sp<SwAudioOutputDescr
     device = mPolicyMixes.getDeviceAndMixForOutput(outputDesc, mAvailableOutputDevices);
     if (device != nullptr) {
         return DeviceVector(device);
+    }
+
+    if (mDirectOutput != nullptr && outputDesc == mDirectOutput)
+    {
+        ALOGD("%s reusing direct output, select directoutput device!", __func__);
+        return mDirectOutput->devices();
     }
 
     for (const auto &productStrategy : mEngine->getOrderedProductStrategies()) {
