@@ -49,14 +49,14 @@ T *ExtensionsLoader<T>::createInstance(const char *createFunctionName) {
         ALOGV("createInstance(%lubit) : %s", (unsigned long)sizeof(intptr_t)*8, createFunctionName);
         // create extended object if extensions-lib is available
         using CreateFunc_t = T*(*)(void);
+
         CreateFunc_t createFunc = nullptr;
 
         loadLib();
-
         if (mLibHandle) {
             createFunc = (CreateFunc_t)::dlsym(mLibHandle, createFunctionName);
             if (!createFunc) {
-                 ALOGW("symbol %s not found:  %s",createFunctionName, dlerror());
+                ALOGW("symbol %s not found:  %s",createFunctionName, dlerror());
             }
         }
 

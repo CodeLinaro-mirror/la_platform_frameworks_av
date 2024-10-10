@@ -1866,9 +1866,9 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                         command->mStatus = UNKNOWN_ERROR;
                         break;
                     }
-                    mLock.unlock();
+                    mMutex.unlock();
                     command->mStatus = svc->doStartOutput(data->mPortId);
-                    mLock.lock();
+                    mMutex.lock();
                     }break;
                 case STOP_OUTPUT: {
                     StopOutputData *data = (StopOutputData *)command->mParam.get();
