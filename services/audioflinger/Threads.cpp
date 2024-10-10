@@ -1832,8 +1832,7 @@ status_t ThreadBase::addEffect_ll(const sp<IAfEffectModule>& effect)
         return BAD_VALUE;
     }
 
-
-    effect->setOffloaded((mType == OFFLOAD || mType == DIRECT), mId);
+    effect->setOffloaded_l((mType == OFFLOAD || mType == DIRECT), mId);
 
     status_t status = chain->addEffect(effect);
     if (status != NO_ERROR) {
@@ -6653,7 +6652,7 @@ sp<IAfPlaybackThread> IAfPlaybackThread::createDirectOutputThread(
 DirectOutputThread::DirectOutputThread(const sp<IAfThreadCallback>& afThreadCallback,
         AudioStreamOut* output, audio_io_handle_t id, ThreadBase::type_t type, bool systemReady,
         const audio_offload_info_t& offloadInfo)
-    :   PlaybackThread(audioFlinger, output, id, type, systemReady)
+    :   PlaybackThread(afThreadCallback, output, id, type, systemReady)
         , mOffloadInfo(offloadInfo)
         , mVolumeShaperActive(false)
         , mFramesWrittenAtStandby(0)
@@ -7233,8 +7232,7 @@ void DirectOutputThread::flushHw_l()
     // those tracks will continue to show isStopped().
 }
 
-
-status_t AudioFlinger::DirectOutputThread::getTimestamp_l(AudioTimestamp& timestamp)
+status_t DirectOutputThread::getTimestamp_l(AudioTimestamp& timestamp)
 {
     if (mOutput != NULL) {
         uint64_t position64;
@@ -7247,7 +7245,7 @@ status_t AudioFlinger::DirectOutputThread::getTimestamp_l(AudioTimestamp& timest
     return INVALID_OPERATION;
 }
 
-int64_t AudioFlinger::DirectOutputThread::computeWaitTimeNs_l() const {
+int64_t DirectOutputThread::computeWaitTimeNs_l() const {
     // If a VolumeShaper is active, we must wake up periodically to update volume.
     const int64_t NS_PER_MS = 1000000;
     return mVolumeShaperActive ?
@@ -7433,7 +7431,7 @@ PlaybackThread::mixer_state OffloadThread::prepareTracks_l(
         if (track->isInvalid()) {
             ALOGW("An invalidated track shouldn't be in active list");
             tracksToRemove->add(track);
-        } else if (track->mState == TrackBase::IDLE) {
+        } else if (track->state() == IAfTrackBase::IDLE) {
             ALOGW("An idle track shouldn't be in active list");
             continue;
         }

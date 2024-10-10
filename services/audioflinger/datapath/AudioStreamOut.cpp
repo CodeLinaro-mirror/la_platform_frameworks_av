@@ -33,11 +33,6 @@ namespace android {
 AudioStreamOut::AudioStreamOut(AudioHwDevice *dev, audio_output_flags_t flags)
         : audioHwDev(dev)
         , flags(flags)
-        , mRenderPosition(0)
-        , mRateMultiplier(1)
-        , mHalFormatHasProportionalFrames(false)
-        , mHalFrameSize(0)
-        , mExpectRetrograde(false)
 {
 }
 
@@ -79,8 +74,8 @@ status_t AudioStreamOut::getPresentationPosition(uint64_t *frames, struct timesp
         return status;
     }
 
-
-    if (mHalFormatHasProportionalFrames) {
+    if (mHalFormatHasProportionalFrames &&
+            (flags & AUDIO_OUTPUT_FLAG_DIRECT) == AUDIO_OUTPUT_FLAG_DIRECT) {
         *frames = halPosition / mRateMultiplier;
     } else {
         // For offloaded MP3 and other compressed formats, and linear PCM.
@@ -155,15 +150,12 @@ audio_config_base_t AudioStreamOut::getAudioProperties() const
 
 int AudioStreamOut::flush()
 {
-    mFramesWritten = 0;
-    mFramesWrittenAtStandby = 0;
-    const status_t result = stream->flush();
+    status_t result = stream->flush();
     return result != INVALID_OPERATION ? result : NO_ERROR;
 }
 
 int AudioStreamOut::standby()
 {
-    mFramesWrittenAtStandby = mFramesWritten;
     return stream->standby();
 }
 
