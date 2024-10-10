@@ -284,7 +284,6 @@ protected:
     // format updates. This will equal to mOutputFormat until the first actual frame is received.
     sp<AMessage> mBaseOutputFormat;
 
-    FrameRenderTracker mRenderTracker; // render information for buffers rendered by ACodec
     std::vector<BufferInfo> mBuffers[4];
     bool mPortEOS[2];
     status_t mInputEOSResult;
@@ -609,6 +608,7 @@ protected:
             status_t internalError = UNKNOWN_ERROR);
 
     status_t requestIDRFrame();
+    status_t setSurfaceParameters(const sp<AMessage> &params);
     virtual status_t setParameters(const sp<AMessage> &params);
 
 

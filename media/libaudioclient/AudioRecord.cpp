@@ -1210,7 +1210,7 @@ String8 AudioRecord::getParameters(const String8& keys) {
     AutoMutex lock(mLock);
     return mInput != AUDIO_IO_HANDLE_NONE
            ? AudioSystem::getParameters(mInput, keys)
-                : String8::empty();
+                : String8();
 }
 
 // -------------------------------------------------------------------------
