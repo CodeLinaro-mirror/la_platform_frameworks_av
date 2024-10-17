@@ -14,7 +14,7 @@
  * limitations under the License.
  *
  * Changes from Qualcomm Innovation Center are provided under the following license:
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -956,10 +956,12 @@ void AudioPolicyManager::setPhoneState(audio_mode_t state)
                     (delayMs < (int)desc->latency()*2)) {
                 delayMs = desc->latency()*2;
             }
-            setStrategyMute(musicStrategy, true, desc);
-            setStrategyMute(musicStrategy, false, desc, MUTE_TIME_MS,
-                mEngine->getOutputDevicesForAttributes(attributes_initializer(AUDIO_USAGE_MEDIA),
+            if (!property_get_bool("vendor.audio.enabled.mora.i2s", false)) {
+                setStrategyMute(musicStrategy, true, desc);
+                setStrategyMute(musicStrategy, false, desc, MUTE_TIME_MS,
+                    mEngine->getOutputDevicesForAttributes(attributes_initializer(AUDIO_USAGE_MEDIA),
                                                        nullptr, true /*fromCache*/).types());
+            }
             setStrategyMute(sonificationStrategy, true, desc);
             setStrategyMute(sonificationStrategy, false, desc, MUTE_TIME_MS,
                 mEngine->getOutputDevicesForAttributes(attributes_initializer(AUDIO_USAGE_ALARM),
