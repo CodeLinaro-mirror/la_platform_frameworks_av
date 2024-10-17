@@ -44,6 +44,8 @@
 #include <binder/IServiceManager.h>
 #include <camera/VendorTagDescriptor.h>
 
+#include "config/SharedSessionConfigUtils.h"
+
 namespace android {
 
 using hardware::camera2::utils::CameraIdAndSessionConfiguration;
@@ -762,7 +764,7 @@ private:
             status_t addPreCorrectionActiveArraySize();
             status_t addReadoutTimestampTag(bool readoutTimestampSupported = true);
             status_t addSessionConfigQueryVersionTag();
-            status_t addSharedSessionConfigurationTags();
+            status_t addSharedSessionConfigurationTags(const std::string &cameraId);
             bool isAutomotiveDevice();
 
             static void getSupportedSizes(const CameraMetadata& ch, uint32_t tag,
