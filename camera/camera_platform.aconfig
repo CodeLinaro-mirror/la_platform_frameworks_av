@@ -225,3 +225,14 @@ flag {
     description: "Enable stream reconfiguration for unchanged streams"
     bug: "341740105"
 }
+
+flag {
+    namespace: "camera_platform"
+    name: "camera_multi_client"
+    is_exported: true
+    description: "add new feature to allow multiple clients to access the camera in shared mode"
+    bug: "265196098"
+    metadata {
+        purpose: PURPOSE_FEATURE
+    }
+}

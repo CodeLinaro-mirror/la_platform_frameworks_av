@@ -115,7 +115,7 @@ public:
             int servicePid,
             bool overrideForPerfClass,
             int rotationOverride,
-            bool forceSlowJpegMode);
+            bool forceSlowJpegMode, bool sharedMode);
 
     virtual ~Camera2Client();
 

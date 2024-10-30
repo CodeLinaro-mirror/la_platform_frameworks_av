@@ -65,6 +65,7 @@ public:
                       int servicePid,
                       bool overrideForPerfClass,
                       int rotationOverride,
+                      bool sharedMode,
                       bool legacyClient = false);
     virtual ~Camera2ClientBase();
 
@@ -97,6 +98,7 @@ public:
     virtual void          notifyPrepared(int streamId);
     virtual void          notifyRequestQueueEmpty();
     virtual void          notifyRepeatingRequestError(long lastFrameNumber);
+    virtual void          notifyClientSharedAccessPriorityChanged(bool primaryClient) override;
 
     void                  notifyIdleWithUserTag(int64_t requestCount, int64_t resultErrorCount,
                                      bool deviceError,

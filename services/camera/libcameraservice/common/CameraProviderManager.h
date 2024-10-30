@@ -762,6 +762,8 @@ private:
             status_t addPreCorrectionActiveArraySize();
             status_t addReadoutTimestampTag(bool readoutTimestampSupported = true);
             status_t addSessionConfigQueryVersionTag();
+            status_t addSharedSessionConfigurationTags();
+            bool isAutomotiveDevice();
 
             static void getSupportedSizes(const CameraMetadata& ch, uint32_t tag,
                     android_pixel_format_t format,

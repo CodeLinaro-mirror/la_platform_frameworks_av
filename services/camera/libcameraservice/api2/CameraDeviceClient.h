@@ -61,7 +61,8 @@ protected:
             int clientPid,
             uid_t clientUid,
             int servicePid,
-            int rotationOverride);
+            int rotationOverride,
+            bool sharedMode);
 
     sp<hardware::camera2::ICameraDeviceCallbacks> mRemoteCallback;
 };
@@ -175,6 +176,8 @@ public:
             /*out*/
             sp<hardware::camera2::ICameraOfflineSession>* session) override;
 
+    virtual binder::Status isPrimaryClient(/*out*/bool* isPrimary) override;
+
     /**
      * Interface used by CameraService
      */
@@ -194,7 +197,8 @@ public:
             int servicePid,
             bool overrideForPerfClass,
             int rotationOverride,
-            const std::string& originalCameraId);
+            const std::string& originalCameraId,
+            bool sharedMode);
     virtual ~CameraDeviceClient();
 
     virtual status_t      initialize(sp<CameraProviderManager> manager,
@@ -237,6 +241,7 @@ public:
     virtual void notifyPrepared(int streamId);
     virtual void notifyRequestQueueEmpty();
     virtual void notifyRepeatingRequestError(long lastFrameNumber);
+    virtual void notifyClientSharedAccessPriorityChanged(bool primaryClient);
 
     void setImageDumpMask(int mask) { if (mDevice != nullptr) mDevice->setImageDumpMask(mask); }
     /**
