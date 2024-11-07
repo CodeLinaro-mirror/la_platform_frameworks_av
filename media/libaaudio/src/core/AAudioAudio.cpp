@@ -53,6 +53,16 @@ AAUDIO_API const char * AAudio_convertStreamStateToText(aaudio_stream_state_t st
     return AudioGlobal_convertStreamStateToText(state);
 }
 
+AAUDIO_API aaudio_policy_t AAudio_getPlatformMMapPolicy(
+        AAudio_DeviceType device, aaudio_direction_t direction) {
+    return AudioGlobal_getPlatformMMapPolicy(device, direction);
+}
+
+AAUDIO_API aaudio_policy_t AAudio_getPlatformMMapExclusivePolicy(
+        AAudio_DeviceType device, aaudio_direction_t direction) {
+    return AudioGlobal_getPlatformMMapExclusivePolicy(device, direction);
+}
+
 static AudioStream *convertAAudioStreamToAudioStream(AAudioStream* stream)
 {
     return (AudioStream*) stream;
@@ -602,6 +612,7 @@ AAUDIO_API aaudio_policy_t AAudio_getMMapPolicy() {
 }
 
 AAUDIO_API aaudio_result_t AAudio_setMMapPolicy(aaudio_policy_t policy) {
+    ALOGD("%s(%d)", __func__, policy);
     return AudioGlobal_setMMapPolicy(policy);
 }
 

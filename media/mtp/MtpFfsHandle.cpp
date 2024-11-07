@@ -20,7 +20,6 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <memory>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -297,9 +296,12 @@ int MtpFfsHandle::start(bool ptp) {
 }
 
 void MtpFfsHandle::close() {
-    auto timeout = std::chrono::seconds(2);
-    std::unique_lock lk(m);
-    cv.wait_for(lk, timeout ,[this]{return child_threads==0;});
+    // Join all child threads before destruction
+    int count = mChildThreads.size();
+    for (int i = 0; i < count; i++) {
+        mChildThreads[i].join();
+    }
+    mChildThreads.clear();
 
     io_destroy(mCtx);
     closeEndpoints();
@@ -677,12 +679,10 @@ int MtpFfsHandle::sendEvent(mtp_event me) {
     memcpy(temp, me.data, me.length);
     me.data = temp;
 
-    std::unique_lock lk(m);
-    child_threads++;
-    lk.unlock();
-
     std::thread t([this, me]() { return this->doSendEvent(me); });
-    t.detach();
+
+    // Store the thread object for later joining
+    mChildThreads.emplace_back(std::move(t));
     return 0;
 }
 
@@ -692,11 +692,6 @@ void MtpFfsHandle::doSendEvent(mtp_event me) {
     if (static_cast<unsigned>(ret) != length)
         PLOG(ERROR) << "Mtp error sending event thread!";
     delete[] reinterpret_cast<char*>(me.data);
-
-    std::unique_lock lk(m);
-    child_threads--;
-    lk.unlock();
-    cv.notify_one();
 }
 
 } // namespace android

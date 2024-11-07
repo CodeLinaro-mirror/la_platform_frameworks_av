@@ -61,61 +61,33 @@ CameraDeviceClientBase::CameraDeviceClientBase(
         const sp<CameraService>& cameraService,
         const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-        const std::string& clientPackageName,
-        bool systemNativeClient,
-        const std::optional<std::string>& clientFeatureId,
-        const std::string& cameraId,
-        [[maybe_unused]] int api1CameraId,
-        int cameraFacing,
-        int sensorOrientation,
-        int clientPid,
-        uid_t clientUid,
-        int servicePid,
-        int rotationOverride) :
-    BasicClient(cameraService,
-            IInterface::asBinder(remoteCallback),
-            attributionAndPermissionUtils,
-            clientPackageName,
-            systemNativeClient,
-            clientFeatureId,
-            cameraId,
-            cameraFacing,
-            sensorOrientation,
-            clientPid,
-            clientUid,
-            servicePid,
-            rotationOverride),
-    mRemoteCallback(remoteCallback) {
-}
+        const AttributionSourceState& clientAttribution, int callingPid, bool systemNativeClient,
+        const std::string& cameraId, [[maybe_unused]] int api1CameraId, int cameraFacing,
+        int sensorOrientation, int servicePid, int rotationOverride)
+    : BasicClient(cameraService, IInterface::asBinder(remoteCallback),
+                  attributionAndPermissionUtils, clientAttribution, callingPid, systemNativeClient,
+                  cameraId, cameraFacing, sensorOrientation, servicePid, rotationOverride),
+      mRemoteCallback(remoteCallback) {}
 
 // Interface used by CameraService
 
-CameraDeviceClient::CameraDeviceClient(const sp<CameraService>& cameraService,
+CameraDeviceClient::CameraDeviceClient(
+        const sp<CameraService>& cameraService,
         const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,
         std::shared_ptr<CameraServiceProxyWrapper> cameraServiceProxyWrapper,
         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
-        const std::string& clientPackageName,
-        bool systemNativeClient,
-        const std::optional<std::string>& clientFeatureId,
-        const std::string& cameraId,
-        int cameraFacing,
-        int sensorOrientation,
-        int clientPid,
-        uid_t clientUid,
-        int servicePid,
-        bool overrideForPerfClass,
-        int rotationOverride,
-        const std::string& originalCameraId) :
-    Camera2ClientBase(cameraService, remoteCallback, cameraServiceProxyWrapper,
-            attributionAndPermissionUtils, clientPackageName,
-            systemNativeClient, clientFeatureId, cameraId, /*API1 camera ID*/ -1, cameraFacing,
-            sensorOrientation, clientPid, clientUid, servicePid, overrideForPerfClass,
-            rotationOverride),
-    mInputStream(),
-    mStreamingRequestId(REQUEST_ID_NONE),
-    mRequestIdCounter(0),
-    mOverrideForPerfClass(overrideForPerfClass),
-    mOriginalCameraId(originalCameraId) {
+        const AttributionSourceState& clientAttribution, int callingPid, bool systemNativeClient,
+        const std::string& cameraId, int cameraFacing, int sensorOrientation, int servicePid,
+        bool overrideForPerfClass, int rotationOverride, const std::string& originalCameraId)
+    : Camera2ClientBase(cameraService, remoteCallback, cameraServiceProxyWrapper,
+                        attributionAndPermissionUtils, clientAttribution, callingPid,
+                        systemNativeClient, cameraId, /*API1 camera ID*/ -1, cameraFacing,
+                        sensorOrientation, servicePid, overrideForPerfClass, rotationOverride),
+      mInputStream(),
+      mStreamingRequestId(REQUEST_ID_NONE),
+      mRequestIdCounter(0),
+      mOverrideForPerfClass(overrideForPerfClass),
+      mOriginalCameraId(originalCameraId) {
     ATRACE_CALL();
     ALOGI("CameraDeviceClient %s: Opened", cameraId.c_str());
 }
@@ -546,14 +518,14 @@ binder::Status CameraDeviceClient::submitRequestList(
             mRunningSessionStats.mVideoStabilizationMode = entry.data.u8[0];
         }
 
-        if (!mRunningSessionStats.mUsedUltraWide && flags::log_ultrawide_usage()) {
+        if (!mRunningSessionStats.mUsedUltraWide) {
             entry = physicalSettingsList.begin()->metadata.find(
                     ANDROID_CONTROL_ZOOM_RATIO);
             if (entry.count == 1 && entry.data.f[0] < 1.0f ) {
                 mRunningSessionStats.mUsedUltraWide = true;
             }
         }
-        if (!mRunningSessionStats.mUsedSettingsOverrideZoom && flags::log_zoom_override_usage()) {
+        if (!mRunningSessionStats.mUsedSettingsOverrideZoom) {
             entry = physicalSettingsList.begin()->metadata.find(
                     ANDROID_CONTROL_SETTINGS_OVERRIDE);
             if (entry.count == 1 && entry.data.i32[0] ==
@@ -1240,6 +1212,18 @@ binder::Status CameraDeviceClient::getInputSurface(/*out*/ view::Surface *inputS
     if (!mDevice.get()) {
         return STATUS_ERROR(CameraService::ERROR_DISCONNECTED, "Camera device no longer alive");
     }
+#if WB_CAMERA3_AND_PROCESSORS_WITH_DEPENDENCIES
+    sp<Surface> surface;
+    status_t err = mDevice->getInputSurface(&surface);
+    if (err != OK) {
+        res = STATUS_ERROR_FMT(CameraService::ERROR_INVALID_OPERATION,
+                "Camera %s: Error getting input Surface: %s (%d)",
+                mCameraIdStr.c_str(), strerror(-err), err);
+    } else {
+        inputSurface->name = toString16("CameraInput");
+        inputSurface->graphicBufferProducer = surface->getIGraphicBufferProducer();
+    }
+#else
     sp<IGraphicBufferProducer> producer;
     status_t err = mDevice->getInputBufferProducer(&producer);
     if (err != OK) {
@@ -1250,6 +1234,7 @@ binder::Status CameraDeviceClient::getInputSurface(/*out*/ view::Surface *inputS
         inputSurface->name = toString16("CameraInput");
         inputSurface->graphicBufferProducer = producer;
     }
+#endif
     return res;
 }
 
@@ -1921,10 +1906,10 @@ binder::Status CameraDeviceClient::switchToOffline(
 
     sp<CameraOfflineSessionClient> offlineClient;
     if (offlineSession.get() != nullptr) {
-        offlineClient = new CameraOfflineSessionClient(sCameraService,
-                offlineSession, offlineCompositeStreamMap, cameraCb, mAttributionAndPermissionUtils,
-                mClientPackageName, mClientFeatureId, mCameraIdStr, mCameraFacing, mOrientation,
-                mClientPid, mClientUid, mServicePid);
+        offlineClient = new CameraOfflineSessionClient(
+                sCameraService, offlineSession, offlineCompositeStreamMap, cameraCb,
+                mAttributionAndPermissionUtils, mClientAttribution, mCallingPid, mCameraIdStr,
+                mCameraFacing, mOrientation, mServicePid);
         ret = sCameraService->addOfflineClient(mCameraIdStr, offlineClient);
     }
 
@@ -1971,7 +1956,7 @@ status_t CameraDeviceClient::dumpClient(int fd, const Vector<String16>& args) {
             mCameraIdStr.c_str(),
             (getRemoteCallback() != NULL ?
                     IInterface::asBinder(getRemoteCallback()).get() : NULL) );
-    dprintf(fd, "    Current client UID %u\n", mClientUid);
+    dprintf(fd, "    Current client UID %u\n", getClientUid());
 
     dprintf(fd, "    State:\n");
     dprintf(fd, "      Request ID counter: %d\n", mRequestIdCounter);

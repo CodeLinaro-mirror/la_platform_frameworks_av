@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include <android/content/pm/IPackageManagerNative.h>
+#include <android-base/thread_annotations.h>
 #include <binder/IMemory.h>
 #include <binder/PermissionController.h>
 #include <cutils/multiuser.h>
@@ -91,7 +92,7 @@ bool recordingAllowed(const AttributionSourceState& attributionSource,
 bool recordingAllowed(const AttributionSourceState &attributionSource,
                       uint32_t virtualDeviceId,
                       audio_source_t source);
-bool startRecording(const AttributionSourceState& attributionSource, uint32_t virtualDeviceId,
+int startRecording(const AttributionSourceState& attributionSource, uint32_t virtualDeviceId,
                     const String16& msg, audio_source_t source);
 void finishRecording(const AttributionSourceState& attributionSource, uint32_t virtualDeviceId,
                      audio_source_t source);
@@ -113,6 +114,10 @@ bool modifyPhoneStateAllowed(const AttributionSourceState& attributionSource);
 bool bypassInterruptionPolicyAllowed(const AttributionSourceState& attributionSource);
 bool callAudioInterceptionAllowed(const AttributionSourceState& attributionSource);
 void purgePermissionCache();
+bool mustAnonymizeBluetoothAddress(
+        const AttributionSourceState& attributionSource, const String16& caller);
+void anonymizeBluetoothAddress(char *address);
+
 int32_t getOpForSource(audio_source_t source);
 
 AttributionSourceState getCallingAttributionSource();
@@ -167,12 +172,18 @@ public:
      *
      * \param uid is the uid of the app or service.
      */
-    Info getInfo(uid_t uid);
+    std::shared_ptr<const Info> getCachedInfo(uid_t uid);
+
+    /* return a singleton */
+    static UidInfo& getUidInfo();
+
+    /* returns a non-null pointer to a const Info struct */
+    static std::shared_ptr<const Info> getInfo(uid_t uid);
 
 private:
     std::mutex mLock;
     // TODO: use concurrent hashmap with striped lock.
-    std::unordered_map<uid_t, Info> mInfoMap; // GUARDED_BY(mLock)
+    std::unordered_map<uid_t, std::shared_ptr<const Info>> mInfoMap GUARDED_BY(mLock);
 };
 
 } // namespace mediautils

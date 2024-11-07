@@ -18,6 +18,7 @@
 #define LOG_TAG "ServiceUtilities"
 
 #include <audio_utils/clock.h>
+#include <android-base/properties.h>
 #include <binder/AppOpsManager.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
@@ -28,9 +29,11 @@
 #include <media/AidlConversionUtil.h>
 #include <android/content/AttributionSourceState.h>
 
-#include <iterator>
 #include <algorithm>
+#include <iterator>
+#include <mutex>
 #include <pwd.h>
+#include <thread>
 
 /* When performing permission checks we do not use permission cache for
  * runtime permissions (protection level dangerous) as they may change at
@@ -40,6 +43,10 @@
  */
 
 namespace android {
+
+namespace {
+constexpr auto PERMISSION_HARD_DENIED = permission::PermissionChecker::PERMISSION_HARD_DENIED;
+}
 
 using content::AttributionSourceState;
 
@@ -115,7 +122,7 @@ std::optional<AttributionSourceState> resolveAttributionSource(
     return std::optional<AttributionSourceState>{myAttributionSource};
 }
 
-    static bool checkRecordingInternal(const AttributionSourceState &attributionSource,
+    static int checkRecordingInternal(const AttributionSourceState &attributionSource,
                                        const uint32_t virtualDeviceId,
                                        const String16 &msg, bool start, audio_source_t source) {
     // Okay to not track in app ops as audio server or media server is us and if
@@ -138,15 +145,15 @@ std::optional<AttributionSourceState> resolveAttributionSource(
     const int32_t attributedOpCode = getOpForSource(source);
 
     permission::PermissionChecker permissionChecker;
-    bool permitted = false;
+    int permitted;
     if (start) {
-        permitted = (permissionChecker.checkPermissionForStartDataDeliveryFromDatasource(
+        permitted = permissionChecker.checkPermissionForStartDataDeliveryFromDatasource(
                 sAndroidPermissionRecordAudio, resolvedAttributionSource.value(), msg,
-                attributedOpCode) != permission::PermissionChecker::PERMISSION_HARD_DENIED);
+                attributedOpCode);
     } else {
-        permitted = (permissionChecker.checkPermissionForPreflightFromDatasource(
+        permitted = permissionChecker.checkPermissionForPreflightFromDatasource(
                 sAndroidPermissionRecordAudio, resolvedAttributionSource.value(), msg,
-                attributedOpCode) != permission::PermissionChecker::PERMISSION_HARD_DENIED);
+                attributedOpCode);
     }
 
     return permitted;
@@ -156,17 +163,17 @@ static constexpr int DEVICE_ID_DEFAULT = 0;
 
 bool recordingAllowed(const AttributionSourceState &attributionSource, audio_source_t source) {
     return checkRecordingInternal(attributionSource, DEVICE_ID_DEFAULT, String16(), /*start*/ false,
-                                  source);
+                                  source) != PERMISSION_HARD_DENIED;
 }
 
 bool recordingAllowed(const AttributionSourceState &attributionSource,
                       const uint32_t virtualDeviceId,
                       audio_source_t source) {
     return checkRecordingInternal(attributionSource, virtualDeviceId,
-                                  String16(), /*start*/ false, source);
+                                  String16(), /*start*/ false, source) != PERMISSION_HARD_DENIED;
 }
 
-bool startRecording(const AttributionSourceState& attributionSource,
+int startRecording(const AttributionSourceState& attributionSource,
                     const uint32_t virtualDeviceId,
                     const String16& msg,
                     audio_source_t source) {
@@ -392,6 +399,106 @@ status_t checkIMemory(const sp<IMemory>& iMemory)
     return NO_ERROR;
 }
 
+// TODO(b/285588444), clean this up on main, but soak it for backporting purposes for now
+namespace {
+class BluetoothPermissionCache {
+    static constexpr auto SYSPROP_NAME = "cache_key.system_server.package_info";
+    const String16 BLUETOOTH_PERM {"android.permission.BLUETOOTH_CONNECT"};
+    mutable std::mutex mLock;
+    // Cached property conditionally defined, since only avail on bionic. On host, don't inval cache
+#if defined(__BIONIC__)
+    // Unlocked, but only accessed from mListenerThread
+    base::CachedProperty mCachedProperty;
+#endif
+    // This thread is designed to never join/terminate, so no signal is fine
+    const std::thread mListenerThread;
+    GUARDED_BY(mLock)
+    std::string mPropValue;
+    GUARDED_BY(mLock)
+    std::unordered_map<uid_t, bool> mCache;
+    PermissionController mPc{};
+public:
+    BluetoothPermissionCache()
+#if defined(__BIONIC__)
+            : mCachedProperty{SYSPROP_NAME},
+            mListenerThread([this]() mutable {
+                    while (true) {
+                        std::string newVal = mCachedProperty.WaitForChange() ?: "";
+                        std::lock_guard l{mLock};
+                        if (newVal != mPropValue) {
+                            ALOGV("Bluetooth permission update");
+                            mPropValue = newVal;
+                            mCache.clear();
+                        }
+                    }
+                })
+#endif
+            {}
+
+    bool checkPermission(uid_t uid, pid_t pid) {
+        std::lock_guard l{mLock};
+        auto it = mCache.find(uid);
+        if (it == mCache.end()) {
+            it = mCache.insert({uid, mPc.checkPermission(BLUETOOTH_PERM, pid, uid)}).first;
+        }
+        return it->second;
+    }
+};
+
+// Don't call this from locks, since it potentially calls up to system server!
+// Check for non-app UIDs above this method!
+bool checkBluetoothPermission(const AttributionSourceState& attr) {
+    [[clang::no_destroy]]  static BluetoothPermissionCache impl{};
+    return impl.checkPermission(attr.uid, attr.pid);
+}
+} // anonymous
+
+/**
+ * Determines if the MAC address in Bluetooth device descriptors returned by APIs of
+ * a native audio service (audio flinger, audio policy) must be anonymized.
+ * MAC addresses returned to system server or apps with BLUETOOTH_CONNECT permission
+ * are not anonymized.
+ *
+ * @param attributionSource The attribution source of the calling app.
+ * @param caller string identifying the caller for logging.
+ * @return true if the MAC addresses must be anonymized, false otherwise.
+ */
+bool mustAnonymizeBluetoothAddress(
+        const AttributionSourceState& attributionSource, const String16&) {
+    uid_t uid = VALUE_OR_FATAL(aidl2legacy_int32_t_uid_t(attributionSource.uid));
+    bool res;
+    switch(multiuser_get_app_id(uid)) {
+        case AID_ROOT:
+        case AID_SYSTEM:
+        case AID_RADIO:
+        case AID_BLUETOOTH:
+        case AID_MEDIA:
+        case AID_AUDIOSERVER:
+            // Don't anonymize for privileged clients
+            res = false;
+            break;
+        default:
+            res = !checkBluetoothPermission(attributionSource);
+            break;
+    }
+    ALOGV("%s uid: %d, result: %d", __func__, uid, res);
+    return res;
+}
+
+/**
+ * Modifies the passed MAC address string in place for consumption by unprivileged clients.
+ * the string is assumed to have a valid MAC address format.
+ * the anonymization must be kept in sync with toAnonymizedAddress() in BluetoothUtils.java
+ *
+ * @param address input/output the char string contining the MAC address to anonymize.
+ */
+void anonymizeBluetoothAddress(char *address) {
+    if (address == nullptr || strlen(address) != strlen("AA:BB:CC:DD:EE:FF")) {
+        return;
+    }
+    memcpy(address, "XX:XX:XX:XX", strlen("XX:XX:XX:XX"));
+}
+
 sp<content::pm::IPackageManagerNative> MediaPackageManager::retrievePackageManager() {
     const sp<IServiceManager> sm = defaultServiceManager();
     if (sm == nullptr) {
@@ -473,35 +580,38 @@ void MediaPackageManager::dump(int fd, int spaces) const {
     }
 }
 
+namespace mediautils {
+
 // How long we hold info before we re-fetch it (24 hours) if we found it previously.
 static constexpr nsecs_t INFO_EXPIRATION_NS = 24 * 60 * 60 * NANOS_PER_SECOND;
 // Maximum info records we retain before clearing everything.
 static constexpr size_t INFO_CACHE_MAX = 1000;
 
 // The original code is from MediaMetricsService.cpp.
-mediautils::UidInfo::Info mediautils::UidInfo::getInfo(uid_t uid)
+std::shared_ptr<const UidInfo::Info> UidInfo::getCachedInfo(uid_t uid)
 {
+    std::shared_ptr<const UidInfo::Info> info;
+
     const nsecs_t now = systemTime(SYSTEM_TIME_REALTIME);
-    struct mediautils::UidInfo::Info info;
     {
         std::lock_guard _l(mLock);
         auto it = mInfoMap.find(uid);
         if (it != mInfoMap.end()) {
             info = it->second;
             ALOGV("%s: uid %d expiration %lld now %lld",
-                    __func__, uid, (long long)info.expirationNs, (long long)now);
-            if (info.expirationNs <= now) {
+                    __func__, uid, (long long)info->expirationNs, (long long)now);
+            if (info->expirationNs <= now) {
                 // purge the stale entry and fall into re-fetching
                 ALOGV("%s: entry for uid %d expired, now %lld",
                         __func__, uid, (long long)now);
                 mInfoMap.erase(it);
-                info.uid = (uid_t)-1;  // this is always fully overwritten
+                info.reset();  // force refetch
             }
         }
     }
 
     // if we did not find it in our map, look it up
-    if (info.uid == (uid_t)(-1)) {
+    if (!info) {
         sp<IServiceManager> sm = defaultServiceManager();
         sp<content::pm::IPackageManagerNative> package_mgr;
         if (sm.get() == nullptr) {
@@ -586,17 +696,30 @@ mediautils::UidInfo::Info mediautils::UidInfo::getInfo(uid_t uid)
         // first clear if we have too many cached elements.  This would be rare.
         if (mInfoMap.size() >= INFO_CACHE_MAX) mInfoMap.clear();
 
-        // always overwrite
-        info.uid = uid;
-        info.package = std::move(pkg);
-        info.installer = std::move(installer);
-        info.versionCode = versionCode;
-        info.expirationNs = now + (notFound ? 0 : INFO_EXPIRATION_NS);
+        info = std::make_shared<const UidInfo::Info>(
+                uid,
+                std::move(pkg),
+                std::move(installer),
+                versionCode,
+                now + (notFound ? 0 : INFO_EXPIRATION_NS));
         ALOGV("%s: adding uid %d package '%s' expirationNs: %lld",
-                __func__, uid, info.package.c_str(), (long long)info.expirationNs);
+                __func__, uid, info->package.c_str(), (long long)info->expirationNs);
         mInfoMap[uid] = info;
     }
     return info;
 }
+
+/* static */
+UidInfo& UidInfo::getUidInfo() {
+    [[clang::no_destroy]] static UidInfo uidInfo;
+    return uidInfo;
+}
+
+/* static */
+std::shared_ptr<const UidInfo::Info> UidInfo::getInfo(uid_t uid) {
+    return UidInfo::getUidInfo().getCachedInfo(uid);
+}
+
+} // namespace mediautils
 
 } // namespace android
