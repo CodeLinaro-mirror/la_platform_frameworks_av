@@ -1397,19 +1397,19 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                     mDirectOutput = policyDesc;
                 }
             }
-            if (policyDesc != nullptr) {
-                policyDesc->mPolicyMix = primaryMix;
-                *output = policyDesc->mIoHandle;
-                *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
+        }
+        if (policyDesc != nullptr) {
+            policyDesc->mPolicyMix = primaryMix;
+            *output = policyDesc->mIoHandle;
+            *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
 
-                ALOGD("getOutputForAttr() returns output %d selectedDeviceId %d", *output, *selectedDeviceId);
-                if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
-                    *outputType = API_OUT_MIX_PLAYBACK;
-                } else {
-                    *outputType = API_OUTPUT_LEGACY;
-                }
-                return NO_ERROR;
+            ALOGD("getOutputForAttr() returns output %d selectedDeviceId %d", *output, *selectedDeviceId);
+            if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+                *outputType = API_OUT_MIX_PLAYBACK;
+            } else {
+                *outputType = API_OUTPUT_LEGACY;
             }
+            return NO_ERROR;
         }
     }
     // Virtual sources must always be dynamicaly or explicitly routed
