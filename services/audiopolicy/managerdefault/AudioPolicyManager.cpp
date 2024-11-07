@@ -1508,21 +1508,21 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                     primaryMix->setOutput(policyDesc);
                 }
             }
-            if (policyDesc != nullptr) {
-                policyDesc->mPolicyMix = primaryMix;
-                *output = policyDesc->mIoHandle;
-                if (deviceDesc != nullptr) {
-                    selectedDeviceIds->push_back(deviceDesc->getId());
-                }
-
-                ALOGD("getOutputForAttr() returns output %d selectedDeviceId %s", *output, toString(*selectedDeviceIds).c_str());
-                if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
-                    *outputType = API_OUT_MIX_PLAYBACK;
-                } else {
-                    *outputType = API_OUTPUT_LEGACY;
-                }
-                return NO_ERROR;
+        }
+        if (policyDesc != nullptr) {
+            policyDesc->mPolicyMix = primaryMix;
+            *output = policyDesc->mIoHandle;
+            if (deviceDesc != nullptr) {
+                selectedDeviceIds->push_back(deviceDesc->getId());
             }
+
+            ALOGD("getOutputForAttr() returns output %d selectedDeviceId %s", *output, toString(*selectedDeviceIds).c_str());
+            if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
+                *outputType = API_OUT_MIX_PLAYBACK;
+            } else {
+                *outputType = API_OUTPUT_LEGACY;
+            }
+            return NO_ERROR;
         }
     }
     // Virtual sources must always be dynamicaly or explicitly routed
