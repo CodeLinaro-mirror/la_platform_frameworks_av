@@ -13,6 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+*/
 
 #define LOG_TAG "APM_AudioPolicyManager"
 
@@ -1332,7 +1337,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
             *output = policyDesc->mIoHandle;
             *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
 
-            ALOGV("getOutputForAttr() returns output %d", *output);
+            ALOGD("getOutputForAttr() returns output %d selectedDeviceId %d", *output, *selectedDeviceId);
             if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
                 *outputType = API_OUT_MIX_PLAYBACK;
             } else {
