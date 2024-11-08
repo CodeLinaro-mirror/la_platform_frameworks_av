@@ -71,6 +71,13 @@ void NuPlayer::DecoderPassThrough::onConfigure(const sp<AMessage> &format) {
     int32_t hasVideo = 0;
     format->findInt32("has-video", &hasVideo);
 
+    AString mime;
+    CHECK(format->findString("mime", &mime));
+    {
+        Mutex::Autolock autolock(mStatsLock);
+        mStats->setString("mime", mime.c_str());
+    }
+
     // The audio sink is already opened before the PassThrough decoder is created.
     // Opening again might be relevant if decoder is instantiated after shutdown and
     // format is different.
