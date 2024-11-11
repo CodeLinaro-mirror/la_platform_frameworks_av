@@ -14,7 +14,7 @@
  * limitations under the License.
  *
  * Changes from Qualcomm Innovation Center are provided under the following license:
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -80,6 +80,7 @@ static constexpr unsigned int kWmaStandardFrequencies = 7;
 static constexpr unsigned int kWmaStandardChannels = 2;
 static constexpr unsigned int kWmaProMaxBitrate = 1536000;
 static constexpr unsigned int kWmaLosslessMaxBitrate = 1152000;
+static audio_io_handle_t navigation_output_handle = 0;
 
 static const uint32_t kWMASupportedSampleRates[kWmaStandardFrequencies] =
 {
@@ -1694,6 +1695,11 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
         bool forceMutingHaptic)
 {
     audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
+
+    if (attr->usage == AUDIO_USAGE_ASSISTANCE_NAVIGATION_GUIDANCE &&
+           devices.containsDeviceWithType(AUDIO_DEVICE_OUT_USB_HEADSET)) {
+        return navigation_output_handle;
+    }
 
     // Discard haptic channel mask when forcing muting haptic channels.
     audio_channel_mask_t channelMask = forceMutingHaptic
@@ -6450,6 +6456,9 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
             sp<SwAudioOutputDescriptor> outputDesc = new SwAudioOutputDescriptor(outProfile,
                                                                                  mpClientInterface);
             audio_io_handle_t output = AUDIO_IO_HANDLE_NONE;
+            if (!strcmp(outProfile->getTagName().c_str(), "navigation")) {
+                mpClientInterface->setParameters(AUDIO_IO_HANDLE_NONE, String8("open_navigation_playback=true"));
+            }
             status_t status = outputDesc->open(nullptr /* halConfig */, nullptr /* mixerConfig */,
                                                DeviceVector(supportedDevice),
                                                AUDIO_STREAM_DEFAULT,
@@ -6458,6 +6467,9 @@ void AudioPolicyManager::onNewAudioModulesAvailableInt(DeviceVector *newDevices)
                 ALOGW("Cannot open output stream for devices %s on hw module %s",
                       supportedDevice->toString().c_str(), hwModule->getName());
                 continue;
+            }
+            if (!strcmp(outProfile->getTagName().c_str(), "navigation")) {
+                navigation_output_handle = output;
             }
             for (const auto &device : availProfileDevices) {
                 // give a valid ID to an attached device once confirmed it is reachable
