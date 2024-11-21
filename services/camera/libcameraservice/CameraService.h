@@ -649,6 +649,9 @@ public:
         CameraClientManager();
         virtual ~CameraClientManager();
 
+        // Bring all remove() functions into scope
+        using ClientManager::remove;
+
         virtual void remove(const DescriptorPtr& value) override;
 
         /**
