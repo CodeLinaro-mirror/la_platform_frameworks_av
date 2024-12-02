@@ -96,6 +96,11 @@ public:
     virtual binder::Status cancelRequest(int requestId,
             /*out*/
             int64_t* lastFrameNumber = NULL) override;
+    virtual binder::Status startStreaming(
+            const std::vector<int>& streamIds,
+            const std::vector<int>& surfaceIds,
+            /*out*/
+            hardware::camera2::utils::SubmitInfo *submitInfo = nullptr) override;
 
     virtual binder::Status beginConfigure() override;
 
@@ -320,6 +325,8 @@ private:
             /*out*/SurfaceMap* surfaceMap, /*out*/Vector<int32_t>* streamIds,
             /*out*/int32_t*  currentStreamId);
 
+    bool matchClientRequest(const CaptureResultExtras& resultExtras, int* clientReqId);
+
     // IGraphicsBufferProducer binder -> Stream ID + Surface ID for output streams
     KeyedVector<sp<IBinder>, StreamSurfaceId> mStreamMap;
 
@@ -341,6 +348,9 @@ private:
     // Streaming request ID
     int32_t mStreamingRequestId;
     Mutex mStreamingRequestIdLock;
+    std::pair<int32_t, int32_t> mSharedStreamingRequest;
+    std::map<int32_t, int32_t> mSharedRequestMap;
+    int64_t mStreamingRequestLastFrameNumber;
     static const int32_t REQUEST_ID_NONE = -1;
 
     int32_t mRequestIdCounter;
