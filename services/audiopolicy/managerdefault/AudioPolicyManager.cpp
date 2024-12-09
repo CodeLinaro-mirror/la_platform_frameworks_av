@@ -1389,7 +1389,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                 status = openDirectOutput(
                         *stream, session, config,
                         (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT),
-                        DeviceVector(deviceDesc), &newOutput);
+                        DeviceVector(deviceDesc), &newOutput,*resultAttr);
                 if (status != NO_ERROR) {
                     policyDesc = nullptr;
                 } else {
