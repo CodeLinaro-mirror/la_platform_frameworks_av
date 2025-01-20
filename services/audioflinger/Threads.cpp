@@ -13,6 +13,10 @@
 ** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ** See the License for the specific language governing permissions and
 ** limitations under the License.
+*
+* Changes from Qualcomm Innovation Center are provided under the following license:
+* Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
+* SPDX-License-Identifier: BSD-3-Clause-Clear
 */
 
 
@@ -273,7 +277,7 @@ static nsecs_t getStandbyTimeInNanos() {
 
 // Set kEnableExtendedChannels to true to enable greater than stereo output
 // for the MixerThread and device sink.  Number of channels allowed is
-// FCC_2 <= channels <= FCC_LIMIT.
+// FCC_1 <= channels <= FCC_LIMIT.
 constexpr bool kEnableExtendedChannels = true;
 
 // Returns true if channel mask is permitted for the PCM sink in the MixerThread
@@ -285,8 +289,8 @@ bool IAfThreadBase::isValidPcmSinkChannelMask(audio_channel_mask_t channelMask) 
         const uint32_t channelCount = audio_channel_count_from_out_mask(
                 static_cast<audio_channel_mask_t>(channelMask & ~AUDIO_CHANNEL_HAPTIC_ALL));
         const uint32_t maxChannelCount = kEnableExtendedChannels
-                ? FCC_LIMIT : FCC_2;
-        if (channelCount < FCC_2 // mono is not supported at this time
+                ? FCC_LIMIT : FCC_1;
+        if (channelCount < FCC_1 // Enabling mono channel support
                 || channelCount > maxChannelCount) {
             return false;
         }
@@ -296,7 +300,7 @@ bool IAfThreadBase::isValidPcmSinkChannelMask(audio_channel_mask_t channelMask) 
     case AUDIO_CHANNEL_REPRESENTATION_INDEX:
         if (kEnableExtendedChannels) {
             const uint32_t channelCount = audio_channel_count_from_out_mask(channelMask);
-            if (channelCount >= FCC_2 // mono is not supported at this time
+            if (channelCount >= FCC_1 // Enabling mono channel support
                     && channelCount <= FCC_LIMIT) {
                 return true;
             }
