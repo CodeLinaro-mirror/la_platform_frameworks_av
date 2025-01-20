@@ -66,10 +66,11 @@ cc_library_static {
     ],
     include_dirs: [
         "frameworks/av/media/libmediaextractor",
-        "frameworks/av/media/libstagefright/mpeg2ts",
+        "frameworks/av/media/module/mpeg2ts",
         "frameworks/av/media/libavextensions",
         "external/flac/include",
         "frameworks/av/media/libstagefright/omx/include/media/stagefright",
+        "frameworks/av/media/module/mpeg2ts/include",
     ],
     cflags: [
         "-Wno-multichar",
@@ -108,10 +109,13 @@ cc_library_static {
         "libstagefright_headers",
         "libmediadrm_headers",
         "libmediametrics_headers",
+        "libmediautils_headers",
+        "libstagefright_rtsp_headers",
     ],
     include_dirs: [
         "frameworks/av/media/libstagefright/rtsp",
         "frameworks/av/media/libmediaplayerservice",
+        "frameworks/av/media/libmediaplayerservice/nuplayer/include",
         "frameworks/av/media/libmediaextractor",
         "frameworks/av/media/libavextensions",
         "external/flac/include",

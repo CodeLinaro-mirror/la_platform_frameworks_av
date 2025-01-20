@@ -37,7 +37,7 @@
 #include <media/IOMX.h>
 #include <camera/android/hardware/ICamera.h>
 #include <media/mediarecorder.h>
-#include "ESQueue.h"
+#include <mpeg2ts/ESQueue.h>
 #include <media/stagefright/CameraSource.h>
 
 namespace android {
@@ -64,7 +64,6 @@ struct AudioSource;
  */
 struct AVFactory {
     virtual sp<ACodec> createACodec();
-    virtual sp<CodecBase> createMediaFilter();
     virtual ElementaryStreamQueue* createESQueue(
             ElementaryStreamQueue::Mode mode, uint32_t flags = 0);
     virtual CameraSource *CreateCameraSourceFromCamera(
