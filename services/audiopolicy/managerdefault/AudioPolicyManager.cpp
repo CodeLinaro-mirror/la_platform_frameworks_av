@@ -14,7 +14,7 @@
  * limitations under the License.
  *
  * Changes from Qualcomm Innovation Center are provided under the following license:
- * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -3192,8 +3192,13 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             halInputSource = AUDIO_SOURCE_VOICE_RECOGNITION;
         }
     } else if (attributes.source == AUDIO_SOURCE_VOICE_COMMUNICATION &&
-               audio_is_linear_pcm(config->format)) {
-        flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
+               audio_is_linear_pcm(config->format) && (((flags & AUDIO_INPUT_FLAG_FAST) == 0))) {
+        if ((flags & AUDIO_INPUT_FLAG_MMAP_NOIRQ) != 0) {
+            flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_MMAP_NOIRQ;
+        } else {
+            flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
+            ALOGV("Set VoIP flag for PCM format");
+        }
     }
 
     if (attributes.source == AUDIO_SOURCE_ULTRASOUND) {
