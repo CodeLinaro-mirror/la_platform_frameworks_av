@@ -1560,12 +1560,12 @@ status_t convertMetaDataToMessage(
         msg->setBuffer("csd-0", buffer);
     }
 
-    if (meta->findData(kKeyDVCC, &type, &data, &size)
-            || meta->findData(kKeyDVVC, &type, &data, &size)
-            || meta->findData(kKeyDVWC, &type, &data, &size)) {
 #ifndef __NO_AVEXTENSIONS__
     AVUtils::get()->convertMetaDataToMessage(meta, &msg);
 #endif
+    if (meta->findData(kKeyDVCC, &type, &data, &size)
+            || meta->findData(kKeyDVVC, &type, &data, &size)
+            || meta->findData(kKeyDVWC, &type, &data, &size)) {
         const uint8_t *ptr = (const uint8_t *)data;
         ALOGV("DV: calling parseDolbyVisionProfileLevelFromDvcc with data size %zu", size);
         parseDolbyVisionProfileLevelFromDvcc(ptr, size, msg);
