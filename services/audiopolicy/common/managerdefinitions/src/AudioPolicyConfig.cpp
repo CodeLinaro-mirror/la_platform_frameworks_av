@@ -13,9 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 
 #define LOG_TAG "APM_Config"
 
+#include <android-base/properties.h>
 #include <AudioPolicyConfig.h>
 #include <IOProfile.h>
 #include <Serializer.h>
@@ -26,6 +33,10 @@
 #include <system/audio.h>
 #include <system/audio_config.h>
 #include <utils/Log.h>
+
+#define VALUEADD_AOSP_SUPPORT_PROPERTY "ro.vendor.qti.va_aosp.support"
+static char g_audio_framework[100];
+#define VA_AUDIO_POLICY_CONFIG_PATH_AR "/vendor/etc/audio_ar/audio_policy_configuration.xml"
 
 namespace android {
 
@@ -197,8 +208,18 @@ sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmAidlConfigWithFallback
 // static
 sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmXmlConfigWithFallback(
         const std::string& xmlFilePath) {
+    std::string audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH_AR;
+    bool va_aosp_support = property_get_bool(VALUEADD_AOSP_SUPPORT_PROPERTY, false);
+    if (va_aosp_support) {
+        property_get("ro.boot.audio", g_audio_framework, NULL);
+        if (strstr(g_audio_framework, "audioreach") != NULL)
+            audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH_AR;
+        else
+            audioPolicyXmlConfigFile = audio_get_audio_policy_config_file();
+    }
     const std::string filePath =
-            xmlFilePath.empty() ? audio_get_audio_policy_config_file() : xmlFilePath;
+            va_aosp_support ? audioPolicyXmlConfigFile :
+            (xmlFilePath.empty() ? audio_get_audio_policy_config_file() : xmlFilePath);
     auto config = sp<AudioPolicyConfig>::make();
     if (status_t status = config->loadFromXml(filePath, false /*forVts*/); status == NO_ERROR) {
         return config;
@@ -269,6 +290,9 @@ status_t AudioPolicyConfig::loadFromAidl(const media::AudioPolicyConfig& aidl) {
     mSurroundFormats = VALUE_OR_RETURN_STATUS(
             aidl2legacy_SurroundSoundConfig_SurroundFormats(aidl.surroundSoundConfig));
     mSource = kAidlConfigSource;
+    if (aidl.engineConfig.capSpecificConfig.has_value()) {
+        setEngineLibraryNameSuffix(kCapEngineLibraryNameSuffix);
+    }
     // No need to augmentData() as AIDL HAL must provide correct mic addresses.
     return NO_ERROR;
 }
@@ -339,6 +363,11 @@ void AudioPolicyConfig::setDefaultSurroundFormats() {
         {AUDIO_FORMAT_DOLBY_TRUEHD, {}},
         {AUDIO_FORMAT_E_AC3_JOC, {}},
         {AUDIO_FORMAT_AC4, {}}};
+}
+
+bool AudioPolicyConfig::useDeepBufferForMedia() const {
+    if (mUseDeepBufferForMediaOverride.has_value()) return *mUseDeepBufferForMediaOverride;
+    return property_get_bool("audio.deep_buffer.media", false /* default_value */);
 }
 
 } // namespace android
