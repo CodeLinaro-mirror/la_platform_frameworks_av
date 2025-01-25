@@ -89,7 +89,6 @@ public:
     };
 
     HevcParameterSets();
-    HevcParameterSets(bool isMvHevc);
 
     status_t addNalUnit(const uint8_t* data, size_t size);
 
@@ -102,14 +101,11 @@ public:
     size_t getNumNalUnitsOfType(uint8_t type);
     // get number of Nalus using layerId as well
     size_t getNumNalUnitsOfType(uint8_t type, uint8_t layerId);
-    // get payloadType of SEI message
-    bool getThreeDimParamParsed();
     uint8_t getType(size_t index);
     size_t getSize(size_t index);
     // Note that this method does not write the start code.
     bool write(size_t index, uint8_t* dest, size_t size);
     status_t makeHvcc(uint8_t *hvcc, size_t *hvccSize, size_t nalSizeLength);
-    status_t makeHvcc_l(uint8_t *hvcc, size_t *hvccSize, size_t nalSizeLength);
     void FindHEVCDimensions(
             const sp<ABuffer> &SpsBuffer, int32_t *width, int32_t *height);
 
@@ -137,11 +133,8 @@ private:
 
     KeyedVector<uint32_t, uint64_t> mParams;
     Vector<sp<ABuffer>> mNalUnits;
-
     // nal unit layer id vector
     Vector<uint8_t> mNalLayerIds;
-    bool mIsLhevc;
-
     Info mInfo;
 
     DISALLOW_EVIL_CONSTRUCTORS(HevcParameterSets);
