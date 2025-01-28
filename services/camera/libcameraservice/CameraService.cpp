@@ -3250,6 +3250,56 @@ void CameraService::notifyMonitoredUids(const std::unordered_set<uid_t> &notifyU
     }
 }
 
+void CameraService::updateSharedClientAccessPriorities(std::vector<int> sharedClientPids) {
+    Mutex::Autolock lock(mServiceLock);
+    if (!flags::camera_multi_client() || sharedClientPids.empty()) {
+        return;
+    }
+    std::vector<int> scores(sharedClientPids.size());
+    std::vector<int> states(sharedClientPids.size());
+    status_t err = ProcessInfoService::getProcessStatesScoresFromPids(sharedClientPids.size(),
+                &sharedClientPids[0], /*out*/&states[0], /*out*/&scores[0]);
+    if (err != OK) {
+        return;
+    }
+    for (size_t i = 0; i < sharedClientPids.size(); i++) {
+        auto clientDescriptorPtr = mActiveClientManager.getSharedClient(sharedClientPids[i]);
+        if (clientDescriptorPtr == nullptr) {
+            continue;
+        }
+        const auto& clientPriority = clientDescriptorPtr->getPriority();
+        int score = clientPriority.getScore();
+        int state = clientPriority.getState();
+        if ((score != scores[i])  || (state != states[i])){
+            clientDescriptorPtr->setPriority(resource_policy::ClientPriority(scores[i], states[i],
+                    false, 0));
+            notifySharedClientPrioritiesChanged(clientDescriptorPtr->getKey());
+        }
+    }
+}
+
+void CameraService::notifySharedClientPrioritiesChanged(const std::string& cameraId) {
+    if (!flags::camera_multi_client()) {
+        return;
+    }
+    auto primaryClientDesc = mActiveClientManager.getPrimaryClient(cameraId);
+    if (primaryClientDesc == nullptr) {
+        return;
+    }
+    auto primaryClient = primaryClientDesc->getValue();
+    if (primaryClient == nullptr) {
+        return;
+    }
+    auto highestPriorityClient = mActiveClientManager.getHighestPrioritySharedClient(cameraId);
+    if (highestPriorityClient == primaryClient) {
+        return;
+    }
+    highestPriorityClient->setPrimaryClient(true);
+    highestPriorityClient->notifyClientSharedAccessPriorityChanged(true);
+    primaryClient->setPrimaryClient(false);
+    primaryClient->notifyClientSharedAccessPriorityChanged(false);
+}
+
 Status CameraService::notifyDeviceStateChange(int64_t newState) {
     const int pid = getCallingPid();
     const int selfPid = getpid();
@@ -4444,6 +4494,10 @@ status_t CameraService::BasicClient::startCameraOps() {
 
     sCameraService->mUidPolicy->registerMonitorUid(mClientUid, /*openCamera*/true);
 
+    if (flags::camera_multi_client() && mSharedMode) {
+        sCameraService->mUidPolicy->addSharedClientPid(getClientUid(), getClientPid());
+    }
+
     // Notify listeners of camera open/close status
     sCameraService->updateOpenCloseStatus(mCameraIdStr, true/*open*/, mClientPackageName, mSharedMode);
 
@@ -4555,6 +4609,10 @@ status_t CameraService::BasicClient::finishCameraOps() {
     mOpsCallback.clear();
 
     sCameraService->mUidPolicy->unregisterMonitorUid(mClientUid, /*closeCamera*/true);
+
+    if (flags::camera_multi_client() && mSharedMode) {
+        sCameraService->mUidPolicy->removeSharedClientPid(getClientUid(), getClientPid());
+    }
 
     // Notify listeners of camera open/close status
     sCameraService->updateOpenCloseStatus(mCameraIdStr, false/*open*/, mClientPackageName, mSharedMode);
@@ -4780,19 +4838,33 @@ void CameraService::UidPolicy::onUidIdle(uid_t uid, bool /* disabled */) {
 void CameraService::UidPolicy::onUidStateChanged(uid_t uid, int32_t procState,
         int64_t procStateSeq __unused, int32_t capability __unused) {
     bool procStateChange = false;
+    std::vector<int> sharedPids;
     {
         Mutex::Autolock _l(mUidLock);
-        if (mMonitoredUids.find(uid) != mMonitoredUids.end() &&
-                mMonitoredUids[uid].procState != procState) {
-            mMonitoredUids[uid].procState = procState;
-            procStateChange = true;
+        if (mMonitoredUids.find(uid) != mMonitoredUids.end()) {
+            if (mMonitoredUids[uid].procState != procState) {
+                mMonitoredUids[uid].procState = procState;
+                procStateChange = true;
+            }
+            if (flags::camera_multi_client()) {
+                std::unordered_set<int> sharedClientPids = mMonitoredUids[uid].sharedClientPids;
+                if (!sharedClientPids.empty()) {
+                  sharedPids.assign(sharedClientPids.begin(), sharedClientPids.end());
+                }
+            }
         }
     }
 
+    sp<CameraService> service = mService.promote();
     if (procStateChange) {
-        sp<CameraService> service = mService.promote();
         if (service != nullptr) {
             service->notifyMonitoredUids();
+        }
+    }
+
+    if (flags::camera_multi_client() && !sharedPids.empty()) {
+        if (service != nullptr) {
+            service->updateSharedClientAccessPriorities(sharedPids);
         }
     }
 }
@@ -4807,6 +4879,7 @@ void CameraService::UidPolicy::onUidStateChanged(uid_t uid, int32_t procState,
  */
 void CameraService::UidPolicy::onUidProcAdjChanged(uid_t uid, int32_t adj) {
     std::unordered_set<uid_t> notifyUidSet;
+    std::vector<int> sharedPids;
     {
         Mutex::Autolock _l(mUidLock);
         auto it = mMonitoredUids.find(uid);
@@ -4830,13 +4903,26 @@ void CameraService::UidPolicy::onUidProcAdjChanged(uid_t uid, int32_t adj) {
                 }
             }
             it->second.procAdj = adj;
+            if (flags::camera_multi_client()) {
+                std::unordered_set<int> sharedClientPids = it->second.sharedClientPids;
+                if (!sharedClientPids.empty()) {
+                    sharedPids.assign(sharedClientPids.begin(), sharedClientPids.end());
+                }
+            }
         }
     }
 
+    sp<CameraService> service = mService.promote();
+
     if (notifyUidSet.size() > 0) {
-        sp<CameraService> service = mService.promote();
         if (service != nullptr) {
             service->notifyMonitoredUids(notifyUidSet);
+        }
+    }
+
+    if (flags::camera_multi_client() && !sharedPids.empty()) {
+        if (service != nullptr) {
+            service->updateSharedClientAccessPriorities(sharedPids);
         }
     }
 }
@@ -4970,6 +5056,20 @@ void CameraService::UidPolicy::addOverrideUid(uid_t uid,
 
 void CameraService::UidPolicy::removeOverrideUid(uid_t uid, const std::string &callingPackage) {
     updateOverrideUid(uid, callingPackage, false, false);
+}
+
+void CameraService::UidPolicy::addSharedClientPid(uid_t uid, int pid) {
+    Mutex::Autolock _l(mUidLock);
+    if (mMonitoredUids.find(uid) != mMonitoredUids.end()) {
+        mMonitoredUids[uid].sharedClientPids.insert(pid);
+    }
+}
+
+void CameraService::UidPolicy::removeSharedClientPid(uid_t uid, int pid) {
+    Mutex::Autolock _l(mUidLock);
+    if (mMonitoredUids.find(uid) != mMonitoredUids.end()) {
+        mMonitoredUids[uid].sharedClientPids.erase(pid);
+    }
 }
 
 void CameraService::UidPolicy::binderDied(const wp<IBinder>& /*who*/) {
@@ -5278,6 +5378,33 @@ sp<CameraService::BasicClient> CameraService::CameraClientManager::getCameraClie
     return descriptor->getValue();
 }
 
+sp<CameraService::BasicClient> CameraService::CameraClientManager::getHighestPrioritySharedClient(
+        const std::string& id) const {
+    if (!flags::camera_multi_client()) {
+        return sp<BasicClient>{nullptr};
+    }
+    auto clientDescriptor = get(id);
+    if (clientDescriptor == nullptr) {
+        ALOGV("CameraService::CameraClientManager::no other clients are using same camera");
+        return sp<BasicClient>{nullptr};
+    }
+    if (!clientDescriptor->getSharedMode()) {
+        return sp<BasicClient>{nullptr};
+    }
+    resource_policy::ClientPriority highestPriority = clientDescriptor->getPriority();
+    sp<BasicClient> highestPriorityClient = clientDescriptor->getValue();
+    if (highestPriorityClient.get() == nullptr) {
+        return sp<BasicClient>{nullptr};
+    }
+    for (auto& i : getAll()) {
+        if ((i->getKey() == id) && (i->getSharedMode()) && (i->getPriority() < highestPriority)) {
+            highestPriority = i->getPriority();
+            highestPriorityClient = i->getValue();
+        }
+    }
+    return highestPriorityClient;
+}
+
 void CameraService::CameraClientManager::remove(const CameraService::DescriptorPtr& value) {
     ClientManager::remove(value);
     if (!flags::camera_multi_client()) {
@@ -5285,29 +5412,17 @@ void CameraService::CameraClientManager::remove(const CameraService::DescriptorP
     }
     auto clientToRemove = value->getValue();
     if ((clientToRemove.get() != nullptr) && clientToRemove->mSharedMode) {
-      bool primaryClient = false;
-      status_t ret = clientToRemove->isPrimaryClient(&primaryClient);
-      if ((ret == OK) && primaryClient) {
+        bool primaryClient = false;
+        status_t ret = clientToRemove->isPrimaryClient(&primaryClient);
+        if ((ret == OK) && primaryClient) {
             // Primary client is being removed. Find the next higher priority
             // client to become primary client.
-            auto clientDescriptor = get(value->getKey());
-            if (clientDescriptor == nullptr) {
-                ALOGV("CameraService::CameraClientManager::no other clients are using same camera");
-                return;
-            }
-            resource_policy::ClientPriority highestPriority = clientDescriptor->getPriority();
-            sp<BasicClient> highestPriorityClient = clientDescriptor->getValue();
-            if (highestPriorityClient.get() != nullptr) {
-                for (auto& i : getAll()) {
-                    if ((i->getKey() == value->getKey()) && (i->getPriority() < highestPriority)) {
-                        highestPriority = i->getPriority();
-                        highestPriorityClient = i->getValue();
-                    }
-                }
+            auto highestPriorityClient = getHighestPrioritySharedClient(value->getKey());
+            if (highestPriorityClient != nullptr) {
                 highestPriorityClient->setPrimaryClient(true);
                 highestPriorityClient->notifyClientSharedAccessPriorityChanged(true);
             }
-       }
+        }
     }
 }
 
