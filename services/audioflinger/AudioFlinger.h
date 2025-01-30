@@ -33,6 +33,7 @@
 #include <audio_utils/mutex.h>
 #include <audio_utils/FdToString.h>
 #include <audio_utils/SimpleLog.h>
+#include <com/android/media/permission/PermissionEnum.h>
 #include <media/IAudioFlinger.h>
 #include <media/IAudioPolicyServiceLocal.h>
 #include <media/MediaMetricsItem.h>
@@ -49,6 +50,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <variant>
 
 namespace android {
 
@@ -439,7 +441,7 @@ public:
                             const audio_attributes_t *attr,
                             audio_config_base_t *config,
                             const AudioClient& client,
-                            audio_port_handle_t *deviceId,
+                            DeviceIdVector *deviceIds,
                             audio_session_t *sessionId,
                             const sp<MmapStreamCallback>& callback,
                             sp<MmapStreamInterface>& interface,
@@ -474,6 +476,9 @@ private:
 
     AudioHwDevice*          findSuitableHwDev_l(audio_module_handle_t module,
             audio_devices_t deviceType) REQUIRES(mutex());
+
+    error::BinderResult<std::monostate> enforceCallingPermission(
+                    com::android::media::permission::PermissionEnum perm);
 
     // incremented by 2 when screen state changes, bit 0 == 1 means "off"
     // AudioFlinger::setParameters() updates with mutex().
@@ -774,9 +779,6 @@ private:
     int64_t mTotalMemory GUARDED_BY(mutex()) = 0;
     std::atomic<size_t> mClientSharedHeapSize = kMinimumClientSharedHeapSizeBytes;
     static constexpr size_t kMinimumClientSharedHeapSizeBytes = 1024 * 1024; // 1MB
-
-    // when a global effect was last enabled
-    nsecs_t mGlobalEffectEnableTime GUARDED_BY(mutex()) = 0;
 
     /* const */ sp<IAfPatchPanel> mPatchPanel;
 

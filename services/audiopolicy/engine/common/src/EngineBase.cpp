@@ -126,7 +126,7 @@ std::string EngineBase::getProductStrategyName(product_strategy_t id) const {
 }
 
 engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
-        const media::audio::common::AudioHalEngineConfig& aidlConfig)
+        const media::audio::common::AudioHalEngineConfig& aidlConfig, bool)
 {
     engineConfig::ParsingResult result = engineConfig::convert(aidlConfig);
     if (result.parsedConfig == nullptr) {
@@ -141,7 +141,8 @@ engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
     return processParsingResult(std::move(result));
 }
 
-engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(const std::string& xmlFilePath)
+engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
+        const std::string& xmlFilePath, bool isConfigurable)
 {
     auto fileExists = [](const char* path) {
         struct stat fileStat;
@@ -150,7 +151,7 @@ engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(const std::s
     const std::string filePath = xmlFilePath.empty() ? engineConfig::DEFAULT_PATH : xmlFilePath;
     engineConfig::ParsingResult result =
             fileExists(filePath.c_str()) ?
-            engineConfig::parse(filePath.c_str()) : engineConfig::ParsingResult{};
+            engineConfig::parse(filePath.c_str(), isConfigurable) : engineConfig::ParsingResult{};
     if (result.parsedConfig == nullptr) {
         ALOGD("%s: No configuration found, using default matching phone experience.", __FUNCTION__);
         engineConfig::Config config = gDefaultEngineConfig;
@@ -795,6 +796,41 @@ DeviceVector EngineBase::getDisabledDevicesForProductStrategy(
                 availableOutputDevices.getDevicesFromDeviceTypeAddrVec(disabledDevicesTypeAddr);
     }
     return disabledDevices;
+}
+
+sp<DeviceDescriptor> EngineBase::getInputDeviceForEchoRef(const audio_attributes_t &attr,
+            const DeviceVector &availableInputDevices) const
+{
+    // get the first input device whose address matches a tag
+
+    std::string tags { attr.tags }; // tags separate by ';'
+    std::size_t posBegin = 0; // first index of current tag, inclusive
+    std::size_t posEnd; // last index of current tag, exclusive
+
+    while (posBegin < tags.size()) {
+        // ';' is used as the delimiter of tags
+        // find the first delimiter after posBegin
+        posEnd = tags.find(';', posBegin);
+
+        std::string tag;
+
+        if (posEnd == std::string::npos) { // no more delimiter found
+            tag = tags.substr(posBegin); // last tag
+        } else {
+            // get next tag
+            tag = tags.substr(posBegin, posEnd - posBegin);
+        }
+        // get the input device whose address matches the tag
+        sp<DeviceDescriptor> device = availableInputDevices.getDevice(
+                AUDIO_DEVICE_IN_ECHO_REFERENCE, String8(tag.c_str()), AUDIO_FORMAT_DEFAULT);
+        if (device != nullptr) {
+            return device;
+        }
+
+        // update posBegin for next tag
+        posBegin = posEnd + 1;
+    }
+    return nullptr;
 }
 
 void EngineBase::dumpCapturePresetDevicesRoleMap(String8 *dst, int spaces) const

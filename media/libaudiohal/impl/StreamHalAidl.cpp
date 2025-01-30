@@ -232,7 +232,9 @@ status_t StreamHalAidl::standby() {
             RETURN_STATUS_IF_ERROR(pause(&reply));
             if (reply.state != StreamDescriptor::State::PAUSED &&
                     reply.state != StreamDescriptor::State::DRAIN_PAUSED &&
-                    reply.state != StreamDescriptor::State::TRANSFER_PAUSED) {
+                    reply.state != StreamDescriptor::State::TRANSFER_PAUSED &&
+                    (state != StreamDescriptor::State::DRAINING ||
+                        reply.state != StreamDescriptor::State::IDLE)) {
                 AUGMENT_LOG(E, "unexpected stream state: %s (expected PAUSED)",
                             toString(reply.state).c_str());
                 return INVALID_OPERATION;
@@ -367,8 +369,12 @@ status_t StreamHalAidl::getObservablePosition(int64_t* frames, int64_t* timestam
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
     RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply, statePositions));
-    *frames = std::max<int64_t>(0, reply.observable.frames);
-    *timestamp = std::max<int64_t>(0, reply.observable.timeNs);
+    if (reply.observable.frames == StreamDescriptor::Position::UNKNOWN ||
+        reply.observable.timeNs == StreamDescriptor::Position::UNKNOWN) {
+        return INVALID_OPERATION;
+    }
+    *frames = reply.observable.frames;
+    *timestamp = reply.observable.timeNs;
     return OK;
 }
 
@@ -377,8 +383,12 @@ status_t StreamHalAidl::getHardwarePosition(int64_t *frames, int64_t *timestamp)
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
     RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply));
-    *frames = std::max<int64_t>(0, reply.hardware.frames);
-    *timestamp = std::max<int64_t>(0, reply.hardware.timeNs);
+    if (reply.hardware.frames == StreamDescriptor::Position::UNKNOWN ||
+        reply.hardware.timeNs == StreamDescriptor::Position::UNKNOWN) {
+        return INVALID_OPERATION;
+    }
+    *frames = reply.hardware.frames;
+    *timestamp = reply.hardware.timeNs;
     return OK;
 }
 
@@ -387,7 +397,10 @@ status_t StreamHalAidl::getXruns(int32_t *frames) {
     if (!mStream) return NO_INIT;
     StreamDescriptor::Reply reply;
     RETURN_STATUS_IF_ERROR(updateCountersIfNeeded(&reply));
-    *frames = std::max<int32_t>(0, reply.xrunFrames);
+    if (reply.xrunFrames == StreamDescriptor::Position::UNKNOWN) {
+        return INVALID_OPERATION;
+    }
+    *frames = reply.xrunFrames;
     return OK;
 }
 
@@ -432,6 +445,10 @@ status_t StreamHalAidl::transfer(void *buffer, size_t bytes, size_t *transferred
             AUGMENT_LOG(E, "failed to read %zu bytes to data MQ", toRead);
             return NOT_ENOUGH_DATA;
         }
+    } else if (*transferred > bytes) {
+        ALOGW("%s: HAL module wrote %zu bytes, which exceeds requested count %zu",
+                __func__, *transferred, bytes);
+        *transferred = bytes;
     }
     mStreamPowerLog.log(buffer, *transferred);
     return OK;
@@ -577,7 +594,9 @@ void StreamHalAidl::onAsyncDrainReady() {
         // For compatibility with HIDL behavior, apply a "soft" position reset
         // after receiving the "drain ready" callback.
         std::lock_guard l(mLock);
-        mStatePositions.framesAtFlushOrDrain = mLastReply.observable.frames;
+        if (mLastReply.observable.frames != StreamDescriptor::Position::UNKNOWN) {
+            mStatePositions.framesAtFlushOrDrain = mLastReply.observable.frames;
+        }
     } else {
         AUGMENT_LOG(W, "unexpected onDrainReady in the state %s", toString(state).c_str());
     }
@@ -640,6 +659,13 @@ status_t StreamHalAidl::sendCommand(
         const ::aidl::android::hardware::audio::core::StreamDescriptor::Command& command,
         ::aidl::android::hardware::audio::core::StreamDescriptor::Reply* reply,
         bool safeFromNonWorkerThread, StatePositions* statePositions) {
+
+    // Add timeCheck only for start command (pause, flush checked at caller).
+    std::unique_ptr<mediautils::TimeCheck> timeCheck;
+    if (command.getTag() == StreamDescriptor::Command::start) {
+        timeCheck = mediautils::makeTimeCheckStatsForClassMethodUniquePtr(
+                getClassName(), "sendCommand_start");
+    }
     // TIME_CHECK();  // TODO(b/243839867) reenable only when optimized.
     if (!safeFromNonWorkerThread) {
         const pid_t workerTid = mWorkerTid.load(std::memory_order_acquire);
@@ -670,7 +696,8 @@ status_t StreamHalAidl::sendCommand(
             }
             mLastReply = *reply;
             mLastReplyExpirationNs = uptimeNanos() + mLastReplyLifeTimeNs;
-            if (!mIsInput && reply->status == STATUS_OK) {
+            if (!mIsInput && reply->status == STATUS_OK &&
+                    reply->observable.frames != StreamDescriptor::Position::UNKNOWN) {
                 if (command.getTag() == StreamDescriptor::Command::standby &&
                         reply->state == StreamDescriptor::State::STANDBY) {
                     mStatePositions.framesAtStandby = reply->observable.frames;

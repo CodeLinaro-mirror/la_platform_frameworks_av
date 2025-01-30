@@ -23,6 +23,7 @@
 #include <audio_utils/mutex.h>
 #include <audio_utils/LinearMap.h>
 #include <binder/AppOpsManager.h>
+#include <media/AppOpsSession.h>
 #include <utils/RWLock.h>
 
 namespace android {
@@ -131,7 +132,6 @@ public:
     float* mainBuffer() const final { return mMainBuffer; }
     int auxEffectId() const final { return mAuxEffectId; }
     status_t getTimestamp(AudioTimestamp& timestamp) final;
-    void signal() final;
     status_t getDualMonoMode(audio_dual_mono_mode_t* mode) const final;
     status_t setDualMonoMode(audio_dual_mono_mode_t mode) final;
     status_t getAudioDescriptionMixLevel(float* leveldB) const final;
@@ -231,6 +231,8 @@ public:
     float getPortVolume() const override { return mVolume; }
     bool getPortMute() const override { return mMutedFromPort; }
 
+    std::string trackFlagsAsString() const final { return toString(mFlags); }
+
 protected:
 
     DISALLOW_COPY_AND_ASSIGN(Track);
@@ -289,9 +291,25 @@ protected:
     bool isDisabled() const final;
 
     int& fastIndex() final { return mFastIndex; }
-    bool isPlaybackRestricted() const final {
+
+    bool isPlaybackRestrictedOp() const final {
         // The monitor is only created for tracks that can be silenced.
-        return mOpPlayAudioMonitor ? !mOpPlayAudioMonitor->hasOpPlayAudio() : false; }
+        return mOpPlayAudioMonitor
+                       ? !mOpPlayAudioMonitor->hasOpPlayAudio()
+                       : false;
+    }
+
+    bool hasOpControlPartial() const {
+        return mOpControlSession ? mHasOpControlPartial.load(std::memory_order_acquire) : true;
+    }
+
+    bool isPlaybackRestrictedControl() const final {
+        return !(mIsExemptedFromOpControl || hasOpControlPartial());
+    }
+
+    bool isPlaybackRestricted() const final {
+        return isPlaybackRestrictedOp() || isPlaybackRestrictedControl();
+    }
 
     const sp<AudioTrackServerProxy>& audioTrackServerProxy() const final {
         return mAudioTrackServerProxy;
@@ -340,6 +358,14 @@ protected:
     sp<media::VolumeHandler>  mVolumeHandler; // handles multiple VolumeShaper configs and operations
 
     sp<OpPlayAudioMonitor>  mOpPlayAudioMonitor;
+
+    // logically const
+    std::optional<media::permission::AppOpsSession<media::permission::DefaultAppOpsFacade>>
+            mOpControlSession;
+
+    // logically const
+    bool mIsExemptedFromOpControl = false;
+    std::atomic<bool> mHasOpControlPartial {true};
 
     bool                mHapticPlaybackEnabled = false; // indicates haptic playback enabled or not
     // scale to play haptic data
