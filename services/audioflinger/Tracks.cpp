@@ -28,8 +28,13 @@
 #include "IAfThread.h"
 #include "ResamplerBufferProvider.h"
 
+#include <audio_utils/StringUtils.h>
 #include <audio_utils/minifloat.h>
+#include <com_android_media_audio.h>
+#include <media/AppOpsSession.h>
+#include <media/AudioPermissionPolicy.h>
 #include <media/AudioValidator.h>
+#include <media/IPermissionProvider.h>
 #include <media/RecordBufferConverter.h>
 #include <media/nbaio/Pipe.h>
 #include <media/nbaio/PipeReader.h>
@@ -69,9 +74,29 @@
 namespace android {
 
 using ::android::aidl_utils::binderStatusFromStatusT;
+using ::com::android::media::audio::hardening_impl;
+using ::com::android::media::audio::hardening_strict;
 using binder::Status;
+using com::android::media::audio::audioserver_permissions;
+using com::android::media::permission::PermissionEnum::CAPTURE_AUDIO_HOTWORD;
 using content::AttributionSourceState;
 using media::VolumeShaper;
+
+static bool shouldExemptFromOpControl(audio_usage_t usage) {
+    // TODO(b/389136997) this should be swapped to another flag when it is added, but use this flag
+    // for now since it is already in teamfood
+    if (hardening_strict()) {
+        switch (usage) {
+            case AUDIO_USAGE_VIRTUAL_SOURCE:
+                return true;
+            default:
+                return media::permission::isSystemUsage(usage);
+        }
+    } else {
+        return true;
+    }
+}
+
 // ----------------------------------------------------------------------------
 //      TrackBase
 // ----------------------------------------------------------------------------
@@ -124,7 +149,12 @@ TrackBase::TrackBase(
         mPortId(portId),
         mIsInvalid(false),
         mTrackMetrics(std::move(metricsId), isOut, clientUid),
-        mCreatorPid(creatorPid)
+        mCreatorPid(creatorPid),
+        mTraceSuffix{std::to_string(mPortId).append(".").append(std::to_string(mId))
+                .append(".").append(std::to_string(mThreadIoHandle))},
+        mTraceActionId{std::string(AUDIO_TRACE_PREFIX_AUDIO_TRACK_ACTION).append(mTraceSuffix)},
+        mTraceIntervalId{std::string(AUDIO_TRACE_PREFIX_AUDIO_TRACK_INTERVAL)
+                .append(mTraceSuffix)}
 {
     const uid_t callingUid = IPCThreadState::self()->getCallingUid();
     if (!isAudioServerOrMediaServerUid(callingUid) || clientUid == AUDIO_UID_INVALID) {
@@ -335,6 +365,99 @@ void TrackBase::beginBatteryAttribution() {
 void TrackBase::endBatteryAttribution() {
     mBatteryStatsHolder.reset();
     mTrackToken.reset();
+}
+
+audio_utils::trace::Object TrackBase::createDeviceIntervalTrace(const std::string& devices) {
+    audio_utils::trace::Object trace;
+
+    // Please do not modify any items without approval (look at git blame).
+    // Sanitize the device string to remove addresses.
+    std::string plainDevices;
+    if (devices.find(")") != std::string::npos) {
+        auto deviceAddrVector = audio_utils::stringutils::getDeviceAddressPairs(devices);
+        for (const auto& deviceAddr : deviceAddrVector) {
+            // "|" not compatible with ATRACE filtering so we use "+".
+            if (!plainDevices.empty()) plainDevices.append("+");
+            plainDevices.append(deviceAddr.first);
+        }
+    } else {
+        plainDevices = devices;
+    }
+
+    trace // the following key, value pairs should be alphabetical
+            .set(AUDIO_TRACE_OBJECT_KEY_CHANNEL_MASK, static_cast<int32_t>(mChannelMask))
+            .set(AUDIO_TRACE_OBJECT_KEY_CONTENT_TYPE, toString(mAttr.content_type))
+            .set(AUDIO_TRACE_OBJECT_KEY_DEVICES, plainDevices)
+            .set(AUDIO_TRACE_OBJECT_KEY_FLAGS, trackFlagsAsString())
+            .set(AUDIO_TRACE_OBJECT_KEY_FORMAT, IAfThreadBase::formatToString(mFormat))
+            .set(AUDIO_TRACE_OBJECT_KEY_FRAMECOUNT, static_cast<int64_t>(mFrameCount))
+            .set(AUDIO_TRACE_OBJECT_KEY_PID, static_cast<int32_t>(
+                    mClient ? mClient->pid() : getpid()))
+            .set(AUDIO_TRACE_OBJECT_KEY_SAMPLE_RATE, static_cast<int32_t>(sampleRate()));
+    if (const auto thread = mThread.promote()) {
+        trace // continue in alphabetical order
+                .set(AUDIO_TRACE_PREFIX_THREAD AUDIO_TRACE_OBJECT_KEY_CHANNEL_MASK,
+                        static_cast<int32_t>(thread->channelMask()))
+                .set(AUDIO_TRACE_PREFIX_THREAD AUDIO_TRACE_OBJECT_KEY_FLAGS,
+                        thread->flagsAsString())
+                .set(AUDIO_TRACE_PREFIX_THREAD AUDIO_TRACE_OBJECT_KEY_FORMAT,
+                        IAfThreadBase::formatToString(thread->format()))
+                .set(AUDIO_TRACE_PREFIX_THREAD AUDIO_TRACE_OBJECT_KEY_FRAMECOUNT,
+                        static_cast<int64_t>(thread->frameCount()))
+                .set(AUDIO_TRACE_PREFIX_THREAD AUDIO_TRACE_OBJECT_KEY_ID,
+                        static_cast<int32_t>(mThreadIoHandle))
+                .set(AUDIO_TRACE_PREFIX_THREAD AUDIO_TRACE_OBJECT_KEY_SAMPLE_RATE,
+                        static_cast<int32_t>(thread->sampleRate()))
+                .set(AUDIO_TRACE_PREFIX_THREAD AUDIO_TRACE_OBJECT_KEY_TYPE,
+                        IAfThreadBase::threadTypeToString(thread->type()));
+    }
+    trace // continue in alphabetical order
+            .set(AUDIO_TRACE_OBJECT_KEY_UID, static_cast<int32_t>(uid()))
+            .set(AUDIO_TRACE_OBJECT_KEY_USAGE, toString(mAttr.usage));
+    return trace;
+}
+
+void TrackBase::logBeginInterval(const std::string& devices) {
+    mTrackMetrics.logBeginInterval(devices);
+
+    if (ATRACE_ENABLED()) [[unlikely]] {
+        auto trace = createDeviceIntervalTrace(devices);
+        mLastTrace = trace;
+        ATRACE_INSTANT_FOR_TRACK(mTraceIntervalId.c_str(),
+                trace.set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_BEGIN_INTERVAL)
+                        .toTrace().c_str());
+    }
+}
+
+void TrackBase::logEndInterval() {
+    if (!mLastTrace.empty()) {
+        if (ATRACE_ENABLED()) [[unlikely]] {
+            ATRACE_INSTANT_FOR_TRACK(mTraceIntervalId.c_str(),
+                    mLastTrace.set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_END_INTERVAL)
+                            .toTrace().c_str());
+        }
+        mLastTrace.clear();
+    }
+    mTrackMetrics.logEndInterval();
+}
+
+void TrackBase::logRefreshInterval(const std::string& devices) {
+    if (ATRACE_ENABLED()) [[unlikely]] {
+        if (mLastTrace.empty()) mLastTrace = createDeviceIntervalTrace(devices);
+        auto trace = mLastTrace;
+        ATRACE_INSTANT_FOR_TRACK(mTraceIntervalId.c_str(),
+                trace.set(AUDIO_TRACE_OBJECT_KEY_EVENT,
+                               AUDIO_TRACE_EVENT_REFRESH_INTERVAL)
+                        .toTrace().c_str());
+    }
+}
+
+void TrackBase::signal() {
+    const sp<IAfThreadBase> thread = mThread.promote();
+    if (thread != nullptr) {
+        audio_utils::lock_guard _l(thread->mutex());
+        thread->broadcast_l();
+    }
 }
 
 PatchTrackBase::PatchTrackBase(const sp<ClientProxy>& proxy,
@@ -835,6 +958,27 @@ Track::Track(
         return;
     }
 
+    using media::permission::ValidatedAttributionSourceState;
+    using media::permission::Ops;
+
+    if (hardening_impl()) {
+        // Don't bother for non-output tracks and server uids
+        if (!media::permission::skipOpsForUid(attributionSource.uid) && type != TYPE_PATCH) {
+            mOpControlSession.emplace(
+                ValidatedAttributionSourceState::createFromTrustedSource(attributionSource),
+                Ops { .attributedOp = AppOpsManager::OP_CONTROL_AUDIO_PARTIAL },
+                [this]
+                (bool isPermitted) {
+                    mHasOpControlPartial.store(isPermitted, std::memory_order_release);
+                    if (isOffloaded()) {
+                        signal();
+                    }
+                }
+            );
+            mIsExemptedFromOpControl = shouldExemptFromOpControl(attr.usage);
+        }
+    }
+
     if (sharedBuffer == 0) {
         mAudioTrackServerProxy = new AudioTrackServerProxy(mCblk, mBuffer, frameCount,
                 mFrameSize, !isExternalTrack(), sampleRate);
@@ -1090,7 +1234,7 @@ void Track::appendDump(String8& result, bool active) const
     result.appendFormat("%7s %7u/%7u %7u %7u %2s 0x%03X "
                         "%08X %08X %6u "
                         "%2u %3x %2x "
-                        "%5.2g %5.2g %5.2g %5.2g%c %11.2g %12s"
+                        "%5.2g %5.2g %5.2g %5.2g%c %11.2g %10s "
                         "%08X %6zu%c %6zu %c %9u%c %7u %10s %12s",
             active ? "yes" : "no",
             mClient ? mClient->pid() : getpid() ,
@@ -1159,6 +1303,12 @@ status_t Track::getNextBuffer(AudioBufferProvider::Buffer* buffer)
         ALOGV("%s(%d): underrun,  framesReady(%zu) < framesDesired(%zd), state: %d",
                 __func__, mId, buf.mFrameCount, desiredFrames, (int)mState);
         mAudioTrackServerProxy->tallyUnderrunFrames(desiredFrames);
+        if (ATRACE_ENABLED()) [[unlikely]] {
+            ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
+                    .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_UNDERRUN)
+                    .set(AUDIO_TRACE_OBJECT_KEY_FRAMECOUNT, desiredFrames)
+                    .toTrace().c_str());
+        }
     } else {
         mAudioTrackServerProxy->tallyUnderrunFrames(0);
     }
@@ -1271,6 +1421,11 @@ bool Track::isReady() const {
 status_t Track::start(AudioSystem::sync_event_t event __unused,
                                                     audio_session_t triggerSession __unused)
 {
+    if (ATRACE_ENABLED()) [[unlikely]] {
+        ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
+                .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_START)
+                .toTrace().c_str());
+    }
     status_t status = NO_ERROR;
     ALOGV("%s(%d): calling pid %d session %d",
             __func__, mId, IPCThreadState::self()->getCallingPid(), mSessionId);
@@ -1327,7 +1482,8 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
 
         // states to reset position info for pcm tracks
         if (audio_is_linear_pcm(mFormat)
-                && (state == IDLE || state == STOPPED || state == FLUSHED)) {
+                && (state == IDLE || state == STOPPED || state == FLUSHED
+                        || state == PAUSED)) {
             mFrameMap.reset();
 
             if (!isFastTrack()) {
@@ -1390,6 +1546,13 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
         status = BAD_VALUE;
     }
     if (status == NO_ERROR) {
+        // start OP_AUDIO_CONTROL session for track
+        // TODO(b/385417236) once mute logic is centralized, the delivery request session should be
+        // tied to sonifying playback instead of track start->pause
+        if (mOpControlSession) {
+            mHasOpControlPartial.store(mOpControlSession->beginDeliveryRequest(),
+                                std::memory_order_release);
+        }
         // send format to AudioManager for playback activity monitoring
         const sp<IAudioManager> audioManager =
                 thread->afThreadCallback()->getOrCreateAudioManager();
@@ -1414,6 +1577,11 @@ status_t Track::start(AudioSystem::sync_event_t event __unused,
 void Track::stop()
 {
     ALOGV("%s(%d): calling pid %d", __func__, mId, IPCThreadState::self()->getCallingPid());
+    if (ATRACE_ENABLED()) [[unlikely]] {
+        ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
+                .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_STOP)
+                .toTrace().c_str());
+    }
     const sp<IAfThreadBase> thread = mThread.promote();
     if (thread != 0) {
         audio_utils::unique_lock ul(thread->mutex());
@@ -1446,11 +1614,25 @@ void Track::stop()
         }
         forEachTeePatchTrack_l([](const auto& patchTrack) { patchTrack->stop(); });
     }
+    // TODO(b/385417236)
+    // Due to the complexity of state management for offload we do not call endDeliveryRequest().
+    // For offload tracks, sonification may continue significantly after the STOP
+    // phase begins. Leave the session on-going until the track is eventually
+    // destroyed. We continue to allow appop callbacks during STOPPING and STOPPED state.
+    // This is suboptimal but harmless.
+    if (mOpControlSession && !isOffloaded()) {
+        mOpControlSession->endDeliveryRequest();
+    }
 }
 
 void Track::pause()
 {
     ALOGV("%s(%d): calling pid %d", __func__, mId, IPCThreadState::self()->getCallingPid());
+    if (ATRACE_ENABLED()) [[unlikely]] {
+        ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
+                .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_PAUSE)
+                .toTrace().c_str());
+    }
     const sp<IAfThreadBase> thread = mThread.promote();
     if (thread != 0) {
         audio_utils::unique_lock ul(thread->mutex());
@@ -1485,11 +1667,21 @@ void Track::pause()
         // Pausing the TeePatch to avoid a glitch on underrun, at the cost of buffered audio loss.
         forEachTeePatchTrack_l([](const auto& patchTrack) { patchTrack->pause(); });
     }
+    // When stopping a paused track, there will be two endDeliveryRequests. This is tolerated by
+    // the implementation.
+    if (mOpControlSession) {
+        mOpControlSession->endDeliveryRequest();
+    }
 }
 
 void Track::flush()
 {
     ALOGV("%s(%d)", __func__, mId);
+    if (ATRACE_ENABLED()) [[unlikely]] {
+        ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
+                .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_FLUSH)
+                .toTrace().c_str());
+    }
     const sp<IAfThreadBase> thread = mThread.promote();
     if (thread != 0) {
         audio_utils::unique_lock ul(thread->mutex());
@@ -1618,13 +1810,8 @@ status_t Track::selectPresentation(int presentationId,
 
 void Track::setPortVolume(float volume) {
     mVolume = volume;
-    if (mType != TYPE_PATCH) {
-        // Do not recursively propagate a PatchTrack setPortVolume to
-        // downstream PatchTracks.
-        forEachTeePatchTrack_l([volume](const auto &patchTrack) {
-            patchTrack->setPortVolume(volume);
-        });
-    }
+    // for now the secondary patch tracks contain the unattenuated volume
+    // TODO(b/388241142): use volume capture rules to forward the volume to its patch tracks
 }
 
 void Track::setPortMute(bool muted) {
@@ -1632,13 +1819,8 @@ void Track::setPortMute(bool muted) {
         return;
     }
     mMutedFromPort = muted;
-    if (mType != TYPE_PATCH) {
-        // Do not recursively propagate a PatchTrack setPortVolume to
-        // downstream PatchTracks.
-        forEachTeePatchTrack_l([muted](const auto &patchTrack) {
-            patchTrack->setPortMute(muted);
-        });
-    }
+    // for now the secondary patch tracks will always be not muted
+    // TODO(b/388241142): use volume capture rules to forward the mute state to its patch tracks
 }
 
 VolumeShaper::Status Track::applyVolumeShaper(
@@ -1963,16 +2145,6 @@ void Track::signalClientFlag(int32_t flag)
     android_atomic_release_store(0x40000000, &cblk->mFutex);
     // client is not in server, so FUTEX_WAKE is needed instead of FUTEX_WAKE_PRIVATE
     (void) syscall(__NR_futex, &cblk->mFutex, FUTEX_WAKE, INT_MAX);
-}
-
-void Track::signal()
-{
-    const sp<IAfThreadBase> thread = mThread.promote();
-    if (thread != 0) {
-        auto* const t = thread->asIAfPlaybackThread().get();
-        audio_utils::lock_guard _l(t->mutex());
-        t->broadcast_l();
-    }
 }
 
 status_t Track::getDualMonoMode(audio_dual_mono_mode_t* mode) const
@@ -2713,6 +2885,7 @@ public:
     binder::Status setPreferredMicrophoneFieldDimension(float zoom) final;
     binder::Status shareAudioHistory(
             const std::string& sharedAudioPackageName, int64_t sharedAudioStartMs) final;
+    binder::Status setParameters(const ::std::string& keyValuePairs) final;
 
 private:
     const sp<IAfRecordTrack> mRecordTrack;
@@ -2780,6 +2953,11 @@ binder::Status RecordHandle::shareAudioHistory(
         const std::string& sharedAudioPackageName, int64_t sharedAudioStartMs) {
     return binderStatusFromStatusT(
             mRecordTrack->shareAudioHistory(sharedAudioPackageName, sharedAudioStartMs));
+}
+
+binder::Status RecordHandle::setParameters(const ::std::string& keyValuePairs) {
+    return binderStatusFromStatusT(mRecordTrack->setParameters(
+            String8(keyValuePairs.c_str())));
 }
 
 // ----------------------------------------------------------------------------
@@ -2935,6 +3113,11 @@ status_t RecordTrack::getNextBuffer(AudioBufferProvider::Buffer* buffer)
 status_t RecordTrack::start(AudioSystem::sync_event_t event,
                                                         audio_session_t triggerSession)
 {
+    if (ATRACE_ENABLED()) [[unlikely]] {
+        ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
+                .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_START)
+                .toTrace().c_str());
+    }
     const sp<IAfThreadBase> thread = mThread.promote();
     if (thread != 0) {
         auto* const recordThread = thread->asIAfRecordThread().get();
@@ -2947,6 +3130,11 @@ status_t RecordTrack::start(AudioSystem::sync_event_t event,
 
 void RecordTrack::stop()
 {
+    if (ATRACE_ENABLED()) [[unlikely]] {
+        ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
+                .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_STOP)
+                .toTrace().c_str());
+    }
     const sp<IAfThreadBase> thread = mThread.promote();
     if (thread != 0) {
         auto* const recordThread = thread->asIAfRecordThread().get();
@@ -3159,11 +3347,23 @@ status_t RecordTrack::shareAudioHistory(
     attributionSource.uid = VALUE_OR_RETURN_STATUS(legacy2aidl_uid_t_int32_t(callingUid));
     attributionSource.pid = VALUE_OR_RETURN_STATUS(legacy2aidl_uid_t_int32_t(callingPid));
     attributionSource.token = sp<BBinder>::make();
-    if (!captureHotwordAllowed(attributionSource)) {
-        return PERMISSION_DENIED;
+    const sp<IAfThreadBase> thread = mThread.promote();
+    if (audioserver_permissions()) {
+        const auto res = thread->afThreadCallback()->getPermissionProvider().checkPermission(
+                    CAPTURE_AUDIO_HOTWORD,
+                    attributionSource.uid);
+            if (!res.ok()) {
+                return aidl_utils::statusTFromBinderStatus(res.error());
+            }
+            if (!res.value()) {
+                return PERMISSION_DENIED;
+            }
+    } else {
+        if (!captureHotwordAllowed(attributionSource)) {
+            return PERMISSION_DENIED;
+        }
     }
 
-    const sp<IAfThreadBase> thread = mThread.promote();
     if (thread != 0) {
         auto* const recordThread = thread->asIAfRecordThread().get();
         status_t status = recordThread->shareAudioHistory(
@@ -3174,6 +3374,18 @@ status_t RecordTrack::shareAudioHistory(
         return status;
     } else {
         return BAD_VALUE;
+    }
+}
+
+status_t RecordTrack::setParameters(const String8& keyValuePairs) {
+    const sp<IAfThreadBase> thread = mThread.promote();
+    if (thread == nullptr) {
+        ALOGE("%s(%d): thread is dead", __func__, mId);
+        return FAILED_TRANSACTION;
+    } else if (thread->type() == IAfThreadBase::DIRECT) {
+        return thread->setParameters(keyValuePairs);
+    } else {
+        return PERMISSION_DENIED;
     }
 }
 
@@ -3618,11 +3830,21 @@ status_t MmapTrack::initCheck() const
 status_t MmapTrack::start(AudioSystem::sync_event_t event __unused,
                                                     audio_session_t triggerSession __unused)
 {
+    if (ATRACE_ENABLED()) [[unlikely]] {
+        ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
+                .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_START)
+                .toTrace().c_str());
+    }
     return NO_ERROR;
 }
 
 void MmapTrack::stop()
 {
+    if (ATRACE_ENABLED()) [[unlikely]] {
+        ATRACE_INSTANT_FOR_TRACK(mTraceActionId.c_str(), audio_utils::trace::Object{}
+                .set(AUDIO_TRACE_OBJECT_KEY_EVENT, AUDIO_TRACE_EVENT_STOP)
+                .toTrace().c_str());
+    }
 }
 
 // AudioBufferProvider interface

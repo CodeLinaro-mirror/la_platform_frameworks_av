@@ -35,12 +35,28 @@ flag {
 }
 
 flag {
+    name: "audio_eraser_effect"
+    namespace: "media_audio"
+    description: "Enable audio eraser effect"
+    bug: "367667349"
+}
+
+flag {
     name: "bluetooth_mac_address_anonymization"
     namespace: "media_audio"
     description:
         "Enable Bluetooth MAC address anonymization when reporting "
         "audio device descriptors to non privileged apps."
     bug: "285588444"
+}
+
+flag {
+    name: "defer_wear_permission_updates"
+    namespace: "media_audio"
+    description:
+        "defer permission updates to reduce pressure"
+        "on app launch latency on lower core devices."
+    bug: "380347376"
 }
 
 flag {
@@ -69,10 +85,33 @@ flag {
 }
 
 flag {
+    name: "hardening_impl"
+    is_exported: true
+    namespace: "media_audio"
+    description: "Flag for overall implementation of hardening"
+    bug: "376480814"
+}
+
+flag {
+    name: "hardening_strict"
+    is_exported: true
+    namespace: "media_audio"
+    description: "Flag for strict enforcement (deny access) of hardening"
+    bug: "376480814"
+}
+
+flag {
     name: "music_fx_edge_to_edge"
     namespace: "media_audio"
     description: "Enable Edge-to-edge feature for MusicFx and handle insets"
     bug: "336204940"
+}
+
+flag {
+    name: "optimize_bt_device_switch"
+    namespace: "media_audio"
+    description: "Optimize the Bluetooth active device switch sequence"
+    bug: "373867402"
 }
 
 flag {

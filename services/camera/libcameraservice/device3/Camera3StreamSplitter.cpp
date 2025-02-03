@@ -201,6 +201,17 @@ void Camera3StreamSplitter::setHalBufferManager(bool enabled) {
     mUseHalBufManager = enabled;
 }
 
+status_t Camera3StreamSplitter::setTransform(size_t surfaceId, int transform) {
+    Mutex::Autolock lock(mMutex);
+    if (!mOutputSurfaces.contains(surfaceId) || mOutputSurfaces[surfaceId] == nullptr) {
+        SP_LOGE("%s: No surface at id %zu", __FUNCTION__, surfaceId);
+        return BAD_VALUE;
+    }
+
+    mOutputTransforms[surfaceId] = transform;
+    return OK;
+}
+
 status_t Camera3StreamSplitter::addOutputLocked(size_t surfaceId, const sp<Surface>& outputQueue) {
     ATRACE_CALL();
     if (outputQueue == nullptr) {
@@ -374,7 +385,12 @@ status_t Camera3StreamSplitter::outputBufferLocked(const sp<Surface>& output,
     output->setBuffersDataSpace(static_cast<ui::Dataspace>(bufferItem.mDataSpace));
     output->setCrop(&bufferItem.mCrop);
     output->setScalingMode(bufferItem.mScalingMode);
-    output->setBuffersTransform(bufferItem.mTransform);
+
+    int transform = bufferItem.mTransform;
+    if (mOutputTransforms.contains(surfaceId)) {
+        transform = mOutputTransforms[surfaceId];
+    }
+    output->setBuffersTransform(transform);
 
     // In case the output BufferQueue has its own lock, if we hold splitter lock while calling
     // queueBuffer (which will try to acquire the output lock), the output could be holding its
@@ -458,16 +474,17 @@ status_t Camera3StreamSplitter::attachBufferToOutputs(ANativeWindowBuffer* anb,
         mMutex.unlock();
         res = surface->attachBuffer(anb);
         mMutex.lock();
+        //During buffer attach 'mMutex' is not held which makes the removal of
+        //"surface" possible. Check whether this is the case and continue.
+        if (surface.get() == nullptr) {
+            res = OK;
+            continue;
+        }
         if (res != OK) {
             SP_LOGE("%s: Cannot attachBuffer from GraphicBufferProducer %p: %s (%d)", __FUNCTION__,
                     surface.get(), strerror(-res), res);
             // TODO: might need to detach/cleanup the already attached buffers before return?
             return res;
-        }
-        //During buffer attach 'mMutex' is not held which makes the removal of
-        //"gbp" possible. Check whether this is the case and continue.
-        if (mHeldBuffers[surface] == nullptr) {
-            continue;
         }
         mHeldBuffers[surface]->insert(gb);
         SP_LOGV("%s: Attached buffer %p on output %p.", __FUNCTION__, gb.get(), surface.get());

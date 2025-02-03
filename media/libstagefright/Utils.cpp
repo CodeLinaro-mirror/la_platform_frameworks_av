@@ -44,6 +44,8 @@
 #include <media/AudioParameter.h>
 #include <system/audio.h>
 
+#include <com_android_media_extractor_flags.h>
+
 // TODO : Remove the defines once mainline media is built against NDK >= 31.
 // The mp4 extractor is part of mainline and builds against NDK 29 as of
 // writing. These keys are available only from NDK 31:
@@ -734,6 +736,39 @@ static void parseAV1ProfileLevelFromCsd(const sp<ABuffer> &csd, sp<AMessage> &fo
     }
 }
 
+static void parseAPVProfileLevelFromCsd(const sp<ABuffer>& csd, sp<AMessage>& format) {
+    // Parse CSD structure to extract profile level information
+    // https://github.com/openapv/openapv/blob/main/readme/apv_isobmff.md#syntax-1
+    const uint8_t* data = csd->data();
+    size_t csdSize = csd->size();
+    if (csdSize < 21 || data[5] != 0x01) {  // configurationVersion == 1
+        return;
+    }
+    uint8_t profileData = data[9];           // profile_idc
+    uint8_t levelData = data[10];            // level_idc
+    uint8_t band = data[11];                 // band_idc
+    uint8_t bitDepth = (data[20] >> 4) + 8;  // bit_depth_minus8
+    const static ALookup<std::pair<uint8_t, uint8_t>, int32_t> profiles{
+            {{33, 10}, APVProfile422_10},
+            {{44, 12}, APVProfile422_10HDR10Plus},
+    };
+    int32_t profile;
+    if (profiles.map(std::make_pair(profileData, bitDepth), &profile)) {
+        // bump to HDR profile
+        if (isHdr10or10Plus(format) && profile == APVProfile422_10) {
+            if (format->contains("hdr-static-info")) {
+                profile = APVProfile422_10HDR10;
+            }
+        }
+        format->setInt32("profile", profile);
+    }
+    int level_num = (levelData / 30) * 2;
+    if (levelData % 30 == 0) {
+        level_num -= 1;
+    }
+    int32_t level = ((0x100 << (level_num - 1)) | (1 << band));
+    format->setInt32("level", level);
+}
 
 static std::vector<std::pair<const char *, uint32_t>> stringMappings {
     {
@@ -1443,6 +1478,18 @@ status_t convertMetaDataToMessage(
         buffer->meta()->setInt64("timeUs", 0);
         msg->setBuffer("csd-0", buffer);
         parseAV1ProfileLevelFromCsd(buffer, msg);
+    } else if (com::android::media::extractor::flags::extractor_mp4_enable_apv() &&
+               meta->findData(kKeyAPVC, &type, &data, &size)) {
+        sp<ABuffer> buffer = new (std::nothrow) ABuffer(size);
+        if (buffer.get() == NULL || buffer->base() == NULL) {
+            return NO_MEMORY;
+        }
+        memcpy(buffer->data(), data, size);
+
+        buffer->meta()->setInt32("csd", true);
+        buffer->meta()->setInt64("timeUs", 0);
+        msg->setBuffer("csd-0", buffer);
+        parseAPVProfileLevelFromCsd(buffer, msg);
     } else if (meta->findData(kKeyESDS, &type, &data, &size)) {
         ESDS esds((const char *)data, size);
         if (esds.InitCheck() != (status_t)OK) {
@@ -2052,6 +2099,11 @@ status_t convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
         meta->setInt32(kKeyMaxHeight, maxHeight);
     }
 
+    int32_t gainmap;
+    if (msg->findInt32("gainmap", &gainmap)) {
+        meta->setInt32(kKeyGainmap, gainmap);
+    }
+
     int32_t fps;
     float fpsFloat;
     if (msg->findInt32("frame-rate", &fps) && fps > 0) {
@@ -2091,6 +2143,9 @@ status_t convertMessageToMetaData(const sp<AMessage> &msg, sp<MetaData> &meta) {
         } else if (mime == MEDIA_MIMETYPE_VIDEO_AV1 ||
                    mime == MEDIA_MIMETYPE_IMAGE_AVIF) {
             meta->setData(kKeyAV1C, 0, csd0->data(), csd0->size());
+        } else if (com::android::media::extractor::flags::extractor_mp4_enable_apv() &&
+                   mime == MEDIA_MIMETYPE_VIDEO_APV) {
+            meta->setData(kKeyAPVC, 0, csd0->data(), csd0->size());
         } else if (mime == MEDIA_MIMETYPE_VIDEO_DOLBY_VISION) {
             int32_t profile = -1;
             uint8_t blCompatibilityId = -1;
@@ -2406,6 +2461,24 @@ void mapAACProfileToAudioFormat( audio_format_t& format, uint64_t eAacProfile)
     return;
 }
 
+audio_format_t audioFormatFromEncoding(int32_t pcmEncoding) {
+    switch (pcmEncoding) {
+    case kAudioEncodingPcmFloat:
+        return AUDIO_FORMAT_PCM_FLOAT;
+    case kAudioEncodingPcm32bit:
+        return AUDIO_FORMAT_PCM_32_BIT;
+    case kAudioEncodingPcm24bitPacked:
+        return AUDIO_FORMAT_PCM_24_BIT_PACKED;
+    case kAudioEncodingPcm16bit:
+        return AUDIO_FORMAT_PCM_16_BIT;
+    case kAudioEncodingPcm8bit:
+        return AUDIO_FORMAT_PCM_8_BIT; // TODO: do we want to support this?
+    default:
+        ALOGE("%s: Invalid encoding: %d", __func__, pcmEncoding);
+        return AUDIO_FORMAT_INVALID;
+    }
+}
+
 status_t getAudioOffloadInfo(const sp<MetaData>& meta, bool hasVideo,
         bool isStreaming, audio_stream_type_t streamType, audio_offload_info_t *info)
 {
@@ -2423,6 +2496,12 @@ status_t getAudioOffloadInfo(const sp<MetaData>& meta, bool hasVideo,
         return BAD_VALUE;
     } else {
         ALOGV("Mime type \"%s\" mapped to audio_format %d", mime, info->format);
+    }
+
+    int32_t pcmEncoding;
+    if (meta->findInt32(kKeyPcmEncoding, &pcmEncoding)) {
+        info->format = audioFormatFromEncoding(pcmEncoding);
+        ALOGV("audio_format use kKeyPcmEncoding value %d first", info->format);
     }
 
     if (AUDIO_FORMAT_INVALID == info->format) {

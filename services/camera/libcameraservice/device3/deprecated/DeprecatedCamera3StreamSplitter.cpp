@@ -189,6 +189,17 @@ void DeprecatedCamera3StreamSplitter::setHalBufferManager(bool enabled) {
     mUseHalBufManager = enabled;
 }
 
+status_t DeprecatedCamera3StreamSplitter::setTransform(size_t surfaceId, int transform) {
+    Mutex::Autolock lock(mMutex);
+    if (!mOutputs.contains(surfaceId) || mOutputs[surfaceId] == nullptr) {
+        SP_LOGE("%s: No surface at id %zu", __FUNCTION__, surfaceId);
+        return BAD_VALUE;
+    }
+
+    mOutputTransforms[surfaceId] = transform;
+    return OK;
+}
+
 status_t DeprecatedCamera3StreamSplitter::addOutputLocked(size_t surfaceId,
                                                           const sp<Surface>& outputQueue) {
     ATRACE_CALL();
@@ -355,9 +366,13 @@ status_t DeprecatedCamera3StreamSplitter::outputBufferLocked(
         const sp<IGraphicBufferProducer>& output, const BufferItem& bufferItem, size_t surfaceId) {
     ATRACE_CALL();
     status_t res;
+    int transform = bufferItem.mTransform;
+    if (mOutputTransforms.contains(surfaceId)) {
+        transform = mOutputTransforms[surfaceId];
+    }
     IGraphicBufferProducer::QueueBufferInput queueInput(
             bufferItem.mTimestamp, bufferItem.mIsAutoTimestamp, bufferItem.mDataSpace,
-            bufferItem.mCrop, static_cast<int32_t>(bufferItem.mScalingMode), bufferItem.mTransform,
+            bufferItem.mCrop, static_cast<int32_t>(bufferItem.mScalingMode), transform,
             bufferItem.mFence);
 
     IGraphicBufferProducer::QueueBufferOutput queueOutput;
@@ -459,6 +474,12 @@ status_t DeprecatedCamera3StreamSplitter::attachBufferToOutputs(
         mMutex.unlock();
         res = gbp->attachBuffer(&slot, gb);
         mMutex.lock();
+        // During buffer attach 'mMutex' is not held which makes the removal of
+        //"gbp" possible. Check whether this is the case and continue.
+        if (gbp.get() == nullptr) {
+            res = OK;
+            continue;
+        }
         if (res != OK) {
             SP_LOGE("%s: Cannot attachBuffer from GraphicBufferProducer %p: %s (%d)", __FUNCTION__,
                     gbp.get(), strerror(-res), res);
@@ -469,11 +490,6 @@ status_t DeprecatedCamera3StreamSplitter::attachBufferToOutputs(
             SP_LOGE("%s: Slot received %d either bigger than expected maximum %d or negative!",
                     __FUNCTION__, slot, BufferQueue::NUM_BUFFER_SLOTS);
             return BAD_VALUE;
-        }
-        // During buffer attach 'mMutex' is not held which makes the removal of
-        //"gbp" possible. Check whether this is the case and continue.
-        if (mOutputSlots[gbp] == nullptr) {
-            continue;
         }
         auto& outputSlots = *mOutputSlots[gbp];
         if (static_cast<size_t>(slot + 1) > outputSlots.size()) {
@@ -620,8 +636,7 @@ void DeprecatedCamera3StreamSplitter::decrementBufRefCountLocked(uint64_t id, si
         if (detach) {
             res = consumer->detachBuffer(consumerSlot);
         } else {
-            res = consumer->releaseBuffer(consumerSlot, frameNumber, EGL_NO_DISPLAY,
-                                          EGL_NO_SYNC_KHR, tracker_ptr->getMergedFence());
+            res = consumer->releaseBuffer(consumerSlot, frameNumber, tracker_ptr->getMergedFence());
         }
     } else {
         SP_LOGE("%s: consumer has become null!", __FUNCTION__);

@@ -38,6 +38,7 @@
 
 #include "common/CameraDeviceBase.h"
 #include "common/DepthPhotoProcessor.h"
+#include "common/FrameProcessorBase.h"
 #include "device3/BufferUtils.h"
 #include "device3/StatusTracker.h"
 #include "device3/Camera3BufferManager.h"
@@ -63,6 +64,7 @@ using android::camera3::camera_stream_configuration_t;
 using android::camera3::camera_stream_configuration_mode_t;
 using android::camera3::CAMERA_TEMPLATE_COUNT;
 using android::camera3::OutputStreamInfo;
+using android::camera3::SurfaceHolder;
 
 namespace android {
 
@@ -168,7 +170,7 @@ class Camera3Device :
             bool useReadoutTimestamp = false)
             override;
 
-    status_t createStream(const std::vector<sp<Surface>>& consumers,
+    status_t createStream(const std::vector<SurfaceHolder>& consumers,
             bool hasDeferredConsumer, uint32_t width, uint32_t height, int format,
             android_dataspace dataSpace, camera_stream_rotation_t rotation, int *id,
             const std::string& physicalCameraId,
@@ -181,7 +183,6 @@ class Camera3Device :
             ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD,
             int64_t streamUseCase = ANDROID_SCALER_AVAILABLE_STREAM_USE_CASES_DEFAULT,
             int timestampBase = OutputConfiguration::TIMESTAMP_BASE_DEFAULT,
-            int mirrorMode = OutputConfiguration::MIRROR_MODE_AUTO,
             int32_t colorSpace = ANDROID_REQUEST_AVAILABLE_COLOR_SPACE_PROFILES_MAP_UNSPECIFIED,
             bool useReadoutTimestamp = false)
             override;
@@ -194,6 +195,40 @@ class Camera3Device :
     status_t setStreamTransform(int id, int transform) override;
 
     status_t deleteStream(int id) override;
+
+    virtual status_t beginConfigure() override {return OK;};
+
+    virtual status_t getSharedStreamId(const OutputStreamInfo& /*config*/,
+            int* /*streamId*/) override {return INVALID_OPERATION;};
+
+    virtual status_t addSharedSurfaces(int /*streamId*/,
+            const std::vector<android::camera3::OutputStreamInfo>& /*outputInfo*/,
+            const std::vector<SurfaceHolder>& /*surfaces*/,
+            std::vector<int>* /*surfaceIds*/) override {return INVALID_OPERATION;};
+
+    virtual status_t removeSharedSurfaces(int /*streamId*/,
+            const std::vector<size_t>& /*surfaceIds*/) override {return INVALID_OPERATION;};
+
+    virtual status_t setSharedStreamingRequest(
+            const PhysicalCameraSettingsList& /*request*/, const SurfaceMap& /*surfaceMap*/,
+            int32_t* /*sharedReqID*/, int64_t* /*lastFrameNumber = NULL*/) override {
+        return INVALID_OPERATION;
+    };
+
+    virtual status_t clearSharedStreamingRequest(int64_t* /*lastFrameNumber = NULL*/) override {
+        return INVALID_OPERATION;
+    };
+
+    virtual status_t setSharedCaptureRequest(const PhysicalCameraSettingsList& /*request*/,
+            const SurfaceMap& /*surfaceMap*/, int32_t* /*sharedReqID*/,
+            int64_t* /*lastFrameNumber = NULL*/) override {return INVALID_OPERATION;};
+
+    virtual sp<camera2::FrameProcessorBase> getSharedFrameProcessor() override {return nullptr;};
+
+    virtual status_t startStreaming(const int32_t /*reqId*/, const SurfaceMap& /*surfaceMap*/,
+            int32_t* /*sharedReqID*/, int64_t* /*lastFrameNumber = NULL*/)
+            override {return INVALID_OPERATION;};
+
 
     status_t configureStreams(const CameraMetadata& sessionParams,
             int operatingMode =
@@ -213,7 +248,7 @@ class Camera3Device :
     // Transitions to the idle state on success
     status_t waitUntilDrained() override;
 
-    status_t setNotifyCallback(wp<NotificationListener> listener) override;
+    virtual status_t setNotifyCallback(wp<NotificationListener> listener) override;
     bool     willNotify3A() override;
     status_t waitForNextFrame(nsecs_t timeout) override;
     status_t getNextResult(CaptureResult *frame) override;
@@ -247,13 +282,13 @@ class Camera3Device :
      * consumer configuration.
      */
     status_t setConsumerSurfaces(
-            int streamId, const std::vector<sp<Surface>>& consumers,
+            int streamId, const std::vector<SurfaceHolder>& consumers,
             std::vector<int> *surfaceIds /*out*/) override;
 
     /**
      * Update a given stream.
      */
-    status_t updateStream(int streamId, const std::vector<sp<Surface>> &newSurfaces,
+    status_t updateStream(int streamId, const std::vector<SurfaceHolder> &newSurfaces,
             const std::vector<OutputStreamInfo> &outputInfo,
             const std::vector<size_t> &removedSurfaceIds,
             KeyedVector<sp<Surface>, size_t> *outputMap/*out*/);
@@ -367,7 +402,7 @@ class Camera3Device :
 
   protected:
     status_t disconnectImpl();
-    static status_t removeFwkOnlyRegionKeys(CameraMetadata *request);
+    static status_t removeFwkOnlyKeys(CameraMetadata *request);
 
     float getMaxPreviewFps(sp<camera3::Camera3OutputStreamInterface> stream);
 
@@ -750,6 +785,22 @@ class Camera3Device :
     };
 
     /**
+     * Get the first repeating request in the ongoing repeating request list.
+     */
+    const sp<CaptureRequest> getOngoingRepeatingRequestLocked();
+
+    /**
+     * Update the first repeating request in the ongoing repeating request list
+     * with the surface map provided.
+     */
+    status_t updateOngoingRepeatingRequestLocked(const SurfaceMap& surfaceMap);
+
+    /**
+     * Get the repeating request last frame number.
+     */
+    int64_t getRepeatingRequestLastFrameNumberLocked();
+
+    /**
      * Get the last request submitted to the hal by the request thread.
      *
      * Must be called with mLock held.
@@ -1054,6 +1105,20 @@ class Camera3Device :
          **/
         void wakeupLatestRequest(bool latestRequestFailed, int32_t latestRequestId);
 
+        /**
+         * Get the first repeating request in the ongoing repeating request list.
+         */
+        const sp<CaptureRequest> getOngoingRepeatingRequest();
+
+        /**
+         * Update the first repeating request in the ongoing repeating request list
+         * with the surface map provided.
+         */
+        status_t updateOngoingRepeatingRequest(const SurfaceMap& surfaceMap);
+
+        // Get the repeating request last frame number.
+        int64_t getRepeatingRequestLastFrameNumber();
+
       protected:
 
         virtual bool threadLoop();
@@ -1275,8 +1340,8 @@ class Camera3Device :
             bool callback, nsecs_t minExpectedDuration, nsecs_t maxExpectedDuration,
             bool isFixedFps, const std::set<std::set<std::string>>& physicalCameraIds,
             bool isStillCapture, bool isZslCapture, bool rotateAndCropAuto, bool autoframingAuto,
-            const std::set<std::string>& cameraIdsWithZoom, const SurfaceMap& outputSurfaces,
-            nsecs_t requestTimeNs);
+            const std::set<std::string>& cameraIdsWithZoom, bool useZoomRatio,
+            const SurfaceMap& outputSurfaces, nsecs_t requestTimeNs);
 
     /**
      * Tracking for idle detection
@@ -1644,6 +1709,8 @@ class Camera3Device :
     sp<Camera3DeviceInjectionMethods> mInjectionMethods;
 
     void overrideStreamUseCaseLocked();
+    status_t deriveAndSetTransformLocked(camera3::Camera3OutputStreamInterface& stream,
+                                   int mirrorMode, int surfaceId);
 
 
 }; // class Camera3Device
