@@ -370,6 +370,7 @@ binder::Status CameraDeviceClient::startStreaming(const std::vector<int>& stream
         mSharedStreamingRequest = {sharedReqID, submitInfo->mRequestId};
     }
 
+    markClientActive();
     ALOGV("%s: Camera %s: End of function", __FUNCTION__, mCameraIdStr.c_str());
     return binder::Status::ok();
 }
@@ -698,6 +699,7 @@ binder::Status CameraDeviceClient::submitRequestList(
             mStreamingRequestId = submitInfo->mRequestId;
             if (flags::camera_multi_client() && mSharedMode) {
                 mSharedStreamingRequest = {sharedReqID, submitInfo->mRequestId};
+                markClientActive();
             }
         }
     } else {
@@ -718,6 +720,7 @@ binder::Status CameraDeviceClient::submitRequestList(
         }
         if (flags::camera_multi_client() && mSharedMode) {
             mSharedRequestMap[sharedReqID] = submitInfo->mRequestId;
+            markClientActive();
         }
         ALOGV("%s: requestId = %d ", __FUNCTION__, submitInfo->mRequestId);
     }
@@ -2238,12 +2241,18 @@ void CameraDeviceClient::notifyError(int32_t errorCode,
     bool skipClientNotification = false;
     if (flags::camera_multi_client() && mSharedMode && (resultExtras.requestId != -1)) {
         int clientReqId;
-        if (!matchClientRequest(resultExtras, &clientReqId)) {
+        bool matchStreamingRequest = matchSharedStreamingRequest(resultExtras.requestId);
+        bool matchCaptureRequest = matchSharedCaptureRequest(resultExtras.requestId);
+        if (matchStreamingRequest) {
+            clientReqId = mSharedStreamingRequest.second;
+        } else if (matchCaptureRequest) {
+            clientReqId = mSharedRequestMap[resultExtras.requestId];
+            mSharedRequestMap.erase(resultExtras.requestId);
+        } else {
             return;
         }
         CaptureResultExtras mutableResultExtras = resultExtras;
         mutableResultExtras.requestId = clientReqId;
-        mSharedRequestMap.erase(resultExtras.requestId);
         if (remoteCb != 0) {
             remoteCb->onDeviceError(errorCode, mutableResultExtras);
         }
@@ -2314,7 +2323,13 @@ void CameraDeviceClient::notifyShutter(const CaptureResultExtras& resultExtras,
     CaptureResultExtras mutableResultExtras = resultExtras;
     if (flags::camera_multi_client() && mSharedMode) {
         int clientReqId;
-        if (!matchClientRequest(resultExtras, &clientReqId)) {
+        bool matchStreamingRequest = matchSharedStreamingRequest(resultExtras.requestId);
+        bool matchCaptureRequest = matchSharedCaptureRequest(resultExtras.requestId);
+        if (matchStreamingRequest) {
+            clientReqId = mSharedStreamingRequest.second;
+        } else if (matchCaptureRequest) {
+            clientReqId = mSharedRequestMap[resultExtras.requestId];
+        } else {
             return;
         }
         mutableResultExtras.requestId = clientReqId;
@@ -2419,26 +2434,28 @@ void CameraDeviceClient::detachDevice() {
     mCameraServiceProxyWrapper->logClose(mCameraIdStr, closeLatencyMs, hasDeviceError);
 }
 
-bool CameraDeviceClient::matchClientRequest(const CaptureResultExtras& resultExtras,
-        int* clientReqId) {
+bool CameraDeviceClient::matchSharedStreamingRequest(int reqId) {
     if (!flags::camera_multi_client() || !mSharedMode) {
-        *clientReqId = resultExtras.requestId;
-        return true;
+        return false;
     }
-
     // In shared mode, check if the result req id matches the streaming request
     // sent by client.
-    if (resultExtras.requestId == mSharedStreamingRequest.first) {
-        *clientReqId = mSharedStreamingRequest.second;
+    if (reqId == mSharedStreamingRequest.first) {
         return true;
+    }
+    return false;
+}
+
+bool CameraDeviceClient::matchSharedCaptureRequest(int reqId) {
+    if (!flags::camera_multi_client() || !mSharedMode) {
+        return false;
     }
     // In shared mode, only primary clients can send the capture request. If the
     // result req id does not match the streaming request id, check against the
     // capture request ids sent by the primary client.
     if (mIsPrimaryClient) {
-        auto iter = mSharedRequestMap.find(resultExtras.requestId);
+        auto iter = mSharedRequestMap.find(reqId);
         if (iter != mSharedRequestMap.end()) {
-            *clientReqId = iter->second;
             return true;
         }
     }
@@ -2449,21 +2466,29 @@ void CameraDeviceClient::onResultAvailable(const CaptureResult& result) {
     ATRACE_CALL();
     ALOGV("%s E", __FUNCTION__);
     CaptureResult mutableResult = result;
+    bool matchStreamingRequest, matchCaptureRequest, sharedStreamingLastFrame;
     if (flags::camera_multi_client() && mSharedMode) {
         int clientReqId;
-        if (!matchClientRequest(result.mResultExtras, &clientReqId)) {
+        matchStreamingRequest = matchSharedStreamingRequest(result.mResultExtras.requestId);
+        matchCaptureRequest = matchSharedCaptureRequest(result.mResultExtras.requestId);
+        if (matchStreamingRequest) {
+            clientReqId = mSharedStreamingRequest.second;
+            // When a client stops streaming using cancelRequest, we still need to deliver couple
+            // more capture results to the client, till the lastframe number returned by the
+            // cancelRequest. Therefore, only clean the shared streaming request once all the frames for
+            // the repeating request have been delivered to the client.
+            sharedStreamingLastFrame = (mStreamingRequestId == REQUEST_ID_NONE)
+                    && (result.mResultExtras.frameNumber >= mStreamingRequestLastFrameNumber);
+            if (sharedStreamingLastFrame) {
+                mSharedStreamingRequest.first = REQUEST_ID_NONE;
+                mSharedStreamingRequest.second = REQUEST_ID_NONE;
+            }
+        } else if (matchCaptureRequest) {
+            clientReqId = mSharedRequestMap[result.mResultExtras.requestId];
+            mSharedRequestMap.erase(result.mResultExtras.requestId);
+        } else {
             return;
         }
-        // When a client stops streaming using cancelRequest, we still need to deliver couple
-        // more capture results to the client, till the lastframe number returned by the
-        // cancelRequest. Therefore, only clean the shared streaming request once all the frames for
-        // the repeating request have been delivered to the client.
-        if ((mStreamingRequestId == REQUEST_ID_NONE) &&
-                (result.mResultExtras.frameNumber > mStreamingRequestLastFrameNumber)) {
-            mSharedStreamingRequest.first = REQUEST_ID_NONE;
-            mSharedStreamingRequest.second = REQUEST_ID_NONE;
-        }
-        mSharedRequestMap.erase(result.mResultExtras.requestId);
         mutableResult.mResultExtras.requestId = clientReqId;
         if (mutableResult.mMetadata.update(ANDROID_REQUEST_ID, &clientReqId, 1) != OK) {
             ALOGE("%s Failed to set request ID in metadata.", __FUNCTION__);
@@ -2476,6 +2501,13 @@ void CameraDeviceClient::onResultAvailable(const CaptureResult& result) {
     if (remoteCb != NULL) {
         remoteCb->onResultReceived(mutableResult.mMetadata, mutableResult.mResultExtras,
                 mutableResult.mPhysicalMetadatas);
+        if (flags::camera_multi_client() && mSharedMode) {
+            // If all the capture requests for this client has been processed,
+            // send onDeviceidle callback.
+            if ((mSharedStreamingRequest.first == REQUEST_ID_NONE) && mSharedRequestMap.empty() ) {
+                markClientIdle();
+            }
+        }
     }
 
     // Access to the composite stream map must be synchronized
@@ -2483,6 +2515,36 @@ void CameraDeviceClient::onResultAvailable(const CaptureResult& result) {
     for (size_t i = 0; i < mCompositeStreamMap.size(); i++) {
         mCompositeStreamMap.valueAt(i)->onResultAvailable(mutableResult);
     }
+}
+
+void CameraDeviceClient::markClientActive() {
+    if (mDeviceActive) {
+        // Already in active state.
+        return;
+    }
+    status_t res = startCameraStreamingOps();
+    if (res != OK) {
+        ALOGE("%s: Camera %s: Error starting camera streaming ops: %d", __FUNCTION__,
+                mCameraIdStr.c_str(), res);
+    }
+    mDeviceActive = true;
+}
+
+void CameraDeviceClient::markClientIdle() {
+    if (!mDeviceActive) {
+        // Already in idle state.
+        return;
+    }
+    sp<hardware::camera2::ICameraDeviceCallbacks> remoteCb = mRemoteCallback;
+    if (remoteCb != NULL) {
+        remoteCb->onDeviceIdle();
+    }
+    status_t res = finishCameraStreamingOps();
+    if (res != OK) {
+        ALOGE("%s: Camera %s: Error finishing streaming ops: %d", __FUNCTION__,
+                mCameraIdStr.c_str(), res);
+    }
+    mDeviceActive = false;
 }
 
 binder::Status CameraDeviceClient::checkPidStatus(const char* checkLocation) {

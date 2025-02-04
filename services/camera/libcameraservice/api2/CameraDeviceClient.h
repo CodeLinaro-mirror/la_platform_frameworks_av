@@ -325,7 +325,10 @@ private:
             /*out*/SurfaceMap* surfaceMap, /*out*/Vector<int32_t>* streamIds,
             /*out*/int32_t*  currentStreamId);
 
-    bool matchClientRequest(const CaptureResultExtras& resultExtras, int* clientReqId);
+    bool matchSharedStreamingRequest(int reqId);
+    bool matchSharedCaptureRequest(int reqId);
+    void markClientActive();
+    void markClientIdle();
 
     // IGraphicsBufferProducer binder -> Stream ID + Surface ID for output streams
     KeyedVector<sp<IBinder>, StreamSurfaceId> mStreamMap;
