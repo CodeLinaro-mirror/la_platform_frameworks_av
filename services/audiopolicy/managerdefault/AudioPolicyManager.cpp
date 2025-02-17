@@ -9490,4 +9490,59 @@ void AudioPolicyManager::chkDpConnAndAllowedForVoice(audio_devices_t device,
     }
 }
 
+void AudioPolicyManager::updateClientsInternalMute(
+        const sp<android::SwAudioOutputDescriptor> &desc) {
+    if (!desc->isBitPerfect() ||
+        !com::android::media::audioserver::
+                fix_concurrent_playback_behavior_with_bit_perfect_client()) {
+        // This is only used for bit perfect output now.
+        return;
+    }
+    sp<TrackClientDescriptor> bitPerfectClient = nullptr;
+    bool bitPerfectClientInternalMute = false;
+    std::vector<media::TrackInternalMuteInfo> clientsInternalMute;
+    for (const sp<TrackClientDescriptor>& client : desc->getActiveClients()) {
+        if ((client->flags() & AUDIO_OUTPUT_FLAG_BIT_PERFECT) != AUDIO_OUTPUT_FLAG_NONE) {
+            bitPerfectClient = client;
+            continue;
+        }
+        bool muted = false;
+        if (client->stream() == AUDIO_STREAM_SYSTEM) {
+            // System sound is muted.
+            muted = true;
+        } else {
+            bitPerfectClientInternalMute = true;
+        }
+        if (client->setInternalMute(muted)) {
+            auto result = legacy2aidl_audio_port_handle_t_int32_t(client->portId());
+            if (!result.ok()) {
+                ALOGE("%s, failed to convert port id(%d) to aidl", __func__, client->portId());
+                continue;
+            }
+            media::TrackInternalMuteInfo info;
+            info.portId = result.value();
+            info.muted = client->getInternalMute();
+            clientsInternalMute.push_back(std::move(info));
+        }
+    }
+    if (bitPerfectClient != nullptr &&
+        bitPerfectClient->setInternalMute(bitPerfectClientInternalMute)) {
+        auto result = legacy2aidl_audio_port_handle_t_int32_t(bitPerfectClient->portId());
+        if (result.ok()) {
+            media::TrackInternalMuteInfo info;
+            info.portId = result.value();
+            info.muted = bitPerfectClient->getInternalMute();
+            clientsInternalMute.push_back(std::move(info));
+        } else {
+            ALOGE("%s, failed to convert port id(%d) of bit perfect client to aidl",
+                  __func__, bitPerfectClient->portId());
+        }
+    }
+    if (!clientsInternalMute.empty()) {
+        if (status_t status = mpClientInterface->setTracksInternalMute(clientsInternalMute);
+                status != NO_ERROR) {
+            ALOGE("%s, failed to update tracks internal mute, err=%d", __func__, status);
+        }
+    }
+}
 } // namespace android
