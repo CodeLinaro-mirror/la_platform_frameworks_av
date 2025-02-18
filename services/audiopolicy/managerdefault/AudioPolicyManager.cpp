@@ -1398,6 +1398,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                     policyDesc = nullptr;
                 } else {
                     policyDesc = mOutputs.valueFor(newOutput);
+                    primaryMix->setOutput(policyDesc);
                     mDirectOutput = policyDesc;
                 }
             }
