@@ -1479,7 +1479,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                 status = openDirectOutput(
                         *stream, session, config,
                         (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT),
-                        DeviceVector(deviceDesc), &newOutput);
+                        DeviceVector(deviceDesc), &newOutput, *resultAttr);
                 if (status != NO_ERROR) {
                     policyDesc = nullptr;
                 } else {
@@ -1490,9 +1490,11 @@ status_t AudioPolicyManager::getOutputForAttrInt(
             if (policyDesc != nullptr) {
                 policyDesc->mPolicyMix = primaryMix;
                 *output = policyDesc->mIoHandle;
-                *selectedDeviceId = deviceDesc != 0 ? deviceDesc->getId() : AUDIO_PORT_HANDLE_NONE;
+                if (deviceDesc != nullptr) {
+                    selectedDeviceIds->push_back(deviceDesc->getId());
+                }
 
-                ALOGD("getOutputForAttr() returns output %d selectedDeviceId %d", *output, *selectedDeviceId);
+                ALOGD("getOutputForAttr() returns output %d selectedDeviceId %s", *output, toString(*selectedDeviceIds).c_str());
                 if (resultAttr->usage == AUDIO_USAGE_VIRTUAL_SOURCE) {
                     *outputType = API_OUT_MIX_PLAYBACK;
                 } else {
@@ -1669,7 +1671,7 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
     checkAndUpdateOffloadInfoForDirectTracks(attr, stream, &directConfig, flags);
 
     status_t status = getOutputForAttrInt(&resultAttr, output, session, attr, stream, uid,
-            &directConfig, flags, selectedDeviceId, &isRequestedDeviceForExclusiveUse,
+            &directConfig, flags, selectedDeviceIds, &isRequestedDeviceForExclusiveUse,
             secondaryOutputs != nullptr ? &secondaryMixes : nullptr, outputType, isSpatialized,
             isBitPerfect);
     if (status != NO_ERROR) {
@@ -1815,8 +1817,7 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
         return NAME_NOT_FOUND;
     }
 
-
-    auto outputDesc = sp<SwAudioOutputDescriptor>::make(profile, mpClientInterface);
+    outputDesc = sp<SwAudioOutputDescriptor>::make(profile, mpClientInterface);
 
     // An MSD patch may be using the only output stream that can service this request. Release
     // all MSD patches to prioritize this request over any active output on MSD.
@@ -3378,7 +3379,7 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             halInputSource = AUDIO_SOURCE_VOICE_RECOGNITION;
         }
     } else if (attributes.source == AUDIO_SOURCE_VOICE_COMMUNICATION &&
-               audio_is_linear_pcm(config->format)) {
+               audio_is_linear_pcm(config.format)) {
         if ((flags & AUDIO_INPUT_FLAG_MMAP_NOIRQ) != 0) {
             flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_MMAP_NOIRQ;
         }
@@ -5295,20 +5296,24 @@ bool AudioPolicyManager::isOffloadPossible(const audio_offload_info_t &offloadIn
         return false;
     }
 
-    //If duration is less than minimum value defined in property, return false
-    const int min_duration_secs = property_get_int32(
-            "audio.offload.min.duration.secs", -1 /* default_value */);
-    if (!durationIgnored) {
-        if (min_duration_secs >= 0) {
-            if (offloadInfo.duration_us < min_duration_secs * 1000000LL) {
-                ALOGV("%s: Offload denied by duration < audio.offload.min.duration.secs(=%d)",
-                      __func__, min_duration_secs);
-                return false;
+    if (isOffloadSupportedInternal(offloadInfo)) {
+	    ALOGD("%s: offload is support internal, skip check duration", __func__);
+    } else {
+        //If duration is less than minimum value defined in property, return false
+        const int min_duration_secs = property_get_int32(
+                "audio.offload.min.duration.secs", -1 /* default_value */);
+        if (!durationIgnored) {
+            if (min_duration_secs >= 0) {
+                if (offloadInfo.duration_us < min_duration_secs * 1000000LL) {
+                    ALOGV("%s: Offload denied by duration < audio.offload.min.duration.secs(=%d)",
+                          __func__, min_duration_secs);
+                    return AUDIO_OFFLOAD_NOT_SUPPORTED;
+                }
+            } else if (offloadInfo.duration_us < OFFLOAD_DEFAULT_MIN_DURATION_SECS * 1000000) {
+                ALOGV("%s: Offload denied by duration < default min(=%u)",
+                       __func__, OFFLOAD_DEFAULT_MIN_DURATION_SECS);
+                return AUDIO_OFFLOAD_NOT_SUPPORTED;
             }
-        } else if (offloadInfo.duration_us < OFFLOAD_DEFAULT_MIN_DURATION_SECS * 1000000) {
-            ALOGV("%s: Offload denied by duration < default min(=%u)",
-                  __func__, OFFLOAD_DEFAULT_MIN_DURATION_SECS);
-            return false;
         }
     }
     }
@@ -9899,6 +9904,62 @@ void AudioPolicyManager::chkDpConnAndAllowedForVoice(audio_devices_t device,
             }
         }
         mEngine->setDpConnAndAllowedForVoice(connect & allowed);
+    }
+}
+
+void AudioPolicyManager::updateClientsInternalMute(
+        const sp<android::SwAudioOutputDescriptor> &desc) {
+    if (!desc->isBitPerfect() ||
+        !com::android::media::audioserver::
+                fix_concurrent_playback_behavior_with_bit_perfect_client()) {
+        // This is only used for bit perfect output now.
+        return;
+    }
+    sp<TrackClientDescriptor> bitPerfectClient = nullptr;
+    bool bitPerfectClientInternalMute = false;
+    std::vector<media::TrackInternalMuteInfo> clientsInternalMute;
+    for (const sp<TrackClientDescriptor>& client : desc->getActiveClients()) {
+        if ((client->flags() & AUDIO_OUTPUT_FLAG_BIT_PERFECT) != AUDIO_OUTPUT_FLAG_NONE) {
+            bitPerfectClient = client;
+            continue;
+        }
+        bool muted = false;
+        if (client->stream() == AUDIO_STREAM_SYSTEM) {
+            // System sound is muted.
+            muted = true;
+        } else {
+            bitPerfectClientInternalMute = true;
+        }
+        if (client->setInternalMute(muted)) {
+            auto result = legacy2aidl_audio_port_handle_t_int32_t(client->portId());
+            if (!result.ok()) {
+                ALOGE("%s, failed to convert port id(%d) to aidl", __func__, client->portId());
+                continue;
+            }
+            media::TrackInternalMuteInfo info;
+            info.portId = result.value();
+            info.muted = client->getInternalMute();
+            clientsInternalMute.push_back(std::move(info));
+        }
+    }
+    if (bitPerfectClient != nullptr &&
+        bitPerfectClient->setInternalMute(bitPerfectClientInternalMute)) {
+        auto result = legacy2aidl_audio_port_handle_t_int32_t(bitPerfectClient->portId());
+        if (result.ok()) {
+            media::TrackInternalMuteInfo info;
+            info.portId = result.value();
+            info.muted = bitPerfectClient->getInternalMute();
+            clientsInternalMute.push_back(std::move(info));
+        } else {
+            ALOGE("%s, failed to convert port id(%d) of bit perfect client to aidl",
+                  __func__, bitPerfectClient->portId());
+        }
+    }
+    if (!clientsInternalMute.empty()) {
+        if (status_t status = mpClientInterface->setTracksInternalMute(clientsInternalMute);
+                status != NO_ERROR) {
+            ALOGE("%s, failed to update tracks internal mute, err=%d", __func__, status);
+        }
     }
 }
 

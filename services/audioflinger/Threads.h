@@ -1261,7 +1261,7 @@ public:
                     return mMixerChannelMask;
                 }
 
-    virtual     status_t    getTimestamp_l(AudioTimestamp& timestamp);
+    virtual     status_t    getTimestamp_l(AudioTimestamp& timestamp) REQUIRES(mutex(), ThreadBase_ThreadLoop);
 
     void addPatchTrack(const sp<IAfPatchTrack>& track) final EXCLUDES_ThreadBase_Mutex;
     void deletePatchTrack(const sp<IAfPatchTrack>& track) final EXCLUDES_ThreadBase_Mutex;
