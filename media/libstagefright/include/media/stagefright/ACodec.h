@@ -27,6 +27,7 @@
 #include <media/IOMX.h>
 #include <media/stagefright/AHierarchicalStateMachine.h>
 #include <media/stagefright/CodecBase.h>
+#include <media/stagefright/FrameRenderTracker.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/SkipCutBuffer.h>
 #include <ui/GraphicBuffer.h>

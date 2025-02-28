@@ -32,7 +32,6 @@ namespace android {
 // ----------------------------------------------------------------------------
 AudioStreamOut::AudioStreamOut(AudioHwDevice *dev)
         : audioHwDev(dev)
-        , flags(flags)
 {
 }
 

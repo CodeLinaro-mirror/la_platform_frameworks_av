@@ -6776,7 +6776,6 @@ DirectOutputThread::DirectOutputThread(const sp<IAfThreadCallback>& afThreadCall
         AudioStreamOut* output, audio_io_handle_t id, ThreadBase::type_t type, bool systemReady,
         const audio_offload_info_t& offloadInfo)
     :   PlaybackThread(afThreadCallback, output, id, type, systemReady)
-    , mOffloadInfo(offloadInfo)
         , mOffloadInfo(offloadInfo)
         , mVolumeShaperActive(false)
         , mFramesWrittenAtStandby(0)
