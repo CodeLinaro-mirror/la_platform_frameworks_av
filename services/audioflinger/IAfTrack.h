@@ -22,7 +22,6 @@
 #include <audiomanager/IAudioManager.h>
 #include <binder/IMemory.h>
 #include <media/AppOpsSession.h>
-#include <mediautils/SingleThreadExecutor.h>
 #include <datapath/VolumePortInterface.h>
 #include <fastpath/FastMixerDumpState.h>
 #include <media/AudioSystem.h>
@@ -269,10 +268,9 @@ class AfPlaybackCommon : public virtual VolumePortInterface {
     using AppOpsSession = media::permission::AppOpsSession<media::permission::DefaultAppOpsFacade>;
 
   public:
-    AfPlaybackCommon(IAfTrackBase& self, IAfThreadBase& thread, float volume, bool muted,
+    AfPlaybackCommon(IAfTrackBase& self, IAfThreadCallback& thread, float volume, bool muted,
                      const audio_attributes_t& attr,
                      const AttributionSourceState& attributionSource,
-                     bool isOffloadOrMmap,
                      bool shouldPlaybackHarden = true);
 
     /**
@@ -314,9 +312,11 @@ class AfPlaybackCommon : public virtual VolumePortInterface {
     void endPlaybackDelivery();
 
   private:
-    const IAfTrackBase& mSelf;
-
-    std::optional<mediautils::SingleThreadExecutor> mExecutor;
+    // non-const for signal
+    IAfTrackBase& mSelf;
+    // TODO: replace PersistableBundle with own struct
+    // access these two variables only when holding player thread lock.
+    std::unique_ptr<os::PersistableBundle> mMuteEventExtras;
     // TODO: atomic necessary if underneath thread lock?
     std::atomic<mute_state_t> mMuteState;
     std::atomic<bool> mMutedFromPort;
@@ -328,7 +328,6 @@ class AfPlaybackCommon : public virtual VolumePortInterface {
     std::atomic<bool> mHasOpControlPartial {true};
     mutable std::atomic<bool> mPlaybackHardeningLogged {false};
     // the ref behind the optional is const
-    // this member is last in decl order to ensure it is destroyed first
     std::optional<AppOpsSession> mOpControlSession;
 };
 

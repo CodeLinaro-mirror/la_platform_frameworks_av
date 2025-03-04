@@ -247,14 +247,14 @@ void AsyncCodecHandler::onMessageReceived(const sp<AMessage>& msg) {
         case FrameDecoder::kWhatCallbackNotify:
             int32_t callbackId;
             if (!msg->findInt32("callbackID", &callbackId)) {
-                ALOGD("kWhatCallbackNotify: callbackID is expected.");
+                ALOGE("kWhatCallbackNotify: callbackID is expected.");
                 break;
             }
             switch (callbackId) {
                 case MediaCodec::CB_INPUT_AVAILABLE: {
                     int32_t index;
                     if (!msg->findInt32("index", &index)) {
-                        ALOGD("CB_INPUT_AVAILABLE: index is expected.");
+                        ALOGE("CB_INPUT_AVAILABLE: index is expected.");
                         break;
                     }
                     ALOGD("CB_INPUT_AVAILABLE received, index is %d", index);
@@ -269,7 +269,7 @@ void AsyncCodecHandler::onMessageReceived(const sp<AMessage>& msg) {
                     int64_t timeUs;
                     CHECK(msg->findInt32("index", &index));
                     CHECK(msg->findInt64("timeUs", &timeUs));
-                    ALOGV("CB_OUTPUT_AVAILABLE received, index is %d", index);
+                    ALOGD("CB_OUTPUT_AVAILABLE received, index is %d", index);
                     sp<FrameDecoder> frameDecoder = mFrameDecoder.promote();
                     if (frameDecoder != nullptr) {
                         frameDecoder->handleOutputBufferAsync(index, timeUs);
@@ -277,10 +277,10 @@ void AsyncCodecHandler::onMessageReceived(const sp<AMessage>& msg) {
                     break;
                 }
                 case MediaCodec::CB_OUTPUT_FORMAT_CHANGED: {
-                    ALOGV("CB_OUTPUT_FORMAT_CHANGED received");
+                    ALOGD("CB_OUTPUT_FORMAT_CHANGED received");
                     sp<AMessage> format;
                     if (!msg->findMessage("format", &format) || format == nullptr) {
-                        ALOGD("CB_OUTPUT_FORMAT_CHANGED: format is expected.");
+                        ALOGE("CB_OUTPUT_FORMAT_CHANGED: format is expected.");
                         break;
                     }
                     sp<FrameDecoder> frameDecoder = mFrameDecoder.promote();
@@ -294,38 +294,25 @@ void AsyncCodecHandler::onMessageReceived(const sp<AMessage>& msg) {
                     int32_t actionCode;
                     AString detail;
                     if (!msg->findInt32("err", &err)) {
-                        ALOGD("CB_ERROR: err is expected.");
+                        ALOGE("CB_ERROR: err is expected.");
                         break;
                     }
                     if (!msg->findInt32("actionCode", &actionCode)) {
-                        ALOGD("CB_ERROR: actionCode is expected.");
+                        ALOGE("CB_ERROR: actionCode is expected.");
                         break;
                     }
                     msg->findString("detail", &detail);
-                    ALOGI("Codec reported error(0x%x/%s), actionCode(%d), detail(%s)", err,
+                    ALOGE("Codec reported error(0x%x/%s), actionCode(%d), detail(%s)", err,
                           StrMediaError(err).c_str(), actionCode, detail.c_str());
                     break;
                 }
-                case MediaCodec::CB_REQUIRED_RESOURCES_CHANGED:
-                case MediaCodec::CB_METRICS_FLUSHED:
-                {
-                    // Nothing to do. Informational. Safe to ignore.
-                    break;
-                }
-
-                case MediaCodec::CB_LARGE_FRAME_OUTPUT_AVAILABLE:
-                // unexpected as we are not using large frames
-                case MediaCodec::CB_CRYPTO_ERROR:
-                // unexpected as we are not using crypto
                 default:
-                {
-                    ALOGD("kWhatCallbackNotify: callbackID(%d) is unexpected.", callbackId);
+                    ALOGE("kWhatCallbackNotify: callbackID(%d) is unexpected.", callbackId);
                     break;
-                }
             }
             break;
         default:
-            ALOGD("unexpected message received: %s", msg->debugString().c_str());
+            ALOGE("unexpected message received: %s", msg->debugString().c_str());
             break;
     }
 }

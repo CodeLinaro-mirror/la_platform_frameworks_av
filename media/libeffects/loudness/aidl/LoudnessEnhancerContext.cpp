@@ -69,15 +69,34 @@ IEffect::Status LoudnessEnhancerContext::process(float* in, float* out, int samp
     constexpr float scale = 1 << 15;  // power of 2 is lossless conversion to int16_t range
     constexpr float inverseScale = 1.f / scale;
     const float inputAmp = pow(10, mGain / 2000.0f) * scale;
+    float leftSample, rightSample;
+
     if (mCompressor != nullptr) {
-        const size_t channelCount = aidl::android::hardware::audio::common::getChannelCount(
-                mCommon.input.base.channelMask);
-        const size_t frameCount = samples / channelCount;
-        mCompressor->Compress(channelCount, inputAmp, inverseScale, in, frameCount);
+        for (int inIdx = 0; inIdx < samples; inIdx += 2) {
+            // makeup gain is applied on the input of the compressor
+            leftSample = inputAmp * in[inIdx];
+            rightSample = inputAmp * in[inIdx + 1];
+            mCompressor->Compress(&leftSample, &rightSample);
+            in[inIdx] = leftSample * inverseScale;
+            in[inIdx + 1] = rightSample * inverseScale;
+        }
+    } else {
+        for (int inIdx = 0; inIdx < samples; inIdx += 2) {
+            leftSample = inputAmp * in[inIdx];
+            rightSample = inputAmp * in[inIdx + 1];
+            in[inIdx] = leftSample * inverseScale;
+            in[inIdx + 1] = rightSample * inverseScale;
+        }
     }
+    bool accumulate = false;
     if (in != out) {
-        // nit: update Compress() to write to out.
-        memcpy(out, in, samples * sizeof(float));
+        for (int i = 0; i < samples; i++) {
+            if (accumulate) {
+                out[i] += in[i];
+            } else {
+                out[i] = in[i];
+            }
+        }
     }
     return {STATUS_OK, samples, samples};
 }

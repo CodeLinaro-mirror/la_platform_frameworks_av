@@ -142,7 +142,7 @@ status_t FrameCaptureLayer::init() {
     }
 
     mConsumer = consumer;
-    mSurface = sp<Surface>::make(producer);
+    mSurface = new Surface(producer);
 
     return OK;
 }

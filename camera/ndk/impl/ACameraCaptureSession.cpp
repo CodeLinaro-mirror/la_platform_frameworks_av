@@ -97,7 +97,6 @@ ACameraCaptureSession::stopRepeating() {
     dev->lockDeviceForSessionOps();
     {
         if (dev->isSharedMode() && !dev->isPrimaryClient()) {
-            dev->unlockDevice();
             return ACAMERA_ERROR_UNSUPPORTED_OPERATION;
         }
         Mutex::Autolock _l(mSessionLock);
@@ -139,11 +138,11 @@ ACameraCaptureSession::abortCaptures() {
         ALOGE("Error: Device associated with session %p has been closed!", this);
         return ACAMERA_ERROR_SESSION_CLOSED;
     }
+
     camera_status_t ret;
     dev->lockDeviceForSessionOps();
     {
         if (dev->isSharedMode() && !dev->isPrimaryClient()) {
-            dev->unlockDevice();
             return ACAMERA_ERROR_UNSUPPORTED_OPERATION;
         }
         Mutex::Autolock _l(mSessionLock);
@@ -168,7 +167,6 @@ camera_status_t ACameraCaptureSession::updateOutputConfiguration(ACaptureSession
     dev->lockDeviceForSessionOps();
     {
         if (dev->isSharedMode()) {
-            dev->unlockDevice();
             return ACAMERA_ERROR_UNSUPPORTED_OPERATION;
         }
         Mutex::Autolock _l(mSessionLock);
@@ -193,7 +191,6 @@ camera_status_t ACameraCaptureSession::prepare(ANativeWindow* window) {
     dev->lockDeviceForSessionOps();
     {
         if (dev->isSharedMode()) {
-            dev->unlockDevice();
             return ACAMERA_ERROR_UNSUPPORTED_OPERATION;
         }
         Mutex::Autolock _l(mSessionLock);

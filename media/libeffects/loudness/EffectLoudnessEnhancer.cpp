@@ -103,9 +103,7 @@ int LE_setConfig(LoudnessEnhancerContext *pContext, effect_config_t *pConfig)
     if (pConfig->inputCfg.samplingRate != pConfig->outputCfg.samplingRate) return -EINVAL;
     if (pConfig->inputCfg.channels != pConfig->outputCfg.channels) return -EINVAL;
     if (pConfig->inputCfg.format != pConfig->outputCfg.format) return -EINVAL;
-    if (audio_channel_count_from_out_mask(pConfig->inputCfg.channels) > FCC_LIMIT) {
-        return -EINVAL;
-    }
+    if (pConfig->inputCfg.channels != AUDIO_CHANNEL_OUT_STEREO) return -EINVAL;
     if (pConfig->outputCfg.accessMode != EFFECT_BUFFER_ACCESS_WRITE &&
             pConfig->outputCfg.accessMode != EFFECT_BUFFER_ACCESS_ACCUMULATE) return -EINVAL;
     if (pConfig->inputCfg.format != kProcessFormat) return -EINVAL;
@@ -280,22 +278,27 @@ int LE_process(
     }
 
     //ALOGV("LE about to process %d samples", inBuffer->frameCount);
+    uint16_t inIdx;
     constexpr float scale = 1 << 15; // power of 2 is lossless conversion to int16_t range
     constexpr float inverseScale = 1.f / scale;
     const float inputAmp = pow(10, pContext->mTargetGainmB/2000.0f) * scale;
-    const size_t channelCount =
-            audio_channel_count_from_out_mask(pContext->mConfig.outputCfg.channels);
-    pContext->mCompressor->Compress(
-            channelCount, inputAmp, inverseScale, inBuffer->f32, inBuffer->frameCount);
+    float leftSample, rightSample;
+    for (inIdx = 0 ; inIdx < inBuffer->frameCount ; inIdx++) {
+        // makeup gain is applied on the input of the compressor
+        leftSample  = inputAmp * inBuffer->f32[2*inIdx];
+        rightSample = inputAmp * inBuffer->f32[2*inIdx +1];
+        pContext->mCompressor->Compress(&leftSample, &rightSample);
+        inBuffer->f32[2*inIdx]    = leftSample * inverseScale;
+        inBuffer->f32[2*inIdx +1] = rightSample * inverseScale;
+    }
 
     if (inBuffer->raw != outBuffer->raw) {
-        const size_t sampleCount = outBuffer->frameCount * channelCount;
         if (pContext->mConfig.outputCfg.accessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE) {
-            for (size_t i = 0; i < sampleCount; i++) {
+            for (size_t i = 0; i < outBuffer->frameCount*2; i++) {
                 outBuffer->f32[i] += inBuffer->f32[i];
             }
         } else {
-            memcpy(outBuffer->raw, inBuffer->raw, sampleCount * sizeof(float));
+            memcpy(outBuffer->raw, inBuffer->raw, outBuffer->frameCount * 2 * sizeof(float));
         }
     }
     if (pContext->mState != LOUDNESS_ENHANCER_STATE_ACTIVE) {
@@ -459,3 +462,4 @@ audio_effect_library_t AUDIO_EFFECT_LIBRARY_INFO_SYM = {
 };
 
 }; // extern "C"
+

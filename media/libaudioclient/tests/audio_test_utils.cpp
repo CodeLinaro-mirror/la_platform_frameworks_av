@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#include <thread>
-
 //#define LOG_NDEBUG 0
 #define LOG_TAG "AudioTestUtils"
 
@@ -24,15 +22,11 @@
 #include <binder/IServiceManager.h>
 #include <system/audio_config.h>
 #include <utils/Log.h>
-#include <utils/SystemClock.h>
 
 #include "audio_test_utils.h"
 
 #define WAIT_PERIOD_MS 10  // from AudioTrack.cpp
 #define MAX_WAIT_TIME_MS 5000
-
-static constexpr auto kShortCallbackTimeout = std::chrono::milliseconds(500);
-static constexpr auto kLongCallbackTimeout = std::chrono::seconds(10);
 
 void OnAudioDeviceUpdateNotifier::onAudioDeviceUpdate(audio_io_handle_t audioIo,
                                                       const DeviceIdVector& deviceIds) {
@@ -47,7 +41,7 @@ void OnAudioDeviceUpdateNotifier::onAudioDeviceUpdate(audio_io_handle_t audioIo,
 
 status_t OnAudioDeviceUpdateNotifier::waitForAudioDeviceCb(audio_port_handle_t expDeviceId) {
     std::unique_lock lock(mMutex);
-    base::ScopedLockAssertion lock_assertion(mMutex);
+    android::base::ScopedLockAssertion lock_assertion(mMutex);
     if (mAudioIo == AUDIO_IO_HANDLE_NONE ||
         (expDeviceId != AUDIO_PORT_HANDLE_NONE &&
          std::find(mDeviceIds.begin(), mDeviceIds.end(), expDeviceId) == mDeviceIds.end())) {
@@ -79,7 +73,14 @@ AudioPlayback::AudioPlayback(uint32_t sampleRate, audio_format_t format,
       mSessionId(sessionId),
       mTransferType(transferType),
       mAttributes(attributes),
-      mOffloadInfo(info) {}
+      mOffloadInfo(info) {
+    mStopPlaying = false;
+    mBytesUsedSoFar = 0;
+    mState = PLAY_NO_INIT;
+    mMemCapacity = 0;
+    mMemoryDealer = nullptr;
+    mMemory = nullptr;
+}
 
 AudioPlayback::~AudioPlayback() {
     stop();
@@ -94,16 +95,15 @@ status_t AudioPlayback::create() {
     attributionSource.pid = VALUE_OR_FATAL(legacy2aidl_pid_t_int32_t(getpid()));
     attributionSource.token = sp<BBinder>::make();
     if (mTransferType == AudioTrack::TRANSFER_OBTAIN) {
-        mTrack = sp<TestAudioTrack>::make(attributionSource);
+        mTrack = new AudioTrack(attributionSource);
         mTrack->set(AUDIO_STREAM_MUSIC, mSampleRate, mFormat, mChannelMask, 0 /* frameCount */,
-                    mFlags, wp<AudioTrack::IAudioTrackCallback>::fromExisting(this),
-                    0 /* notificationFrames */, nullptr /* sharedBuffer */, false /*canCallJava */,
-                    mSessionId, mTransferType, mOffloadInfo, attributionSource, mAttributes);
+                    mFlags, nullptr /* callback */, 0 /* notificationFrames */,
+                    nullptr /* sharedBuffer */, false /*canCallJava */, mSessionId, mTransferType,
+                    mOffloadInfo, attributionSource, mAttributes);
     } else if (mTransferType == AudioTrack::TRANSFER_SHARED) {
-        mTrack = sp<TestAudioTrack>::make(
-                AUDIO_STREAM_MUSIC, mSampleRate, mFormat, mChannelMask, mMemory, mFlags,
-                wp<AudioTrack::IAudioTrackCallback>::fromExisting(this), 0, mSessionId,
-                mTransferType, nullptr, attributionSource, mAttributes);
+        mTrack = new AudioTrack(AUDIO_STREAM_MUSIC, mSampleRate, mFormat, mChannelMask, mMemory,
+                                mFlags, wp<AudioTrack::IAudioTrackCallback>::fromExisting(this), 0,
+                                mSessionId, mTransferType, nullptr, attributionSource, mAttributes);
     } else {
         ALOGE("Test application is not handling transfer type %s",
               AudioTrack::convertTransferToText(mTransferType));
@@ -156,8 +156,6 @@ status_t AudioPlayback::start() {
         if (OK == status) {
             mState = PLAY_STARTED;
             LOG_FATAL_IF(false != mTrack->stopped());
-            std::lock_guard l(mMutex);
-            mStreamEndReceived = false;
         }
     }
     return status;
@@ -166,15 +164,6 @@ status_t AudioPlayback::start() {
 void AudioPlayback::onBufferEnd() {
     std::lock_guard lock(mMutex);
     mStopPlaying = true;
-}
-
-void AudioPlayback::onStreamEnd() {
-    ALOGD("%s", __func__);
-    {
-        std::lock_guard lock(mMutex);
-        mStreamEndReceived = true;
-    }
-    mCondition.notify_all();
 }
 
 status_t AudioPlayback::fillBuffer() {
@@ -203,7 +192,6 @@ status_t AudioPlayback::fillBuffer() {
             counter++;
         }
     }
-    mBytesUsedSoFar = 0;
     return OK;
 }
 
@@ -269,7 +257,7 @@ void AudioPlayback::stop() {
     if (mState != PLAY_STOPPED && mState != PLAY_NO_INIT) {
         int32_t msec = 0;
         (void)mTrack->pendingDuration(&msec);
-        mTrack->stop();  // Do not join the callback thread, drain may be ongoing.
+        mTrack->stopAndJoinCallbacks();
         LOG_FATAL_IF(true != mTrack->stopped());
         mState = PLAY_STOPPED;
         if (msec > 0) {
@@ -277,23 +265,6 @@ void AudioPlayback::stop() {
             usleep(msec * 1000LL);
         }
     }
-}
-
-bool AudioPlayback::waitForStreamEnd() {
-    ALOGD("%s", __func__);
-    const int64_t endMs = uptimeMillis() + std::chrono::milliseconds(kLongCallbackTimeout).count();
-    while (uptimeMillis() < endMs) {
-        // Wake up the AudioPlaybackThread to get notifications.
-        mTrack->wakeCallbackThread();
-        std::unique_lock lock(mMutex);
-        base::ScopedLockAssertion lock_assertion(mMutex);
-        mCondition.wait_for(lock, kShortCallbackTimeout, [this]() {
-            base::ScopedLockAssertion lock_assertion(mMutex);
-            return mStreamEndReceived;
-        });
-        if (mStreamEndReceived) return true;
-    }
-    return false;
 }
 
 // hold pcm data sent by AudioRecord
@@ -597,7 +568,7 @@ status_t AudioCapture::obtainBufferCb(RawBuffer& buffer) {
     const int maxTries = MAX_WAIT_TIME_MS / WAIT_PERIOD_MS;
     int counter = 0;
     std::unique_lock lock(mMutex);
-    base::ScopedLockAssertion lock_assertion(mMutex);
+    android::base::ScopedLockAssertion lock_assertion(mMutex);
     while (mBuffersReceived.empty() && !mStopRecording && counter < maxTries) {
         mCondition.wait_for(lock, std::chrono::milliseconds(WAIT_PERIOD_MS));
         counter++;
@@ -657,9 +628,9 @@ void AudioCapture::setMarkerPosition(uint32_t markerPosition) {
 
 uint32_t AudioCapture::waitAndGetReceivedCbMarkerAtPosition() const {
     std::unique_lock lock(mMutex);
-    base::ScopedLockAssertion lock_assertion(mMutex);
+    android::base::ScopedLockAssertion lock_assertion(mMutex);
     mMarkerCondition.wait_for(lock, std::chrono::seconds(3), [this]() {
-        base::ScopedLockAssertion lock_assertion(mMutex);
+        android::base::ScopedLockAssertion lock_assertion(mMutex);
         return mReceivedCbMarkerAtPosition.has_value();
     });
     return mReceivedCbMarkerAtPosition.value_or(~0);
@@ -667,9 +638,9 @@ uint32_t AudioCapture::waitAndGetReceivedCbMarkerAtPosition() const {
 
 uint32_t AudioCapture::waitAndGetReceivedCbMarkerCount() const {
     std::unique_lock lock(mMutex);
-    base::ScopedLockAssertion lock_assertion(mMutex);
+    android::base::ScopedLockAssertion lock_assertion(mMutex);
     mMarkerCondition.wait_for(lock, std::chrono::seconds(3), [this]() {
-        base::ScopedLockAssertion lock_assertion(mMutex);
+        android::base::ScopedLockAssertion lock_assertion(mMutex);
         return mReceivedCbMarkerCount.has_value();
     });
     return mReceivedCbMarkerCount.value_or(0);

@@ -67,12 +67,8 @@ public:
                      const std::shared_ptr<::aidl::android::media::IResourceManagerClient>& client,
                      const std::vector<::aidl::android::media::MediaResourceParcel>& resources);
 
-    // Update the importance of the client.
-    bool updateClientImportance(const aidl::android::media::ClientInfoParcel& clientInfo);
-
-    // Update the resource info for given list of resources.
-    bool updateResource(const aidl::android::media::ClientInfoParcel& clientInfo,
-                        const std::vector<::aidl::android::media::MediaResourceParcel>& resources);
+    // Update the resource info, if there is any changes.
+    bool updateResource(const aidl::android::media::ClientInfoParcel& clientInfo);
 
     // Remove a set of resources from the given client.
     // returns true on success, false otherwise.

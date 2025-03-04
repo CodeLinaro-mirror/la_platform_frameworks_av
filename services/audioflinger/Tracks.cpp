@@ -38,7 +38,6 @@
 #include <media/RecordBufferConverter.h>
 #include <media/nbaio/Pipe.h>
 #include <media/nbaio/PipeReader.h>
-#include <mediautils/Runnable.h>
 #include <mediautils/ServiceUtilities.h>
 #include <mediautils/SharedMemoryAllocator.h>
 #include <private/media/AudioTrackShared.h>
@@ -880,8 +879,8 @@ Track::Track(
             float volume,
             bool muted)
     :
-    AfPlaybackCommon(*this, *thread, volume, muted,
-                     attr, attributionSource, thread->isOffloadOrMmap(), type != TYPE_PATCH),
+    AfPlaybackCommon(*this, *thread->afThreadCallback(), volume, muted,
+                     attr, attributionSource, type != TYPE_PATCH),
     TrackBase(thread, client, attr, sampleRate, format, channelMask, frameCount,
                   // TODO: Using unsecurePointer() has some associated security pitfalls
                   //       (see declaration for details).
@@ -2126,9 +2125,7 @@ status_t Track::getPlaybackRateParameters(
         if (thread != nullptr) {
             auto* const t = thread->asIAfPlaybackThread().get();
             audio_utils::lock_guard lock(t->mutex());
-            if (auto* const output = t->getOutput_l()) {
-                status = output->stream->getPlaybackRateParameters(playbackRate);
-            }
+            status = t->getOutput_l()->stream->getPlaybackRateParameters(playbackRate);
             ALOGD_IF((status == NO_ERROR) &&
                     !isAudioPlaybackRateEqual(mPlaybackRateParameters, *playbackRate),
                     "%s: playbackRate inconsistent", __func__);
@@ -2146,11 +2143,9 @@ status_t Track::setPlaybackRateParameters(
         if (thread != nullptr) {
             auto* const t = thread->asIAfPlaybackThread().get();
             audio_utils::lock_guard lock(t->mutex());
-            if (auto* const output = t->getOutput_l()) {
-                status = output->stream->setPlaybackRateParameters(playbackRate);
-                if (status == NO_ERROR) {
-                    mPlaybackRateParameters = playbackRate;
-                }
+            status = t->getOutput_l()->stream->setPlaybackRateParameters(playbackRate);
+            if (status == NO_ERROR) {
+                mPlaybackRateParameters = playbackRate;
             }
         }
     }
@@ -2327,9 +2322,9 @@ OutputTrack::OutputTrack(
             size_t frameCount,
             const AttributionSourceState& attributionSource)
     :
-    AfPlaybackCommon(*this, *playbackThread, /* volume= */ 0.0f,
+    AfPlaybackCommon(*this, *playbackThread->afThreadCallback(), /* volume= */ 0.0f,
                      /* muted= */ false,
-                     AUDIO_ATTRIBUTES_INITIALIZER, attributionSource, /* isOffloadOrMmap= */ false,
+                     AUDIO_ATTRIBUTES_INITIALIZER, attributionSource,
                      /* shouldPlaybackHarden= */ false),
     Track(playbackThread, NULL, AUDIO_STREAM_PATCH,
               AUDIO_ATTRIBUTES_INITIALIZER ,
@@ -2639,10 +2634,9 @@ PatchTrack::PatchTrack(IAfPlaybackThread* playbackThread,
                                                      float speed,
                                                      float volume,
                                                      bool muted)
-    : AfPlaybackCommon(*this, *playbackThread, volume, muted,
+    : AfPlaybackCommon(*this, *playbackThread->afThreadCallback(), volume, muted,
                        AUDIO_ATTRIBUTES_INITIALIZER,
                        audioServerAttributionSource(getpid()),
-                       /* isOffloadOrMmap= */ false,
                        /* shouldPlaybackHarden= */ false),
     Track(playbackThread, NULL, streamType,
               AUDIO_ATTRIBUTES_INITIALIZER,
@@ -3686,15 +3680,14 @@ static bool shouldExemptFromOpControl(audio_usage_t usage, IAfThreadCallback& cb
     }
 }
 
-AfPlaybackCommon::AfPlaybackCommon(IAfTrackBase& self, IAfThreadBase& thread, float volume,
+AfPlaybackCommon::AfPlaybackCommon(IAfTrackBase& self, IAfThreadCallback& threadCb, float volume,
                                    bool muted, const audio_attributes_t& attr,
                                    const AttributionSourceState& attributionSource,
-                                   bool isOffloadOrMmap,
                                    bool shouldPlaybackHarden)
     : mSelf(self),
       mMutedFromPort(muted),
       mVolume(volume),
-      mIsExemptedFromOpControl(shouldExemptFromOpControl(attr.usage, *thread.afThreadCallback())) {
+      mIsExemptedFromOpControl(shouldExemptFromOpControl(attr.usage, threadCb)) {
     using AppOpsManager::OP_CONTROL_AUDIO_PARTIAL;
     using media::permission::Ops;
     using media::permission::skipOpsForUid;
@@ -3703,26 +3696,12 @@ AfPlaybackCommon::AfPlaybackCommon(IAfTrackBase& self, IAfThreadBase& thread, fl
     if (hardening_impl()) {
         // Don't bother for trusted uids
         if (!skipOpsForUid(attributionSource.uid) && shouldPlaybackHarden) {
-            if (isOffloadOrMmap) {
-                mExecutor.emplace();
-            }
-            auto thread_wp = wp<IAfThreadBase>::fromExisting(&thread);
             mOpControlSession.emplace(
                     ValidatedAttributionSourceState::createFromTrustedSource(attributionSource),
-                    Ops{.attributedOp = OP_CONTROL_AUDIO_PARTIAL},
-                    [this, isOffloadOrMmap, thread_wp](bool isPermitted) {
+                    Ops{.attributedOp = OP_CONTROL_AUDIO_PARTIAL}, [this](bool isPermitted) {
                         mHasOpControlPartial.store(isPermitted, std::memory_order_release);
-                        if (isOffloadOrMmap) {
-                            mExecutor->enqueue(mediautils::Runnable{[thread_wp]() {
-                                auto thread = thread_wp.promote();
-                                if (thread != nullptr) {
-                                    audio_utils::lock_guard l {thread->mutex()};
-                                    thread->broadcast_l();
-                                }
-                            }});
-                        }
-                    }
-            );
+                        mSelf.signal();
+                    });
         }
     }
 }
@@ -3820,8 +3799,8 @@ MmapTrack::MmapTrack(IAfThreadBase* thread,
         audio_port_handle_t portId,
         float volume,
         bool muted)
-    :   AfPlaybackCommon(*this, *thread,
-                         volume, muted, attr, attributionSource, /* isOffloadOrMmap */ true),
+    :   AfPlaybackCommon(*this, *thread->afThreadCallback(),
+                         volume, muted, attr, attributionSource),
         TrackBase(thread, NULL, attr, sampleRate, format,
                   channelMask, (size_t)0 /* frameCount */,
                   nullptr /* buffer */, (size_t)0 /* bufferSize */,
