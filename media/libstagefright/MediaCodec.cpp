@@ -419,6 +419,7 @@ struct MediaCodec::ResourceManagerServiceProxy :
     status_t init();
     void addResource(const MediaResourceParcel &resource);
     void addResource(const std::vector<MediaResourceParcel>& resources);
+    void updateResource(const std::vector<MediaResourceParcel>& resources);
     void removeResource(const MediaResourceParcel &resource);
     void removeResource(const std::vector<MediaResourceParcel>& resources);
     void removeClient();
@@ -650,6 +651,17 @@ void MediaCodec::ResourceManagerServiceProxy::addResource(
               std::inserter(mMediaResourceParcel, mMediaResourceParcel.end()));
 }
 
+void MediaCodec::ResourceManagerServiceProxy::updateResource(
+        const std::vector<MediaResourceParcel>& resources) {
+    std::scoped_lock lock{mLock};
+    std::shared_ptr<IResourceManagerService> service = getService_l();
+    if (service == nullptr) {
+        ALOGW("Service isn't available");
+        return;
+    }
+    service->updateResource(getClientInfo(), resources);
+}
+
 void MediaCodec::ResourceManagerServiceProxy::removeResource(
         const MediaResourceParcel &resource) {
     std::vector<MediaResourceParcel> resources;
@@ -762,7 +774,7 @@ class MediaCodec::ReleaseSurface {
 public:
     explicit ReleaseSurface(uint64_t usage) {
         BufferQueue::createBufferQueue(&mProducer, &mConsumer);
-        mSurface = new Surface(mProducer, false /* controlledByApp */);
+        mSurface = sp<Surface>::make(mProducer, false /* controlledByApp */);
         struct ConsumerListener : public IConsumerListener {
             ConsumerListener(const sp<IGraphicBufferConsumer> &consumer) {
                 mConsumer = consumer;
@@ -820,6 +832,7 @@ enum {
     kWhatFirstTunnelFrameReady = 'ftfR',
     kWhatPollForRenderedBuffers = 'plrb',
     kWhatMetricsUpdated      = 'mtru',
+    kWhatRequiredResourcesChanged = 'reqR',
 };
 
 class CryptoAsyncCallback : public CryptoAsync::CryptoAsyncCallback {
@@ -967,6 +980,7 @@ public:
     virtual void onOutputBuffersChanged() override;
     virtual void onFirstTunnelFrameReady() override;
     virtual void onMetricsUpdated(const sp<AMessage> &updatedMetrics) override;
+    virtual void onRequiredResourcesChanged() override;
 private:
     const sp<AMessage> mNotify;
 };
@@ -1097,6 +1111,12 @@ void CodecCallback::onMetricsUpdated(const sp<AMessage> &updatedMetrics) {
     sp<AMessage> notify(mNotify->dup());
     notify->setInt32("what", kWhatMetricsUpdated);
     notify->setMessage("updated-metrics", updatedMetrics);
+    notify->post();
+}
+
+void CodecCallback::onRequiredResourcesChanged() {
+    sp<AMessage> notify(mNotify->dup());
+    notify->setInt32("what", kWhatRequiredResourcesChanged);
     notify->post();
 }
 
@@ -1279,6 +1299,73 @@ static float getOperatingFrameRate(const sp<AMessage>& format,
     float frameRate = defaultFrameRate;
     getValueFor(format, "frame-rate", &frameRate);
     return frameRate;
+}
+
+inline MediaResourceParcel getMediaResourceParcel(const InstanceResourceInfo& resourceInfo) {
+    MediaResourceParcel resource;
+    resource.type = getResourceType(resourceInfo.mName);
+    resource.value = resourceInfo.mStaticCount;
+    return resource;
+}
+
+void MediaCodec::updateResourceUsage(
+        const std::vector<InstanceResourceInfo>& oldResources,
+        const std::vector<InstanceResourceInfo>& newResources) {
+    std::vector<MediaResourceParcel> resources;
+
+    // Add all the new resources first.
+    for (const InstanceResourceInfo& resource : newResources) {
+        resources.push_back(getMediaResourceParcel(resource));
+    }
+
+    // Look for resources that aren't required anymore.
+    for (const InstanceResourceInfo& oldRes : oldResources) {
+        auto found = std::find_if(newResources.begin(),
+                                  newResources.end(),
+                                  [oldRes](const InstanceResourceInfo& newRes) {
+                                      return oldRes.mName == newRes.mName; });
+
+        // If this old resource isn't found in updated resources, that means its
+        // not required anymore.
+        // Set the count to 0, so that it will be removed from the RM.
+        if (found == newResources.end()) {
+            MediaResourceParcel res = getMediaResourceParcel(oldRes);
+            res.value = 0;
+            resources.push_back(res);
+        }
+    }
+
+    // update/notify the RM about change in resource usage.
+    if (!resources.empty()) {
+        mResourceManagerProxy->updateResource(resources);
+    }
+}
+
+bool MediaCodec::getRequiredSystemResources() {
+    bool success = false;
+    std::vector<InstanceResourceInfo> oldResources;
+    std::vector<InstanceResourceInfo> newResources;
+
+    if (android::media::codec::codec_availability() &&
+        android::media::codec::codec_availability_support()) {
+        Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(
+                mRequiredResourceInfo);
+        // Make a copy of the previous required resources, if there were any.
+        oldResources = *resourcesLocked;
+        // Get the required system resources now.
+        newResources = mCodec->getRequiredSystemResources();
+        // Update the dynamic resource usage with the current operating frame-rate.
+        newResources = computeDynamicResources(newResources);
+        *resourcesLocked = newResources;
+        success  = !newResources.empty();
+    }
+
+    // Since the required resources has been updated/changed,
+    // we should update/notify the RM with the updated usage.
+    if (!oldResources.empty()) {
+        updateResourceUsage(oldResources, newResources);
+    }
+    return success;
 }
 
 /**
@@ -2751,9 +2838,8 @@ status_t MediaCodec::getRequiredResources(std::vector<InstanceResourceInfo>& res
     }
 
     Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(mRequiredResourceInfo);
-    std::vector<InstanceResourceInfo>& requiredResourceInfo = *resourcesLocked;
-    if (!requiredResourceInfo.empty()) {
-        resources = requiredResourceInfo;
+    if (!(*resourcesLocked).empty()) {
+        resources = *resourcesLocked;
         return OK;
     }
 
@@ -4212,16 +4298,6 @@ inline void MediaCodec::initClientConfigParcel(ClientConfigParcel& clientConfig)
     clientConfig.id = mCodecId;
 }
 
-inline MediaResourceParcel getMediaResourceParcel(const InstanceResourceInfo& resourceInfo) {
-    MediaResourceParcel resource;
-    resource.type = getResourceType(resourceInfo.mName);
-    resource.value = resourceInfo.mStaticCount;
-    // TODO: How do we use this info and pass it on to RM to track?
-    //resource.value = resourceInfo.mPerFrameCount;
-
-    return resource;
-}
-
 void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
     switch (msg->what()) {
         case kWhatCodecNotify:
@@ -4522,19 +4598,11 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                         mFlags |= kFlagUsesSoftwareRenderer;
                     }
 
-                    if (android::media::codec::codec_availability() &&
-                        android::media::codec::codec_availability_support()) {
-                        // Get the required system resources now.
-                        Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(
-                                mRequiredResourceInfo);
-                        *resourcesLocked = mCodec->getRequiredSystemResources();
-                        // Use input and output formats to get operating frame-rate.
-                        bool isEncoder = mFlags & kFlagIsEncoder;
-                        mFrameRate = getOperatingFrameRate(mInputFormat, mFrameRate, isEncoder);
-                        mFrameRate = getOperatingFrameRate(mOutputFormat, mFrameRate, isEncoder);
-                        // Update the dynamic resource usage with the current operating frame-rate.
-                        *resourcesLocked = computeDynamicResources(*resourcesLocked);
-                    }
+                    // Use input and output formats to get operating frame-rate.
+                    bool isEncoder = mFlags & kFlagIsEncoder;
+                    mFrameRate = getOperatingFrameRate(mInputFormat, mFrameRate, isEncoder);
+                    mFrameRate = getOperatingFrameRate(mOutputFormat, mFrameRate, isEncoder);
+                    getRequiredSystemResources();
 
                     setState(CONFIGURED);
                     postPendingRepliesAndDeferredMessages("kWhatComponentConfigured");
@@ -4685,8 +4753,7 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                         android::media::codec::codec_availability_support()) {
                         Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(
                                 mRequiredResourceInfo);
-                        std::vector<InstanceResourceInfo>& requiredResourceInfo = *resourcesLocked;
-                        for (const InstanceResourceInfo& resource : requiredResourceInfo) {
+                        for (const InstanceResourceInfo& resource : *resourcesLocked) {
                             resources.push_back(getMediaResourceParcel(resource));
                         }
                     }
@@ -4971,6 +5038,16 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                     break;
                 }
 
+                case kWhatRequiredResourcesChanged:
+                {
+                    // Get the updated required system resources.
+                    if (getRequiredSystemResources()) {
+                        onRequiredResourcesChanged();
+                    }
+
+                    break;
+                }
+
                 case kWhatEOS:
                 {
                     // We already notify the client of this by using the
@@ -4996,11 +5073,12 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                         android::media::codec::codec_availability_support()) {
                         Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(
                                 mRequiredResourceInfo);
-                        std::vector<InstanceResourceInfo>& requiredResourceInfo = *resourcesLocked;
-                        for (const InstanceResourceInfo& resource : requiredResourceInfo) {
+                        for (const InstanceResourceInfo& resource : *resourcesLocked) {
                             resources.push_back(getMediaResourceParcel(resource));
                         }
+                        (*resourcesLocked).clear();
                     }
+                    // Notify the RM to remove those resources.
                     if (!resources.empty()) {
                         mResourceManagerProxy->removeResource(resources);
                     }
@@ -6240,12 +6318,24 @@ void MediaCodec::handleOutputFormatChangeIfNeeded(const sp<MediaCodecBuffer> &bu
     // Update the width and the height.
     int32_t left = 0, top = 0, right = 0, bottom = 0, width = 0, height = 0;
     bool newSubsession = false;
-    if (android::media::codec::provider_->subsession_metrics()
-            && mOutputFormat->findInt32("width", &width)
-            && mOutputFormat->findInt32("height", &height)
-            && (width != mWidth || height != mHeight)) {
-        // consider a new subsession if the width or height changes.
-        newSubsession = true;
+    if (android::media::codec::provider_->subsession_metrics()) {
+        // consider a new subsession if the actual video size changes
+        // TODO: if the resolution of the clip changes "mid-stream" and crop params did not change
+        // or changed in such a way that the actual video size did not change then new subsession is
+        // not detected.
+        // TODO: although rare, the buffer attributes (rect(...), width, height) need not be a true
+        // representation of actual stream attributes (rect(...), width, height). It is only
+        // required that actual video frame is correctly presented in the rect() region of the
+        // buffer making this approach of detecting subsession less reliable.
+        if (mOutputFormat->findRect("crop", &left, &top, &right, &bottom)) {
+            if ((right - left + 1) != mWidth || (bottom - top + 1) != mHeight) {
+                newSubsession = true;
+            }
+        } else if (mOutputFormat->findInt32("width", &width) &&
+                   mOutputFormat->findInt32("height", &height) &&
+                   (width != mWidth || height != mHeight)) {
+            newSubsession = true;
+        }
     }
     // TODO: properly detect new audio subsession
 
@@ -6290,9 +6380,15 @@ void MediaCodec::handleOutputFormatChangeIfNeeded(const sp<MediaCodecBuffer> &bu
         bool isEncoder = mFlags & kFlagIsEncoder;
         // Since the output format has changed, see if we need to update
         // operating frame-rate.
-        mFrameRate = getOperatingFrameRate(mOutputFormat, mFrameRate, isEncoder);
-        // TODO: (girishshetty): See if the change in operating frame-rate calls for
-        // onRequiredResourcesChanged callback.
+        float frameRate = getOperatingFrameRate(mOutputFormat, mFrameRate, isEncoder);
+        // if the operating frame-rate has changed, we need to recalibrate the
+        // required system resources again and notify the caller.
+        if (frameRate != mFrameRate) {
+            mFrameRate = frameRate;
+            if (getRequiredSystemResources()) {
+                onRequiredResourcesChanged();
+            }
+        }
     }
 }
 
@@ -7331,19 +7427,8 @@ void MediaCodec::onOutputFormatChanged() {
     }
 }
 
-void MediaCodec::onRequiredResourcesChanged(
-        const std::vector<InstanceResourceInfo>& resourceInfo) {
-    bool canIssueCallback = false;
-    if (android::media::codec::codec_availability() &&
-        android::media::codec::codec_availability_support()) {
-        Mutexed<std::vector<InstanceResourceInfo>>::Locked resourcesLocked(mRequiredResourceInfo);
-        *resourcesLocked = resourceInfo;
-        // Convert per frame/input/output resources into static_count
-        *resourcesLocked = computeDynamicResources(*resourcesLocked);
-        canIssueCallback = true;
-    }
-    // Make sure codec availability feature is on.
-    if (mCallback != nullptr && canIssueCallback) {
+void MediaCodec::onRequiredResourcesChanged() {
+    if (mCallback != nullptr) {
         // Post the callback
         sp<AMessage> msg = mCallback->dup();
         msg->setInt32("callbackID", CB_REQUIRED_RESOURCES_CHANGED);
