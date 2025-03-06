@@ -17,6 +17,11 @@
  * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
+/*
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
 
 #include "utils/Errors.h"
 #define LOG_TAG "APM_AudioPolicyManager"
@@ -1398,6 +1403,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                     policyDesc = nullptr;
                 } else {
                     policyDesc = mOutputs.valueFor(newOutput);
+                    primaryMix->setOutput(policyDesc);
                     mDirectOutput = policyDesc;
                 }
             }
@@ -7917,6 +7923,12 @@ DeviceVector AudioPolicyManager::getNewOutputDevices(const sp<SwAudioOutputDescr
     }
 
     DeviceVector devices;
+    if (mDirectOutput != nullptr && outputDesc == mDirectOutput)
+    {
+        ALOGD("%s reusing direct output, select directoutput device!", __func__);
+        return mDirectOutput->devices();
+    }
+
     for (const auto &productStrategy : mEngine->getOrderedProductStrategies()) {
         StreamTypeVector streams = mEngine->getStreamTypesForProductStrategy(productStrategy);
         auto hasStreamActive = [&](auto stream) {
