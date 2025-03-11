@@ -1446,6 +1446,11 @@ void EffectChain::setVolumeForOutput_l(uint32_t left, uint32_t right)
 status_t EffectModule::sendSetAudioDevicesCommand(
         const AudioDeviceTypeAddrVector &devices, uint32_t cmdCode)
 {
+    // for AIDL, use setDevices to pass the AudioDeviceTypeAddrVector
+    if (!EffectConfiguration::isHidl()) {
+        return mEffectInterface->setDevices(devices);
+    }
+
     audio_devices_t deviceType = deviceTypesToBitMask(getAudioDeviceTypes(devices));
     if (deviceType == AUDIO_DEVICE_NONE) {
         return NO_ERROR;
@@ -1574,6 +1579,11 @@ bool IAfEffectModule::isSpatializer(const effect_uuid_t *type) {
 
 bool EffectModule::isSpatializer() const {
     return IAfEffectModule::isSpatializer(&mDescriptor.type);
+}
+
+bool EffectModule::isEffect(const effect_uuid_t &uuid) const {
+    using android::effect::utils::operator==;
+    return mDescriptor.uuid == uuid;
 }
 
 status_t EffectModule::setHapticScale_l(int id, os::HapticScale hapticScale) {

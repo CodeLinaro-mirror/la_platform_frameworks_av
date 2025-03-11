@@ -49,7 +49,9 @@
 
 #include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferItemConsumer.h>
+#if not COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 #include <gui/IGraphicBufferProducer.h>
+#endif
 #include <gui/Surface.h>
 
 #include <gtest/gtest.h>
@@ -387,15 +389,6 @@ TEST(CameraServiceBinderTest, CheckBinderCameraService) {
 
     for (int32_t i = 0; i < numCameras; i++) {
         std::string cameraId = std::to_string(i);
-        bool isSupported = false;
-        res = service->supportsCameraApi(cameraId,
-                hardware::ICameraService::API_VERSION_2, &isSupported);
-        EXPECT_TRUE(res.isOk()) << res;
-
-        // We only care about binder calls for the Camera2 API.  Camera1 is deprecated.
-        if (!isSupported) {
-            continue;
-        }
 
         // Check metadata binder call
         CameraMetadata metadata;
@@ -704,10 +697,20 @@ TEST_F(CameraClientBinderTest, CheckBinderCameraDeviceUser) {
 
 TEST_F(CameraClientBinderTest, CheckBinderCaptureRequest) {
     sp<CaptureRequest> requestOriginal, requestParceled;
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+    sp<BufferItemConsumer> opaqueConsumer = new BufferItemConsumer(
+            GRALLOC_USAGE_SW_READ_NEVER, /*maxImages*/ 2, /*controlledByApp*/ true);
+    EXPECT_TRUE(opaqueConsumer.get() != nullptr);
+    opaqueConsumer->setName(String8("nom nom nom"));
+    sp<Surface> surface = opaqueConsumer->getSurface();
+#else
     sp<IGraphicBufferProducer> gbProducer;
     sp<IGraphicBufferConsumer> gbConsumer;
     BufferQueue::createBufferQueue(&gbProducer, &gbConsumer);
     sp<Surface> surface(new Surface(gbProducer, /*controlledByApp*/false));
+#endif
+
     Vector<sp<Surface>> surfaceList;
     surfaceList.push_back(surface);
     std::string physicalDeviceId1 = "0";

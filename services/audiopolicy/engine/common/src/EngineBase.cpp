@@ -125,10 +125,16 @@ std::string EngineBase::getProductStrategyName(product_strategy_t id) const {
     return "";
 }
 
-void EngineBase::setDefaultConfiguration() {
+engineConfig::ParsingResult EngineBase::parseAndSetDefaultConfiguration() {
     mProductStrategies.clear();
     mVolumeGroups.clear();
-    (void) processParsingResult({std::make_unique<engineConfig::Config>(gDefaultEngineConfig), 1});
+    engineConfig::Config config = gDefaultEngineConfig;
+    android::status_t ret = engineConfig::parseLegacyVolumes(config.volumeGroups);
+    if (ret != NO_ERROR) {
+        ALOGD("%s: No legacy volume group found, using default music group", __FUNCTION__);
+        config.volumeGroups = gDefaultVolumeGroups;
+    }
+    return processParsingResult({std::make_unique<engineConfig::Config>(config), 1});
 }
 
 engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
@@ -160,10 +166,7 @@ engineConfig::ParsingResult EngineBase::loadAudioPolicyEngineConfig(
             engineConfig::parse(filePath.c_str(), isConfigurable) : engineConfig::ParsingResult{};
     if (result.parsedConfig == nullptr) {
         ALOGD("%s: No configuration found, using default matching phone experience.", __FUNCTION__);
-        engineConfig::Config config = gDefaultEngineConfig;
-        android::status_t ret = engineConfig::parseLegacyVolumes(config.volumeGroups);
-        result = {std::make_unique<engineConfig::Config>(config),
-                  static_cast<size_t>(ret == NO_ERROR ? 0 : 1)};
+        return parseAndSetDefaultConfiguration();
     } else {
         // Append for internal use only volume groups (e.g. rerouting/patch)
         result.parsedConfig->volumeGroups.insert(
@@ -802,6 +805,41 @@ DeviceVector EngineBase::getDisabledDevicesForProductStrategy(
                 availableOutputDevices.getDevicesFromDeviceTypeAddrVec(disabledDevicesTypeAddr);
     }
     return disabledDevices;
+}
+
+sp<DeviceDescriptor> EngineBase::getInputDeviceForEchoRef(const audio_attributes_t &attr,
+            const DeviceVector &availableInputDevices) const
+{
+    // get the first input device whose address matches a tag
+
+    std::string tags { attr.tags }; // tags separate by ';'
+    std::size_t posBegin = 0; // first index of current tag, inclusive
+    std::size_t posEnd; // last index of current tag, exclusive
+
+    while (posBegin < tags.size()) {
+        // ';' is used as the delimiter of tags
+        // find the first delimiter after posBegin
+        posEnd = tags.find(';', posBegin);
+
+        std::string tag;
+
+        if (posEnd == std::string::npos) { // no more delimiter found
+            tag = tags.substr(posBegin); // last tag
+        } else {
+            // get next tag
+            tag = tags.substr(posBegin, posEnd - posBegin);
+        }
+        // get the input device whose address matches the tag
+        sp<DeviceDescriptor> device = availableInputDevices.getDevice(
+                AUDIO_DEVICE_IN_ECHO_REFERENCE, String8(tag.c_str()), AUDIO_FORMAT_DEFAULT);
+        if (device != nullptr) {
+            return device;
+        }
+
+        // update posBegin for next tag
+        posBegin = posEnd + 1;
+    }
+    return nullptr;
 }
 
 void EngineBase::dumpCapturePresetDevicesRoleMap(String8 *dst, int spaces) const

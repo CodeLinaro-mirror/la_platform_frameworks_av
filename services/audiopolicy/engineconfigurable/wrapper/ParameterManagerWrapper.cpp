@@ -64,30 +64,38 @@ using utilities::convertTo;
 namespace audio_policy {
 
 #ifdef ENABLE_CAP_AIDL_HYBRID_MODE
-// Legacy or AIDL with Hybrid enabled read XML from vendor partition
-const char *const ParameterManagerWrapper::mPolicyPfwConfFileName =
+// Legacy XML from vendor partition used when disabling AIDL CAP configuration (HIDL or Hybrid)
+const char *const ParameterManagerWrapper::mVendorPolicyPfwConfFileName =
     "/vendor/etc/parameter-framework/ParameterFrameworkConfigurationPolicy.xml";
-#else
-const char *const ParameterManagerWrapper::mPolicyPfwConfFileName =
-    "/etc/parameter-framework/ParameterFrameworkConfigurationPolicy.xml";
 #endif
+const char *const ParameterManagerWrapper::mPolicyPfwConfFileName =
+    "/etc/parameter-framework/ParameterFrameworkConfigurationCap.xml";
 
 template <>
 struct ParameterManagerWrapper::parameterManagerElementSupported<ISelectionCriterionInterface> {};
 template <>
 struct ParameterManagerWrapper::parameterManagerElementSupported<ISelectionCriterionTypeInterface> {};
 
-ParameterManagerWrapper::ParameterManagerWrapper(bool enableSchemaVerification,
-                                                 const std::string &schemaUri)
+ParameterManagerWrapper::ParameterManagerWrapper(bool useLegacyConfigurationFile,
+        bool enableSchemaVerification, const std::string &schemaUri)
     : mPfwConnectorLogger(new ParameterMgrPlatformConnectorLogger)
 {
+    std::string policyPfwConfFileName;
+#ifdef ENABLE_CAP_AIDL_HYBRID_MODE
     // Connector
-    if (access(mPolicyPfwConfFileName, R_OK) != 0) {
+    if (useLegacyConfigurationFile && access(mVendorPolicyPfwConfFileName, R_OK) == 0) {
+        policyPfwConfFileName = mVendorPolicyPfwConfFileName;
+    }
+#endif
+    if (!useLegacyConfigurationFile && access(mPolicyPfwConfFileName, R_OK) == 0) {
+        policyPfwConfFileName = mPolicyPfwConfFileName;
+    }
+    if (policyPfwConfFileName.empty()) {
         // bailing out
         ALOGE("%s: failed to find Cap config file, cannot init Cap.", __func__);
         return;
     }
-    mPfwConnector = new CParameterMgrFullConnector(mPolicyPfwConfFileName);
+    mPfwConnector = new CParameterMgrFullConnector(policyPfwConfFileName);
     // Logger
     mPfwConnector->setLogger(mPfwConnectorLogger);
 
@@ -105,10 +113,10 @@ status_t ParameterManagerWrapper::addCriterion(const std::string &name, bool isI
                                                ValuePairs pairs, const std::string &defaultValue)
 {
     if (mPfwConnector == nullptr) {
-        ALOGE("%s: Cannot add a criterion, Cap not initialized", __func__);
+        ALOGE("%s: failed, Cap not initialized", __func__);
         return NO_INIT;
     }
-    ALOG_ASSERT(not isStarted(), "Cannot add a criterion if PFW is already started");
+    ALOG_ASSERT(not isStarted(), "%s failed since PFW is already started", __func__);
     auto criterionType = mPfwConnector->createSelectionCriterionType(isInclusive);
 
     for (auto pair : pairs) {
@@ -118,13 +126,13 @@ status_t ParameterManagerWrapper::addCriterion(const std::string &name, bool isI
         criterionType->addValuePair(std::get<0>(pair), std::get<2>(pair), error);
 
         if (name == capEngineConfig::gOutputDeviceCriterionName) {
-            ALOGV("%s: Adding mOutputDeviceToCriterionTypeMap %d %" PRIu64" for criterionType %s",
+            ALOGV("%s: Adding mOutputDeviceToCriterionTypeMap 0x%X %" PRIu64" for criterionType %s",
                   __func__, std::get<1>(pair), std::get<0>(pair), name.c_str());
             audio_devices_t androidType = static_cast<audio_devices_t>(std::get<1>(pair));
             mOutputDeviceToCriterionTypeMap[androidType] = std::get<0>(pair);
         }
         if (name == capEngineConfig::gInputDeviceCriterionName) {
-            ALOGV("%s: Adding mInputDeviceToCriterionTypeMap %d %" PRIu64" for criterionType %s",
+            ALOGV("%s: Adding mInputDeviceToCriterionTypeMap 0x%X %" PRIu64" for criterionType %s",
                   __func__, std::get<1>(pair), std::get<0>(pair), name.c_str());
             audio_devices_t androidType = static_cast<audio_devices_t>(std::get<1>(pair));
             mInputDeviceToCriterionTypeMap[androidType] = std::get<0>(pair);
@@ -164,11 +172,11 @@ status_t ParameterManagerWrapper::start(std::string &error)
     ALOGD("%s: in", __FUNCTION__);
     /// Start PFW
     if (mPfwConnector == nullptr || !mPfwConnector->start(error)) {
-        ALOGE("%s: Policy PFW start error: %s", __FUNCTION__,
+        ALOGE("%s: Policy PFW failed (error:  %s)", __func__,
               mPfwConnector == nullptr ? "invalid connector" : error.c_str());
         return NO_INIT;
     }
-    ALOGD("%s: Policy PFW successfully started!", __FUNCTION__);
+    ALOGD("%s: Policy PFW succeeded!", __FUNCTION__);
     return NO_ERROR;
 }
 
@@ -190,13 +198,17 @@ const T *ParameterManagerWrapper::getElement(const string &name, const std::map<
     return it != elementsMap.end() ? it->second : NULL;
 }
 
-bool ParameterManagerWrapper::isStarted()
+bool ParameterManagerWrapper::isStarted() const
 {
     return mPfwConnector && mPfwConnector->isStarted();
 }
 
 status_t ParameterManagerWrapper::setPhoneState(audio_mode_t mode)
 {
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gPhoneStateCriterionName, mPolicyCriteria);
     if (criterion == NULL) {
@@ -214,11 +226,14 @@ status_t ParameterManagerWrapper::setPhoneState(audio_mode_t mode)
 
 audio_mode_t ParameterManagerWrapper::getPhoneState() const
 {
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return AUDIO_MODE_NORMAL;
+    }
     const ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gPhoneStateCriterionName, mPolicyCriteria);
     if (criterion == NULL) {
-        ALOGE("%s: no criterion found for %s", __FUNCTION__,
-              capEngineConfig::gPhoneStateCriterionName);
+        ALOGE("%s: no criterion found for %s", __func__, capEngineConfig::gPhoneStateCriterionName);
         return AUDIO_MODE_NORMAL;
     }
     return static_cast<audio_mode_t>(criterion->getCriterionState());
@@ -231,11 +246,14 @@ status_t ParameterManagerWrapper::setForceUse(audio_policy_force_use_t usage,
     if (usage > AUDIO_POLICY_FORCE_USE_CNT) {
         return BAD_VALUE;
     }
-
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gForceUseCriterionTag[usage], mPolicyCriteria);
     if (criterion == NULL) {
-        ALOGE("%s: no criterion found for %s", __FUNCTION__,
+        ALOGE("%s: no criterion found for %s", __func__,
               capEngineConfig::gForceUseCriterionTag[usage]);
         return BAD_VALUE;
     }
@@ -253,10 +271,14 @@ audio_policy_forced_cfg_t ParameterManagerWrapper::getForceUse(audio_policy_forc
     if (usage > AUDIO_POLICY_FORCE_USE_CNT) {
         return AUDIO_POLICY_FORCE_NONE;
     }
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return AUDIO_POLICY_FORCE_NONE;
+    }
     const ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gForceUseCriterionTag[usage], mPolicyCriteria);
     if (criterion == NULL) {
-        ALOGE("%s: no criterion found for %s", __FUNCTION__,
+        ALOGE("%s: no criterion found for %s", __func__,
               capEngineConfig::gForceUseCriterionTag[usage]);
         return AUDIO_POLICY_FORCE_NONE;
     }
@@ -274,6 +296,10 @@ bool ParameterManagerWrapper::isValueValidForCriterion(ISelectionCriterionInterf
 status_t ParameterManagerWrapper::setDeviceConnectionState(
         audio_devices_t type, const std::string &address, audio_policy_dev_state_t state)
 {
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     std::string criterionName = audio_is_output_device(type) ?
             capEngineConfig::gOutputDeviceAddressCriterionName :
             capEngineConfig::gInputDeviceAddressCriterionName;
@@ -283,14 +309,14 @@ status_t ParameterManagerWrapper::setDeviceConnectionState(
             getElement<ISelectionCriterionInterface>(criterionName, mPolicyCriteria);
 
     if (criterion == NULL) {
-        ALOGE("%s: no criterion found for %s", __FUNCTION__, criterionName.c_str());
+        ALOGE("%s: no criterion found for %s", __func__, criterionName.c_str());
         return DEAD_OBJECT;
     }
 
     auto criterionType = criterion->getCriterionType();
     uint64_t deviceAddressId;
     if (not criterionType->getNumericalValue(address.c_str(), deviceAddressId)) {
-        ALOGW("%s: unknown device address reported (%s) for criterion %s", __FUNCTION__,
+        ALOGW("%s: unknown device address reported (%s) for criterion %s", __func__,
               address.c_str(), criterionName.c_str());
         return BAD_TYPE;
     }
@@ -306,6 +332,10 @@ status_t ParameterManagerWrapper::setDeviceConnectionState(
 }
 
 status_t ParameterManagerWrapper::setAvailableInputDevices(const DeviceTypeSet &types) {
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gInputDeviceCriterionName, mPolicyCriteria);
     if (criterion == NULL) {
@@ -319,6 +349,10 @@ status_t ParameterManagerWrapper::setAvailableInputDevices(const DeviceTypeSet &
 }
 
 status_t ParameterManagerWrapper::setAvailableOutputDevices(const DeviceTypeSet &types) {
+    if (!isStarted()) {
+        ALOGE("%s: failed, Cap not initialized", __func__);
+        return NO_INIT;
+    }
     ISelectionCriterionInterface *criterion = getElement<ISelectionCriterionInterface>(
             capEngineConfig::gOutputDeviceCriterionName, mPolicyCriteria);
     if (criterion == NULL) {
@@ -334,7 +368,7 @@ status_t ParameterManagerWrapper::setAvailableOutputDevices(const DeviceTypeSet 
 void ParameterManagerWrapper::applyPlatformConfiguration()
 {
     if (!isStarted()) {
-        ALOGE("%s: failed to apply configuration, Cap not initialized", __func__);
+        ALOGE("%s: failed, Cap not initialized", __func__);
         return;
     }
     mPfwConnector->applyConfigurations();
@@ -377,13 +411,13 @@ DeviceTypeSet ParameterManagerWrapper::convertDeviceCriterionValueToDeviceTypes(
 void ParameterManagerWrapper::createDomain(const std::string &domain)
 {
     if (!isStarted()) {
-        ALOGE("%s: failed to createDomain, Cap not initialized", __func__);
+        ALOGE("%s: failed, Cap not initialized", __func__);
         return;
     }
     std::string error;
     bool ret = mPfwConnector->createDomain(domain, error);
     if (!ret) {
-        ALOGD("%s: failed to create domain %s (error=%s)", __func__, domain.c_str(),
+        ALOGD("%s: failed for %s (error=%s)", __func__, domain.c_str(),
         error.c_str());
     }
 }
@@ -392,12 +426,12 @@ void ParameterManagerWrapper::addConfigurableElementToDomain(const std::string &
         const std::string &elementPath)
 {
     if (!isStarted()) {
-        ALOGE("%s: failed to addConfigurableElementToDomain, Cap not initialized", __func__);
+        ALOGE("%s: failed, Cap not initialized", __func__);
         return;
     }
     std::string error;
     bool ret = mPfwConnector->addConfigurableElementToDomain(domain, elementPath, error);
-    ALOGE_IF(!ret, "%s: failed to add parameter %s for domain %s (error=%s)",
+    ALOGE_IF(!ret, "%s: failed for %s for domain %s (error=%s)",
               __func__, elementPath.c_str(), domain.c_str(), error.c_str());
 }
 
@@ -405,12 +439,12 @@ void ParameterManagerWrapper::createConfiguration(const std::string &domain,
         const std::string &configurationName)
 {
     if (!isStarted()) {
-        ALOGE("%s: failed to createConfiguration, Cap not initialized", __func__);
+        ALOGE("%s: failed, Cap not initialized", __func__);
         return;
     }
     std::string error;
     bool ret = mPfwConnector->createConfiguration(domain, configurationName, error);
-    ALOGE_IF(!ret, "%s: failed to create configuration %s for domain %s (error=%s)",
+    ALOGE_IF(!ret, "%s: failed for %s for domain %s (error=%s)",
               __func__, configurationName.c_str(), domain.c_str(), error.c_str());
 }
 
@@ -418,12 +452,12 @@ void ParameterManagerWrapper::setApplicationRule(
         const std::string &domain, const std::string &configurationName, const std::string &rule)
 {
     if (!isStarted()) {
-        ALOGE("%s: failed to setApplicationRule, Cap not initialized", __func__);
+        ALOGE("%s: failed, Cap not initialized", __func__);
         return;
     }
     std::string error;
     bool ret = mPfwConnector->setApplicationRule(domain, configurationName, rule, error);
-    ALOGE_IF(!ret, "%s: failed to set rule %s for domain %s and configuration %s (error=%s)",
+    ALOGE_IF(!ret, "%s: failed for %s for domain %s and configuration %s (error=%s)",
               __func__, rule.c_str(), domain.c_str(), configurationName.c_str(), error.c_str());
 }
 
@@ -432,7 +466,7 @@ void ParameterManagerWrapper::accessConfigurationValue(const std::string &domain
         std::string &value)
 {
     if (!isStarted()) {
-        ALOGE("%s: failed to accessConfigurationValue, Cap not initialized", __func__);
+        ALOGE("%s: failed, Cap not initialized", __func__);
         return;
     }
     std::string error;
@@ -451,7 +485,7 @@ status_t ParameterManagerWrapper::setConfiguration(
     }
     std::string error;
     if (!mPfwConnector->setTuningMode(/* bOn= */ true, error)) {
-        ALOGD("%s: failed to set Tuning Mode error=%s", __FUNCTION__, error.c_str());
+        ALOGD("%s: failed (error=%s)", __func__, error.c_str());
         return DEAD_OBJECT;
     }
     for (auto &domain: capSettings.parsedConfig->capConfigurableDomains) {
