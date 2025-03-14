@@ -1137,8 +1137,7 @@ public:
                     return mMixerChannelMask;
                 }
 
-    status_t getTimestamp_l(AudioTimestamp& timestamp) final
-            REQUIRES(mutex(), ThreadBase_ThreadLoop);
+    virtual     status_t    getTimestamp_l(AudioTimestamp& timestamp) REQUIRES(mutex(), ThreadBase_ThreadLoop);
 
     void addPatchTrack(const sp<IAfPatchTrack>& track) final EXCLUDES_ThreadBase_Mutex;
     void deletePatchTrack(const sp<IAfPatchTrack>& track) final EXCLUDES_ThreadBase_Mutex;
@@ -1814,6 +1813,10 @@ protected:
     float                   mMasterBalanceLeft = 1.f;
     float                   mMasterBalanceRight = 1.f;
 
+    uint64_t                mFramesWrittenAtStandby;// used to reset frames on track reset
+    uint64_t                mFramesWrittenForSleep; // used to reset frames on track removal
+                                                    // or underrun before entering standby
+
 public:
     virtual     bool        hasFastMixer() const { return false; }
 
@@ -1835,6 +1838,7 @@ public:
                     }
                     return INVALID_OPERATION;
                 }
+    virtual     status_t    getTimestamp_l(AudioTimestamp& timestamp) override;
 };
 
 class OffloadThread : public DirectOutputThread {
