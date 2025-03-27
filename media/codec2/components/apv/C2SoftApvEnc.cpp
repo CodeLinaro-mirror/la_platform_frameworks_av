@@ -36,6 +36,7 @@
 #include <util/C2InterfaceHelper.h>
 #include <cmath>
 #include "C2SoftApvEnc.h"
+#include "isAtLeastRelease.h"
 
 namespace android {
 
@@ -943,6 +944,36 @@ void C2SoftApvEnc::setParams(oapve_param_t& param) {
     param.band_idc = mIntf->getBandIdc_l();
     param.profile_idc = mIntf->getProfile_l();
     param.level_idc = mIntf->getLevel_l();
+    mColorAspects = mIntf->getColorAspects_l();
+    ColorAspects sfAspects;
+    if (!C2Mapper::map(mColorAspects->primaries, &sfAspects.mPrimaries)) {
+        sfAspects.mPrimaries = android::ColorAspects::PrimariesUnspecified;
+    }
+    if (!C2Mapper::map(mColorAspects->range, &sfAspects.mRange)) {
+        sfAspects.mRange = android::ColorAspects::RangeUnspecified;
+    }
+    if (!C2Mapper::map(mColorAspects->matrix, &sfAspects.mMatrixCoeffs)) {
+        sfAspects.mMatrixCoeffs = android::ColorAspects::MatrixUnspecified;
+    }
+    if (!C2Mapper::map(mColorAspects->transfer, &sfAspects.mTransfer)) {
+        sfAspects.mTransfer = android::ColorAspects::TransferUnspecified;
+    }
+
+    int32_t isoPrimaries, isoTransfer, isoMatrix;
+    bool isoFullRange;
+    ColorUtils::convertCodecColorAspectsToIsoAspects(sfAspects,
+        &isoPrimaries, &isoTransfer, &isoMatrix, &isoFullRange);
+    param.color_primaries = isoPrimaries;
+    param.transfer_characteristics = isoTransfer;
+    param.matrix_coefficients = isoMatrix;
+    param.full_range_flag = isoFullRange;
+
+    if (mColorAspects->primaries != C2Color::PRIMARIES_UNSPECIFIED ||
+            mColorAspects->transfer != C2Color::TRANSFER_UNSPECIFIED ||
+            mColorAspects->matrix != C2Color::MATRIX_UNSPECIFIED ||
+            mColorAspects->range != C2Color::RANGE_UNSPECIFIED) {
+        param.color_description_present_flag = 1;
+    }
 }
 
 c2_status_t C2SoftApvEnc::setEncodeArgs(oapv_frms_t* inputFrames, const C2GraphicView* const input,
@@ -1136,13 +1167,14 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
     uint8_t profile_idc = 0;
     uint8_t level_idc = 0;
     uint8_t band_idc = 0;
-    uint32_t frame_width_minus1 = 0;
-    uint32_t frame_height_minus1 = 0;
+    uint32_t frame_width = 0;
+    uint32_t frame_height = 0;
     uint8_t chroma_format_idc = 0;
     uint8_t bit_depth_minus8 = 0;
     uint8_t capture_time_distance = 0;
     uint8_t color_primaries = 0;
     uint8_t transfer_characteristics = 0;
+    uint8_t full_range_flag = 0;
     uint8_t matrix_coefficients = 0;
 
     /* pbu_header() */
@@ -1157,8 +1189,8 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
     level_idc = reader.getBits(8);              // level_idc
     band_idc = reader.getBits(3);               // band_idc
     reader.skipBits(5);                         // reserved_zero_5bits
-    frame_width_minus1 = reader.getBits(32);    // width
-    frame_height_minus1 = reader.getBits(32);   // height
+    frame_width = reader.getBits(24);           // width
+    frame_height = reader.getBits(24);          // height
     chroma_format_idc = reader.getBits(4);      // chroma_format_idc
     bit_depth_minus8 = reader.getBits(4);       // bit_depth
     capture_time_distance = reader.getBits(8);  // capture_time_distance
@@ -1171,21 +1203,14 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
         color_primaries = reader.getBits(8);           // color_primaries
         transfer_characteristics = reader.getBits(8);  // transfer_characteristics
         matrix_coefficients = reader.getBits(8);       // matrix_coefficients
+        full_range_flag = reader.getBits(1);           // full_range_flag
+        reader.skipBits(7);                            // reserved_zero_7bits
     }
 
     number_of_configuration_entry = 1;  // The real-time encoding on the device is assumed to be 1.
     number_of_frame_info = 1;  // The real-time encoding on the device is assumed to be 1.
 
     std::vector<uint8_t> csdData;
-
-    //TODO(b/392976813): These 4 lines need to be removed once test data are fixed.
-    csdData.push_back((uint8_t)0x0);
-    csdData.push_back((uint8_t)0x0);
-    csdData.push_back((uint8_t)0x0);
-    csdData.push_back((uint8_t)0x0);
-
-    //TODO(b/392976819) This need to be removed once OpenAPV is fixed.
-    bit_depth_minus8 = 2;
 
     csdData.push_back((uint8_t)0x1);
     csdData.push_back(number_of_configuration_entry);
@@ -1199,21 +1224,22 @@ void C2SoftApvEnc::createCsdData(const std::unique_ptr<C2Work>& work,
             csdData.push_back(profile_idc);
             csdData.push_back(level_idc);
             csdData.push_back(band_idc);
-            csdData.push_back((uint8_t)((frame_width_minus1 >> 24) & 0xff));
-            csdData.push_back((uint8_t)((frame_width_minus1 >> 16) & 0xff));
-            csdData.push_back((uint8_t)((frame_width_minus1 >> 8) & 0xff));
-            csdData.push_back((uint8_t)(frame_width_minus1 & 0xff));
-            csdData.push_back((uint8_t)((frame_height_minus1 >> 24) & 0xff));
-            csdData.push_back((uint8_t)((frame_height_minus1 >> 16) & 0xff));
-            csdData.push_back((uint8_t)((frame_height_minus1 >> 8) & 0xff));
-            csdData.push_back((uint8_t)(frame_height_minus1 & 0xff));
-            csdData.push_back((uint8_t)(((bit_depth_minus8 << 4) & 0xf0) |
-                                      (chroma_format_idc & 0xf)));
+            csdData.push_back((uint8_t)((frame_width >> 24) & 0xff));
+            csdData.push_back((uint8_t)((frame_width >> 16) & 0xff));
+            csdData.push_back((uint8_t)((frame_width >> 8) & 0xff));
+            csdData.push_back((uint8_t)(frame_width & 0xff));
+            csdData.push_back((uint8_t)((frame_height >> 24) & 0xff));
+            csdData.push_back((uint8_t)((frame_height >> 16) & 0xff));
+            csdData.push_back((uint8_t)((frame_height >> 8) & 0xff));
+            csdData.push_back((uint8_t)(frame_height & 0xff));
+            csdData.push_back((uint8_t)(((chroma_format_idc << 4) & 0xf0) |
+                                      (bit_depth_minus8 & 0xf)));
             csdData.push_back((uint8_t)(capture_time_distance));
             if (color_description_present_flag) {
                 csdData.push_back(color_primaries);
                 csdData.push_back(transfer_characteristics);
                 csdData.push_back(matrix_coefficients);
+                csdData.push_back(full_range_flag << 7);
             }
         }
     }
@@ -1403,6 +1429,13 @@ __attribute__((cfi_canonical_jump_table)) extern "C" ::C2ComponentFactory* Creat
         ALOGV("APV SW Codec is not enabled");
         return nullptr;
     }
+
+    bool enabled = isAtLeastRelease(36, "Baklava");
+    ALOGD("isAtLeastRelease(36, Baklava) says enable: %s", enabled ? "yes" : "no");
+    if (!enabled) {
+        return nullptr;
+    }
+
     return new ::android::C2SoftApvEncFactory();
 }
 

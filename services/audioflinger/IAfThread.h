@@ -108,11 +108,6 @@ public:
             IAfEffectChain* srcChain = nullptr)
             REQUIRES(mutex(), audio_utils::ThreadBase_Mutex) = 0;
 
-    virtual void requestLogMerge() = 0;
-    virtual sp<NBLog::Writer> newWriter_l(size_t size, const char *name)
-            REQUIRES(mutex()) = 0;
-    virtual void unregisterWriter(const sp<NBLog::Writer>& writer) = 0;
-
     virtual sp<audioflinger::SyncEvent> createSyncEvent(AudioSystem::sync_event_t type,
             audio_session_t triggerSession,
             audio_session_t listenerSession,
@@ -149,6 +144,7 @@ public:
         MMAP_CAPTURE,   // Thread class for MMAP capture stream
         SPATIALIZER,    //
         BIT_PERFECT,    // Thread class for BitPerfectThread
+        DIRECT_RECORD,  // Thread class for DirectRecordThread
         // When adding a value, also update IAfThreadBase::threadTypeToString()
     };
 
@@ -689,6 +685,9 @@ public:
 
     // TODO(b/291317898)  move to IAfThreadBase?
     virtual void invalidateTracks(std::set<audio_port_handle_t>& portIds)
+            EXCLUDES_ThreadBase_Mutex = 0;
+
+    virtual void invalidateTracks(audio_stream_type_t streamType)
             EXCLUDES_ThreadBase_Mutex = 0;
 
     // Sets the UID records silence - TODO(b/291317898)  move to IAfMmapCaptureThread

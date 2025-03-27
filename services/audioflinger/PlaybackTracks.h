@@ -45,14 +45,14 @@ private:
                        const AttributionSourceState& attributionSource,
                        audio_usage_t usage, int id, uid_t uid);
     void onFirstRef() override;
-    static void getPackagesForUid(uid_t uid, Vector<String16>& packages);
 
     AppOpsManager mAppOpsManager;
 
-    class PlayAudioOpCallback : public BnAppOpsCallback {
+    class PlayAudioOpCallback : public com::android::internal::app::BnAppOpsCallback {
     public:
         explicit PlayAudioOpCallback(const wp<OpPlayAudioMonitor>& monitor);
-        void opChanged(int32_t op, const String16& packageName) override;
+        binder::Status opChanged(int32_t op, int32_t uid, const String16& packageName,
+                                 const String16& persistentDeviceId) override;
 
     private:
         const wp<OpPlayAudioMonitor> mMonitor;

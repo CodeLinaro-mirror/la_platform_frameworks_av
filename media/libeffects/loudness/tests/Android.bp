@@ -1,3 +1,5 @@
+// Build the unit tests for loudness effect tests
+
 package {
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
@@ -7,32 +9,28 @@ package {
     default_applicable_licenses: ["frameworks_av_license"],
 }
 
-cc_library {
-    name: "libmedialogservice",
-
+cc_test {
+    name: "loudness_enhancer_tests",
     srcs: [
-        "IMediaLogService.cpp",
-        "MediaLogService.cpp",
+        "loudness_enhancer_tests.cpp",
     ],
-
-    header_libs: [
-        "libmedia_headers",
-    ],
-
     shared_libs: [
-        "libaudioutils",
-        "libbinder",
+        "libbase",
         "liblog",
-        "libmediautils",
-        "libnblog",
-        "libutils",
-        "packagemanager_aidl-cpp",
     ],
-
-    export_include_dirs: ["."],
-
+    static_libs: [
+        "libldnhncr",
+    ],
+    header_libs: [
+        "libaudioeffects",
+        "libaudioutils_headers",
+    ],
+    include_dirs: [
+        "frameworks/av/media/libeffects/loudness",
+    ],
     cflags: [
         "-Wall",
         "-Werror",
+        "-Wthread-safety",
     ],
 }
