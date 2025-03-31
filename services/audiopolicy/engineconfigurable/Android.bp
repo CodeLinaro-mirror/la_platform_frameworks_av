@@ -24,12 +24,13 @@ cc_library_shared {
         "src/Stream.cpp",
     ],
     cflags: [
+        "-DENABLE_CAP_AIDL_HYBRID_MODE",
         "-Wall",
         "-Werror",
         "-Wextra",
     ] + select(release_flag("RELEASE_HARDWARE_AUDIO_USE_CAP_AIDL"), {
         true: [],
-        default: ["-DENABLE_CAP_AIDL_HYBRID_MODE"],
+        default: ["-DDISABLE_CAP_AIDL"],
     }),
     local_include_dirs: ["include"],
     header_libs: [
@@ -45,6 +46,7 @@ cc_library_shared {
         "libaudiopolicyengineconfigurable_pfwwrapper",
     ],
     shared_libs: [
+        "com.android.media.audioserver-aconfig-cc",
         "libaudio_aidl_conversion_common_cpp",
         "libaudiofoundation",
         "libaudiopolicy",

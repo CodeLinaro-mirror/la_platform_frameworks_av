@@ -38,6 +38,7 @@
 
 #include "common/CameraDeviceBase.h"
 #include "common/DepthPhotoProcessor.h"
+#include "common/FrameProcessorBase.h"
 #include "device3/BufferUtils.h"
 #include "device3/StatusTracker.h"
 #include "device3/Camera3BufferManager.h"
@@ -130,6 +131,10 @@ class Camera3Device :
     const CameraMetadata& info() const override;
     const CameraMetadata& infoPhysical(const std::string& physicalId) const override;
     bool isCompositeJpegRDisabled() const override { return mIsCompositeJpegRDisabled; };
+    bool isCompositeHeicDisabled() const override { return mIsCompositeHeicDisabled; }
+    bool isCompositeHeicUltraHDRDisabled() const override {
+        return mIsCompositeHeicUltraHDRDisabled;
+    }
 
     // Capture and setStreamingRequest will configure streams if currently in
     // idle state
@@ -197,7 +202,7 @@ class Camera3Device :
 
     virtual status_t beginConfigure() override {return OK;};
 
-    virtual status_t getSharedStreamId(const OutputConfiguration& /*config*/,
+    virtual status_t getSharedStreamId(const OutputStreamInfo& /*config*/,
             int* /*streamId*/) override {return INVALID_OPERATION;};
 
     virtual status_t addSharedSurfaces(int /*streamId*/,
@@ -207,6 +212,27 @@ class Camera3Device :
 
     virtual status_t removeSharedSurfaces(int /*streamId*/,
             const std::vector<size_t>& /*surfaceIds*/) override {return INVALID_OPERATION;};
+
+    virtual status_t setSharedStreamingRequest(
+            const PhysicalCameraSettingsList& /*request*/, const SurfaceMap& /*surfaceMap*/,
+            int32_t* /*sharedReqID*/, int64_t* /*lastFrameNumber = NULL*/) override {
+        return INVALID_OPERATION;
+    };
+
+    virtual status_t clearSharedStreamingRequest(int64_t* /*lastFrameNumber = NULL*/) override {
+        return INVALID_OPERATION;
+    };
+
+    virtual status_t setSharedCaptureRequest(const PhysicalCameraSettingsList& /*request*/,
+            const SurfaceMap& /*surfaceMap*/, int32_t* /*sharedReqID*/,
+            int64_t* /*lastFrameNumber = NULL*/) override {return INVALID_OPERATION;};
+
+    virtual sp<camera2::FrameProcessorBase> getSharedFrameProcessor() override {return nullptr;};
+
+    virtual status_t startStreaming(const int32_t /*reqId*/, const SurfaceMap& /*surfaceMap*/,
+            int32_t* /*sharedReqID*/, int64_t* /*lastFrameNumber = NULL*/)
+            override {return INVALID_OPERATION;};
+
 
     status_t configureStreams(const CameraMetadata& sessionParams,
             int operatingMode =
@@ -226,7 +252,7 @@ class Camera3Device :
     // Transitions to the idle state on success
     status_t waitUntilDrained() override;
 
-    status_t setNotifyCallback(wp<NotificationListener> listener) override;
+    virtual status_t setNotifyCallback(wp<NotificationListener> listener) override;
     bool     willNotify3A() override;
     status_t waitForNextFrame(nsecs_t timeout) override;
     status_t getNextResult(CaptureResult *frame) override;
@@ -596,6 +622,8 @@ class Camera3Device :
     CameraMetadata             mDeviceInfo;
     bool                       mSupportNativeZoomRatio;
     bool                       mIsCompositeJpegRDisabled;
+    bool                       mIsCompositeHeicDisabled;
+    bool                       mIsCompositeHeicUltraHDRDisabled;
     std::unordered_map<std::string, CameraMetadata> mPhysicalDeviceInfoMap;
 
     CameraMetadata             mRequestTemplateCache[CAMERA_TEMPLATE_COUNT];
@@ -761,6 +789,22 @@ class Camera3Device :
         int32_t inputStreamId = -1;
         std::set<int32_t> outputStreamIds;
     };
+
+    /**
+     * Get the first repeating request in the ongoing repeating request list.
+     */
+    const sp<CaptureRequest> getOngoingRepeatingRequestLocked();
+
+    /**
+     * Update the first repeating request in the ongoing repeating request list
+     * with the surface map provided.
+     */
+    status_t updateOngoingRepeatingRequestLocked(const SurfaceMap& surfaceMap);
+
+    /**
+     * Get the repeating request last frame number.
+     */
+    int64_t getRepeatingRequestLastFrameNumberLocked();
 
     /**
      * Get the last request submitted to the hal by the request thread.
@@ -1066,6 +1110,20 @@ class Camera3Device :
          * signal mLatestRequestmutex
          **/
         void wakeupLatestRequest(bool latestRequestFailed, int32_t latestRequestId);
+
+        /**
+         * Get the first repeating request in the ongoing repeating request list.
+         */
+        const sp<CaptureRequest> getOngoingRepeatingRequest();
+
+        /**
+         * Update the first repeating request in the ongoing repeating request list
+         * with the surface map provided.
+         */
+        status_t updateOngoingRepeatingRequest(const SurfaceMap& surfaceMap);
+
+        // Get the repeating request last frame number.
+        int64_t getRepeatingRequestLastFrameNumber();
 
       protected:
 

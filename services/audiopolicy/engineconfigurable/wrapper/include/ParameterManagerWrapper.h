@@ -47,7 +47,8 @@ private:
     using Criteria = std::map<std::string, ISelectionCriterionInterface *>;
 
 public:
-    ParameterManagerWrapper(bool enableSchemaVerification = false,
+    ParameterManagerWrapper(bool useLegacyConfigurationFile = false,
+                            bool enableSchemaVerification = false,
                             const std::string &schemaUri = {});
     ~ParameterManagerWrapper();
 
@@ -75,7 +76,7 @@ public:
      *
      * @return true if platform state is started correctly, false otherwise.
      */
-    bool isStarted();
+    bool isStarted() const;
 
     /**
      * Set Telephony Mode.
@@ -234,7 +235,9 @@ private:
 
     DeviceToCriterionTypeAdapter mOutputDeviceToCriterionTypeMap;
     DeviceToCriterionTypeAdapter mInputDeviceToCriterionTypeMap;
-
+#ifdef ENABLE_CAP_AIDL_HYBRID_MODE
+    static const char *const mVendorPolicyPfwConfFileName; /**< CapEngine PFW top file name.*/
+#endif
     static const char *const mPolicyPfwConfFileName; /**< CapEngine PFW top file name.*/
 };
 

@@ -304,7 +304,8 @@ public:
     static void onNewAudioModulesAvailable();
     static status_t setDeviceConnectionState(audio_policy_dev_state_t state,
                                              const android::media::audio::common::AudioPort& port,
-                                             audio_format_t encodedFormat);
+                                             audio_format_t encodedFormat,
+                                             bool deviceSwitch);
     static audio_policy_dev_state_t getDeviceConnectionState(audio_devices_t device,
                                                                 const char *device_address);
     static status_t handleDeviceConfigChange(audio_devices_t device,
@@ -370,6 +371,7 @@ public:
      * @param[in|out] selectedDeviceId the requested device id for playback, the actual device id
      *                                 for playback will be returned
      * @param[out] portId the generated port id to identify the client
+     * @param[out] source the audio source validated by audio policy manager
      * @return if the call is successful or not
      */
     static status_t getInputForAttr(const audio_attributes_t *attr,
@@ -380,7 +382,8 @@ public:
                                     audio_config_base_t *config,
                                     audio_input_flags_t flags,
                                     audio_port_handle_t *selectedDeviceId,
-                                    audio_port_handle_t *portId);
+                                    audio_port_handle_t *portId,
+                                    audio_source_t *source);
 
     static status_t startInput(audio_port_handle_t portId);
     static status_t stopInput(audio_port_handle_t portId);

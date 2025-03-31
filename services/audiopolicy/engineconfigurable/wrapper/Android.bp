@@ -13,12 +13,13 @@ cc_library {
     export_include_dirs: ["include"],
     srcs: ["ParameterManagerWrapper.cpp"],
     cflags: [
+        "-DENABLE_CAP_AIDL_HYBRID_MODE",
         "-Wall",
         "-Werror",
         "-Wextra",
     ] + select(release_flag("RELEASE_HARDWARE_AUDIO_USE_CAP_AIDL"), {
         true: [],
-        default: ["-DENABLE_CAP_AIDL_HYBRID_MODE"],
+        default: ["-DDISABLE_CAP_AIDL"],
     }),
     header_libs: [
         "libaudiofoundation_headers",

@@ -40,8 +40,10 @@
 #include <fakeservicemanager/FakeServiceManager.h>
 #include <fuzzbinder/random_binder.h>
 #include <gui/BufferItemConsumer.h>
-#include <gui/Flags.h>
+#include <gui/Flags.h> // remove with COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
+#if not COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_CONSUMER_BASE_OWNS_BQ)
 #include <gui/IGraphicBufferProducer.h>
+#endif
 #include <gui/Surface.h>
 #include <gui/SurfaceComposerClient.h>
 #include <media/IAudioFlinger.h>
@@ -65,8 +67,6 @@ const size_t kMinArgs = 1;
 const size_t kMaxArgs = 5;
 const int32_t kCamType[] = {hardware::ICameraService::CAMERA_TYPE_BACKWARD_COMPATIBLE,
                             hardware::ICameraService::CAMERA_TYPE_ALL};
-const int kCameraApiVersion[] = {android::CameraService::API_VERSION_1,
-                                 android::CameraService::API_VERSION_2};
 const uint8_t kSensorPixelModes[] = {ANDROID_SENSOR_PIXEL_MODE_DEFAULT,
         ANDROID_SENSOR_PIXEL_MODE_MAXIMUM_RESOLUTION};
 const int32_t kRequestTemplates[] = {
@@ -430,8 +430,6 @@ void CameraFuzzer::getNumCameras() {
 void CameraFuzzer::getCameraInformation(int32_t cameraId) {
     std::string cameraIdStr = std::to_string(cameraId);
     bool isSupported = false;
-    mCameraService->supportsCameraApi(
-        cameraIdStr, kCameraApiVersion[mFuzzedDataProvider->ConsumeBool()], &isSupported);
     mCameraService->isHiddenPhysicalCamera(cameraIdStr, &isSupported);
 
     std::string parameters;
@@ -848,10 +846,10 @@ void Camera2Fuzzer::process() {
 
         std::string noPhysicalId;
         size_t rotations = sizeof(kRotations) / sizeof(int32_t) - 1;
-        sp<IGraphicBufferProducer> igbp = surface->getIGraphicBufferProducer();
+        ParcelableSurfaceType pSurface = flagtools::surfaceToParcelableSurfaceType(surface);
         OutputConfiguration output(
-                igbp, kRotations[mFuzzedDataProvider->ConsumeIntegralInRange<size_t>(0, rotations)],
-                noPhysicalId);
+            pSurface, kRotations[mFuzzedDataProvider->ConsumeIntegralInRange<size_t>(0, rotations)],
+            noPhysicalId);
 #else
         sp<IGraphicBufferProducer> gbProducer;
         sp<IGraphicBufferConsumer> gbConsumer;

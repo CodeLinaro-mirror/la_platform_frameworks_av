@@ -89,6 +89,16 @@ namespace wm_flags = com::android::window::flags;
 
 namespace android {
 
+namespace {
+
+bool shouldInjectFakeStream(const CameraMetadata& info) {
+    // Do not inject fake stream for a virtual camera (i.e., camera belonging to virtual devices),
+    // as it can handle zero streams properly.
+    return getDeviceId(info) == kDefaultDeviceId;
+}
+
+} // namespace
+
 Camera3Device::Camera3Device(std::shared_ptr<CameraServiceProxyWrapper>& cameraServiceProxyWrapper,
         std::shared_ptr<AttributionAndPermissionUtils> attributionAndPermissionUtils,
         const std::string &id, bool overrideForPerfClass, int rotationOverride,
@@ -100,6 +110,8 @@ Camera3Device::Camera3Device(std::shared_ptr<CameraServiceProxyWrapper>& cameraS
         mOperatingMode(NO_MODE),
         mIsConstrainedHighSpeedConfiguration(false),
         mIsCompositeJpegRDisabled(false),
+        mIsCompositeHeicDisabled(false),
+        mIsCompositeHeicUltraHDRDisabled(false),
         mStatus(STATUS_UNINITIALIZED),
         mStatusWaiters(0),
         mUsePartialResult(false),
@@ -2502,11 +2514,13 @@ status_t Camera3Device::configureStreamsLocked(int operatingMode,
 
     // Workaround for device HALv3.2 or older spec bug - zero streams requires
     // adding a fake stream instead.
-    // TODO: Bug: 17321404 for fixing the HAL spec and removing this workaround.
-    if (mOutputStreams.size() == 0) {
-        addFakeStreamLocked();
-    } else {
-        tryRemoveFakeStreamLocked();
+    // TODO(b/17321404): Fix the HAL spec and remove this workaround.
+    if (shouldInjectFakeStream(mDeviceInfo)) {
+        if (mOutputStreams.size() == 0) {
+            addFakeStreamLocked();
+        } else {
+            tryRemoveFakeStreamLocked();
+        }
     }
 
     // Override stream use case based on "adb shell command"
@@ -2987,6 +3001,36 @@ Camera3Device::LatestRequestInfo Camera3Device::getLatestRequestInfoLocked() {
     return retVal;
 }
 
+const sp<Camera3Device::CaptureRequest> Camera3Device::getOngoingRepeatingRequestLocked() {
+    ALOGV("%s", __FUNCTION__);
+
+    if (mRequestThread != NULL) {
+        return mRequestThread->getOngoingRepeatingRequest();
+    }
+
+    return nullptr;
+}
+
+status_t Camera3Device::updateOngoingRepeatingRequestLocked(const SurfaceMap& surfaceMap) {
+    ALOGV("%s", __FUNCTION__);
+
+    if (mRequestThread != NULL) {
+        return mRequestThread->updateOngoingRepeatingRequest(surfaceMap);
+    }
+
+    return INVALID_OPERATION;
+}
+
+int64_t Camera3Device::getRepeatingRequestLastFrameNumberLocked() {
+    ALOGV("%s", __FUNCTION__);
+
+    if (mRequestThread != NULL) {
+        return mRequestThread->getRepeatingRequestLastFrameNumber();
+    }
+
+    return hardware::camera2::ICameraDeviceUser::NO_IN_FLIGHT_REPEATING_FRAMES;
+}
+
 void Camera3Device::monitorMetadata(TagMonitor::eventSource source,
         int64_t frameNumber, nsecs_t timestamp, const CameraMetadata& metadata,
         const std::unordered_map<std::string, CameraMetadata>& physicalMetadata,
@@ -3141,7 +3185,7 @@ Camera3Device::RequestThread::RequestThread(wp<Camera3Device> parent,
         mRotationOverride(rotationOverride),
         mSupportSettingsOverride(supportSettingsOverride) {
     mStatusId = statusTracker->addComponent("RequestThread");
-    mVndkVersion = getVNDKVersionFromProp(__ANDROID_API_FUTURE__);
+    mVndkVersion = getVNDKVersion();
 }
 
 Camera3Device::RequestThread::~RequestThread() {}
@@ -4249,6 +4293,60 @@ Camera3Device::LatestRequestInfo Camera3Device::RequestThread::getLatestRequestI
     ALOGV("RequestThread::%s", __FUNCTION__);
 
     return mLatestRequestInfo;
+}
+
+const sp<Camera3Device::CaptureRequest> Camera3Device::RequestThread::getOngoingRepeatingRequest() {
+    ATRACE_CALL();
+    Mutex::Autolock l(mRequestLock);
+
+    ALOGV("RequestThread::%s", __FUNCTION__);
+    if (mRepeatingRequests.empty()) {
+        return nullptr;
+    }
+
+    return *mRepeatingRequests.begin();
+}
+
+status_t Camera3Device::RequestThread::updateOngoingRepeatingRequest(const SurfaceMap& surfaceMap) {
+    ATRACE_CALL();
+    Mutex::Autolock l(mRequestLock);
+    if (mRepeatingRequests.empty()) {
+        return INVALID_OPERATION;
+    }
+
+    sp<CaptureRequest> curRequest = *mRepeatingRequests.begin();
+    std::vector<int32_t> outputStreamIds;
+    Vector<sp<camera3::Camera3OutputStreamInterface>> outputStreams;
+    for (const auto& [key, value] : surfaceMap) {
+        outputStreamIds.push_back(key);
+    }
+    for (auto id : outputStreamIds) {
+        sp<Camera3Device> parent = mParent.promote();
+        if (parent == nullptr) {
+            ALOGE("%s: parent does not exist!", __FUNCTION__);
+            return INVALID_OPERATION;
+        }
+        sp<Camera3OutputStreamInterface> stream = parent->mOutputStreams.get(id);
+        if (stream == nullptr) {
+            CLOGE("Request references unknown stream %d",id);
+            return BAD_VALUE;
+        }
+        outputStreams.push(stream);
+    }
+    curRequest->mOutputStreams = outputStreams;
+    curRequest->mOutputSurfaces = surfaceMap;
+
+    ALOGV("RequestThread::%s", __FUNCTION__);
+    return OK;
+
+}
+
+int64_t Camera3Device::RequestThread::getRepeatingRequestLastFrameNumber() {
+    ATRACE_CALL();
+    Mutex::Autolock l(mRequestLock);
+
+    ALOGV("RequestThread::%s", __FUNCTION__);
+    return mRepeatingLastFrameNumber;
 }
 
 bool Camera3Device::RequestThread::isStreamPending(
@@ -5830,4 +5928,4 @@ status_t Camera3Device::deriveAndSetTransformLocked(
     return OK;
 }
 
-}; // namespace android
+} // namespace android
