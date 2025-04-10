@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 /**
@@ -300,7 +304,12 @@ enum {
     /**
      * Reducing latency is more important than battery life.
      */
-    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY
+    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
+
+    /**
+     * reserve HD APTX mode for HD audio case.
+     */
+    AAUDIO_PERFORMANCE_MODE_HD_APTX
 };
 typedef int32_t aaudio_performance_mode_t;
 

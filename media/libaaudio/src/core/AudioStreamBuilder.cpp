@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #define LOG_TAG "AudioStreamBuilder"
@@ -266,6 +270,7 @@ aaudio_result_t AudioStreamBuilder::validate() const {
         case AAUDIO_PERFORMANCE_MODE_NONE:
         case AAUDIO_PERFORMANCE_MODE_POWER_SAVING:
         case AAUDIO_PERFORMANCE_MODE_LOW_LATENCY:
+        case AAUDIO_PERFORMANCE_MODE_HD_APTX:
             break;
         default:
             ALOGE("illegal performanceMode = %d", mPerformanceMode);

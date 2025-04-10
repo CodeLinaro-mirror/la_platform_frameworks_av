@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #define LOG_TAG "AudioStreamTrack"
@@ -85,7 +89,9 @@ aaudio_result_t AudioStreamTrack::open(const AudioStreamBuilder& builder)
             // This uses a mixer that wakes up less often than the FAST mixer.
             flags = AUDIO_OUTPUT_FLAG_DEEP_BUFFER;
             break;
-
+        case AAUDIO_PERFORMANCE_MODE_HD_APTX:
+            flags = AUDIO_OUTPUT_FLAG_DIRECT;
+            break;
         case AAUDIO_PERFORMANCE_MODE_NONE:
         default:
             // No flags. Use a normal mixer in front of the FAST mixer.
