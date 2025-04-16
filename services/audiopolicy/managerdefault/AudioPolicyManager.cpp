@@ -1820,6 +1820,7 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
         if (*flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
             ALOGV("Set MMAP output flags for PCM format");
         } else if (*flags & AUDIO_OUTPUT_FLAG_FAST) {
+            *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX | AUDIO_OUTPUT_FLAG_FAST);
             ALOGV("Set Fast output flags for PCM format");
         } else if ((*flags & AUDIO_OUTPUT_FLAG_INCALL_MUSIC) == 0) {
            *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX |
