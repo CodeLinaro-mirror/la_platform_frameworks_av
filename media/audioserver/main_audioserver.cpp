@@ -217,7 +217,7 @@ int main(int argc __unused, char **argv)
         // attempting to call audio flinger on a null pointer could make the process crash
         // and attract attentions.
         std::vector<AudioMMapPolicyInfo> policyInfos;
-        status_t status = sp<IAudioFlinger>::cast(af)->getMmapPolicyInfos(
+        status_t status = AudioSystem::getMmapPolicyInfos(
                 AudioMMapPolicyType::DEFAULT, &policyInfos);
         // Initialize aaudio service when querying mmap policy succeeds and
         // any of the policy supports MMAP.
@@ -232,6 +232,7 @@ int main(int argc __unused, char **argv)
                   __func__, status, policyInfos.size());
         }
         const auto endTime = std::chrono::steady_clock::now();
+        af->startupFinished();
         using FloatMillis = std::chrono::duration<float, std::milli>;
         const float timeTaken = std::chrono::duration_cast<FloatMillis>(
                 endTime - startTime).count();
