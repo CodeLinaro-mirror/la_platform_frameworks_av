@@ -27,6 +27,10 @@
 #include <system/audio_config.h>
 #include <utils/Log.h>
 
+#define VALUEADD_AOSP_SUPPORT_PROPERTY "ro.vendor.qti.va_aosp.support"
+static char g_audio_framework[100];
+#define VA_AUDIO_POLICY_CONFIG_PATH "/vendor/etc/audio/audio_policy_configuration.xml"
+
 namespace android {
 
 using media::audio::common::AudioIoFlags;
@@ -190,8 +194,16 @@ sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmAidlConfigWithFallback
 // static
 sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmXmlConfigWithFallback(
         const std::string& xmlFilePath) {
+    std::string audioPolicyXmlConfigFile = VA_AUDIO_POLICY_CONFIG_PATH;
+    bool va_aosp_support = property_get_bool(VALUEADD_AOSP_SUPPORT_PROPERTY, false);
+    if (va_aosp_support) {
+        property_get("ro.boot.audio", g_audio_framework, NULL);
+        if (strstr(g_audio_framework, "audioreach") != NULL)
+            audioPolicyXmlConfigFile = audio_get_audio_policy_config_file();
+    }
     const std::string filePath =
-            xmlFilePath.empty() ? audio_get_audio_policy_config_file() : xmlFilePath;
+            va_aosp_support ? audioPolicyXmlConfigFile :
+            (xmlFilePath.empty() ? audio_get_audio_policy_config_file() : xmlFilePath);
     auto config = sp<AudioPolicyConfig>::make();
     if (status_t status = config->loadFromXml(filePath, false /*forVts*/); status == NO_ERROR) {
         return config;
