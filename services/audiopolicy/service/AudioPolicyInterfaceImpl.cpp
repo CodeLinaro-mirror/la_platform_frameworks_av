@@ -24,6 +24,7 @@
 #include <android/content/AttributionSourceState.h>
 #include <android_media_audiopolicy.h>
 #include <com_android_media_audio.h>
+#include <cutils/properties.h>
 #include <error/expected_utils.h>
 #include <media/AidlConversion.h>
 #include <media/AudioPolicy.h>
@@ -79,6 +80,8 @@ using media::audio::common::AudioDeviceDescription;
 using media::audio::common::AudioFormatDescription;
 using media::audio::common::AudioMode;
 using media::audio::common::AudioOffloadInfo;
+using media::audio::common::AudioPolicyForceUse;
+using media::audio::common::AudioPolicyForcedConfig;
 using media::audio::common::AudioSource;
 using media::audio::common::AudioStreamType;
 using media::audio::common::AudioUsage;
@@ -284,8 +287,8 @@ Status AudioPolicyService::getPhoneState(AudioMode* _aidl_return) {
     return Status::ok();
 }
 
-Status AudioPolicyService::setForceUse(media::AudioPolicyForceUse usageAidl,
-                                       media::AudioPolicyForcedConfig configAidl)
+Status AudioPolicyService::setForceUse(AudioPolicyForceUse usageAidl,
+                                       AudioPolicyForcedConfig configAidl)
 {
     audio_policy_force_use_t usage = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(usageAidl));
@@ -316,8 +319,8 @@ Status AudioPolicyService::setForceUse(media::AudioPolicyForceUse usageAidl,
     return Status::ok();
 }
 
-Status AudioPolicyService::getForceUse(media::AudioPolicyForceUse usageAidl,
-                                       media::AudioPolicyForcedConfig* _aidl_return) {
+Status AudioPolicyService::getForceUse(AudioPolicyForceUse usageAidl,
+                                       AudioPolicyForcedConfig* _aidl_return) {
     audio_policy_force_use_t usage = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPolicyForceUse_audio_policy_force_use_t(usageAidl));
 
@@ -474,8 +477,11 @@ Status AudioPolicyService::getOutputForAttr(const media::audio::common::AudioAtt
     }
 
     if (result == NO_ERROR) {
-        attr = VALUE_OR_RETURN_BINDER_STATUS(
-                mUsecaseValidator->verifyAudioAttributes(output, attributionSource, attr));
+        // usecase validator is disabled by default
+        if (property_get_bool("ro.audio.usecase_validator_enabled", false /* default */)) {
+                attr = VALUE_OR_RETURN_BINDER_STATUS(
+                        mUsecaseValidator->verifyAudioAttributes(output, attributionSource, attr));
+        }
 
         sp<AudioPlaybackClient> client =
                 new AudioPlaybackClient(attr, output, attributionSource, session,
@@ -1112,8 +1118,15 @@ Status AudioPolicyService::releaseInput(int32_t portIdAidl)
 Status AudioPolicyService::setDeviceAbsoluteVolumeEnabled(const AudioDevice& deviceAidl,
                                                           bool enabled,
                                                           AudioStreamType streamToDriveAbsAidl) {
-    audio_stream_type_t streamToDriveAbs = VALUE_OR_RETURN_BINDER_STATUS(
-            aidl2legacy_AudioStreamType_audio_stream_type_t(streamToDriveAbsAidl));
+    ALOGI("%s: deviceAidl %s, enabled %d, streamToDriveAbsAidl %d", __func__,
+          deviceAidl.toString().c_str(), enabled, streamToDriveAbsAidl);
+
+    audio_stream_type_t streamToDriveAbs = AUDIO_STREAM_DEFAULT;
+    if (enabled) {
+        streamToDriveAbs = VALUE_OR_RETURN_BINDER_STATUS(
+                aidl2legacy_AudioStreamType_audio_stream_type_t(streamToDriveAbsAidl));
+    }
+
     audio_devices_t deviceType;
     std::string address;
     RETURN_BINDER_STATUS_IF_ERROR(
@@ -1127,9 +1140,7 @@ Status AudioPolicyService::setDeviceAbsoluteVolumeEnabled(const AudioDevice& dev
             : settingsAllowed())) {
         return binderStatusFromStatusT(PERMISSION_DENIED);
     }
-    if (uint32_t(streamToDriveAbs) >= AUDIO_STREAM_PUBLIC_CNT) {
-        return binderStatusFromStatusT(BAD_VALUE);
-    }
+
     audio_utils::lock_guard _l(mMutex);
     AutoCallerClear acc;
     return binderStatusFromStatusT(

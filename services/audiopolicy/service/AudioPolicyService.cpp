@@ -193,9 +193,7 @@ static AudioPolicyInterface* createAudioPolicyManager(AudioPolicyClientInterface
     media::AudioPolicyConfig apmConfig;
     if (status_t status = clientInterface->getAudioPolicyConfig(&apmConfig); status == OK) {
         auto config = AudioPolicyConfig::loadFromApmAidlConfigWithFallback(apmConfig);
-        LOG_ALWAYS_FATAL_IF(config->getEngineLibraryNameSuffix() !=
-                AudioPolicyConfig::kDefaultEngineLibraryNameSuffix,
-                "Only default engine is currently supported with the AIDL HAL");
+        ALOGD("%s loading APM engine %s", __func__, config->getEngineLibraryNameSuffix().c_str());
         apm = new AudioPolicyManager(config,
                 loadApmEngineLibraryAndCreateEngine(
                         config->getEngineLibraryNameSuffix(), apmConfig.engineConfig),
@@ -1418,7 +1416,7 @@ status_t AudioPolicyService::onTransact(
         }
     }, mediautils::TimeCheck::getDefaultTimeoutDuration(),
     mediautils::TimeCheck::getDefaultSecondChanceDuration(),
-    true /* crashOnTimeout */);
+    !property_get_bool("audio.timecheck.disabled", false) /* crashOnTimeout */);
 
     switch (code) {
         case SHELL_COMMAND_TRANSACTION: {
@@ -1804,6 +1802,7 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                   ++numTimesBecameEmpty;
                 }
                 mLastCommand = command;
+                status_t createAudioPatchStatus;
 
                 switch (command->mCommand) {
                 case SET_VOLUME: {
@@ -1884,10 +1883,11 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                     ALOGV("AudioCommandThread() processing create audio patch");
                     sp<IAudioFlinger> af = AudioSystem::get_audio_flinger();
                     if (af == 0) {
-                        command->mStatus = PERMISSION_DENIED;
+                        createAudioPatchStatus = PERMISSION_DENIED;
                     } else {
                         ul.unlock();
-                        command->mStatus = af->createAudioPatch(&data->mPatch, &data->mHandle);
+                        createAudioPatchStatus = af->createAudioPatch(&data->mPatch,
+                                                                      &data->mHandle);
                         ul.lock();
                     }
                     } break;
@@ -2056,8 +2056,28 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                 {
                     audio_utils::lock_guard _l(command->mMutex);
                     if (command->mWaitStatus) {
+                        if (command->mCommand == CREATE_AUDIO_PATCH) {
+                            command->mStatus = createAudioPatchStatus;
+                        }
                         command->mWaitStatus = false;
                         command->mCond.notify_one();
+                    } else if (command->mCommand == CREATE_AUDIO_PATCH &&
+                               command->mStatus == TIMED_OUT &&
+                               createAudioPatchStatus == NO_ERROR) {
+                        // Because of special handling in insertCommand_l() the CREATE_AUDIO_PATCH
+                        // command wait status can be only false in case timeout (see TIMED_OUT)
+                        // happened.
+                        CreateAudioPatchData *createData =
+                                (CreateAudioPatchData *)command->mParam.get();
+                        ALOGW("AudioCommandThread() no caller awaiting for handle(%d) after \
+                                processing create audio patch, going to release it",
+                                createData->mHandle);
+                        sp<AudioCommand> releaseCommand = new AudioCommand();
+                        releaseCommand->mCommand = RELEASE_AUDIO_PATCH;
+                        ReleaseAudioPatchData *releaseData = new ReleaseAudioPatchData();
+                        releaseData->mHandle = createData->mHandle;
+                        releaseCommand->mParam = releaseData;
+                        insertCommand_l(releaseCommand, 0);
                     }
                 }
                 waitTime = -1;
@@ -2629,7 +2649,8 @@ void AudioPolicyService::AudioCommandThread::insertCommand_l(sp<AudioCommand>& c
 
     // Disable wait for status if delay is not 0.
     // Except for create audio patch command because the returned patch handle
-    // is needed by audio policy manager
+    // is needed by audio policy manager. Audio patch created after timeout
+    // (see TIMED_OUT) will be released from threadLoop().
     if (delayMs != 0 && command->mCommand != CREATE_AUDIO_PATCH) {
         command->mWaitStatus = false;
     }

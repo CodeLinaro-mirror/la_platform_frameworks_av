@@ -38,6 +38,7 @@
 #include <media/audiohal/DevicesFactoryHalInterface.h>
 #include <mediautils/ServiceUtilities.h>
 #include <mediautils/Synchronization.h>
+#include <psh_utils/AudioPowerManager.h>
 
 // not needed with the includes above, added to prevent transitive include dependency.
 #include <utils/KeyedVector.h>
@@ -499,6 +500,7 @@ private:
         const pid_t             mPid;
         const uid_t             mUid;
         const sp<media::IAudioFlingerClient> mAudioFlingerClient;
+        const std::unique_ptr<media::psh_utils::Token> mClientToken;
     };
 
     // --- MediaLogNotifier ---
@@ -698,8 +700,7 @@ private:
 
     DefaultKeyedVector<audio_io_handle_t, sp<IAfRecordThread>> mRecordThreads GUARDED_BY(mutex());
 
-    DefaultKeyedVector<pid_t, sp<NotificationClient>> mNotificationClients
-            GUARDED_BY(clientMutex());
+    std::map<pid_t, sp<NotificationClient>> mNotificationClients GUARDED_BY(clientMutex());
 
                 // updated by atomic_fetch_add_explicit
     volatile atomic_uint_fast32_t mNextUniqueIds[AUDIO_UNIQUE_ID_USE_MAX];  // ctor init
@@ -776,8 +777,6 @@ private:
 
     bool mSystemReady GUARDED_BY(mutex()) = false;
     std::atomic<bool> mAudioPolicyReady = false;
-
-    mediautils::UidInfo mUidInfo GUARDED_BY(mutex());
 
     // no mutex needed.
     SimpleLog  mRejectedSetParameterLog;

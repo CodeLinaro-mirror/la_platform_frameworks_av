@@ -318,11 +318,23 @@ void TrackBase::deferRestartIfDisabled()
 {
     const auto thread = mThread.promote();
     if (thread == nullptr) return;
-    thread->getThreadloopExecutor().defer(
-            [track = wp<TrackBase>::fromExisting(this)] {
-            const auto actual = track.promote();
+    auto weakTrack = wp<TrackBase>::fromExisting(this);
+    thread->getThreadloopExecutor().defer([weakTrack] {
+            const auto actual = weakTrack.promote();
             if (actual) actual->restartIfDisabled();
         });
+}
+
+void TrackBase::beginBatteryAttribution() {
+    mBatteryStatsHolder.emplace(uid());
+    if (media::psh_utils::AudioPowerManager::enabled()) {
+        mTrackToken = media::psh_utils::createAudioTrackToken(uid());
+    }
+}
+
+void TrackBase::endBatteryAttribution() {
+    mBatteryStatsHolder.reset();
+    mTrackToken.reset();
 }
 
 PatchTrackBase::PatchTrackBase(const sp<ClientProxy>& proxy,
@@ -1599,6 +1611,16 @@ status_t Track::selectPresentation(int presentationId,
         return directOutputThread->selectPresentation(presentationId, programId);
     }
     return INVALID_OPERATION;
+}
+
+void Track::setPortVolume(float volume) {
+    mVolume = volume;
+    if (mType != TYPE_PATCH) {
+        // Do not recursively propagate a PatchTrack setPortVolume to
+        // downstream PatchTracks.
+        forEachTeePatchTrack_l([volume](const auto& patchTrack) {
+                patchTrack->setPortVolume(volume); });
+    }
 }
 
 VolumeShaper::Status Track::applyVolumeShaper(
