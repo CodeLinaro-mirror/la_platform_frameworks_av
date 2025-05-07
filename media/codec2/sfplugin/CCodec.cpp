@@ -16,7 +16,9 @@
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "CCodec"
+#define ATRACE_TAG  ATRACE_TAG_VIDEO
 #include <utils/Log.h>
+#include <utils/Trace.h>
 
 #include <sstream>
 #include <thread>
@@ -883,6 +885,7 @@ struct CCodec::ClientListener : public Codec2Client::Listener {
             const std::weak_ptr<Codec2Client::Component>& component,
             std::list<std::unique_ptr<C2Work>>& workItems) override {
         (void)component;
+        ScopedTrace trace(ATRACE_TAG, "CCodec::ClientListener-WorkDone");
         sp<CCodec> codec(mCodec.promote());
         if (!codec) {
             return;
@@ -2878,6 +2881,7 @@ void CCodec::onMessageReceived(const sp<AMessage> &msg) {
             break;
         }
         case kWhatWorkDone: {
+            ScopedTrace trace(ATRACE_TAG, "CCodec::msg-onWorkDone");
             std::unique_ptr<C2Work> work;
             bool shouldPost = false;
             {
@@ -2911,6 +2915,21 @@ void CCodec::onMessageReceived(const sp<AMessage> &msg) {
                     for (const std::unique_ptr<C2Param> &param
                             : work->worklets.front()->output.configUpdate) {
                         updates.push_back(C2Param::Copy(*param));
+                    }
+                    // Check for change in resources required.
+                    if (!updates.empty() && android::media::codec::codec_availability_support()) {
+                        for (const std::unique_ptr<C2Param>& param : updates) {
+                            if (param->index() == C2ResourcesNeededTuning::PARAM_TYPE) {
+                                // Update the required resources.
+                                if (mCodecResources) {
+                                    mCodecResources->updateRequiredResources(
+                                            C2ResourcesNeededTuning::From(param.get()));
+                                }
+                                // Report to MediaCodec
+                                mCallback->onRequiredResourcesChanged();
+                                break;
+                            }
+                        }
                     }
                     unsigned stream = 0;
                     std::vector<std::shared_ptr<C2Buffer>> &outputBuffers =

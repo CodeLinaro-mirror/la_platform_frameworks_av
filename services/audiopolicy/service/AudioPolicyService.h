@@ -100,7 +100,8 @@ public:
     binder::Status setDeviceConnectionState(
             media::AudioPolicyDeviceState state,
             const android::media::audio::common::AudioPort& port,
-            const AudioFormatDescription& encodedFormat) override;
+            const AudioFormatDescription& encodedFormat,
+            bool deviceSwitch) override;
     binder::Status getDeviceConnectionState(const AudioDevice& device,
                                             media::AudioPolicyDeviceState* _aidl_return) override;
     binder::Status handleDeviceConfigChange(
@@ -337,10 +338,13 @@ public:
             AudioMMapPolicyType policyType,
             AudioMMapPolicyInfo* policyInfo) override;
 
+    binder::Status setEnableHardening(bool shouldEnable) override;
+
     status_t onTransact(uint32_t code, const Parcel& data, Parcel* reply, uint32_t flags) override;
 
     // -- IAudioPolicyLocal methods
     const IPermissionProvider& getPermissionProvider() const override;
+    bool isHardeningOverrideEnabled() const override { return mShouldEnableHardening.load(); };
 
     // IBinder::DeathRecipient
     virtual     void        binderDied(const wp<IBinder>& who);
@@ -385,6 +389,7 @@ public:
 
     void doOnNewAudioModulesAvailable();
     status_t doStopOutput(audio_port_handle_t portId);
+    status_t doStartOutput(audio_port_handle_t portId);
     void doReleaseOutput(audio_port_handle_t portId);
 
     status_t clientCreateAudioPatch(const struct audio_patch *patch,
@@ -609,6 +614,7 @@ private:
             SET_PORTS_VOLUME,
             SET_PARAMETERS,
             SET_VOICE_VOLUME,
+            START_OUTPUT,
             STOP_OUTPUT,
             RELEASE_OUTPUT,
             CREATE_AUDIO_PATCH,
@@ -645,6 +651,7 @@ private:
                     status_t    parametersCommand(audio_io_handle_t ioHandle,
                                             const char *keyValuePairs, int delayMs = 0);
                     status_t    voiceVolumeCommand(float volume, int delayMs = 0);
+                    status_t    startOutputCommand(audio_port_handle_t portId);
                     void        stopOutputCommand(audio_port_handle_t portId);
                     void        releaseOutputCommand(audio_port_handle_t portId);
                     status_t    sendCommand(sp<AudioCommand>& command, int delayMs = 0);
@@ -742,6 +749,11 @@ private:
         class VoiceVolumeData : public AudioCommandData {
         public:
             float mVolume;
+        };
+
+        class StartOutputData : public AudioCommandData {
+        public:
+            audio_port_handle_t mPortId;
         };
 
         class StopOutputData : public AudioCommandData {
@@ -1139,6 +1151,7 @@ private:
     DestroyAudioPolicyManagerInstance mDestroyAudioPolicyManager;
     std::unique_ptr<media::UsecaseValidator> mUsecaseValidator;
     const sp<NativePermissionController> mPermissionController;
+    std::atomic<bool> mShouldEnableHardening;
 };
 
 } // namespace android

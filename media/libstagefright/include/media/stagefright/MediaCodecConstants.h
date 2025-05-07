@@ -593,9 +593,9 @@ inline constexpr int32_t APVProfile422_10HDR10Plus  = 0x2000;
 
 inline static const char *asString_APVProfile(int32_t i, const char *def = "??") {
     switch (i) {
-        case APVProfile422_10:           return "APVProfile422_10";
-        case APVProfile422_10HDR10:      return "APVProfile422_10HDR10";
-        case APVProfile422_10HDR10Plus:  return "APVProfile422_10HDR10Plus";
+        case APVProfile422_10:           return "422_10";
+        case APVProfile422_10HDR10:      return "422_10HDR10";
+        case APVProfile422_10HDR10Plus:  return "422_10HDR10Plus";
         default:                        return def;
     }
 }
@@ -1022,6 +1022,7 @@ inline constexpr char KEY_VIDEO_QP_MIN[] = "video-qp-min";
 inline constexpr char KEY_VIDEO_QP_P_MAX[] = "video-qp-p-max";
 inline constexpr char KEY_VIDEO_QP_P_MIN[] = "video-qp-p-min";
 inline constexpr char KEY_WIDTH[] = "width";
+inline constexpr char KEY_PICTURE_PROFILE_HANDLE[] = "picture-profile-handle";
 
 // from MediaCodec.java
 inline constexpr int32_t ERROR_INSUFFICIENT_OUTPUT_PROTECTION = 4;

@@ -23,7 +23,6 @@
 #include <cutils/properties.h>
 
 #include <aidlcommonsupport/NativeHandle.h>
-#include <android_companion_virtualdevice_flags.h>
 #include <android/binder_manager.h>
 #include <android/hardware/ICameraService.h>
 #include <camera_metadata_hidden.h>
@@ -43,7 +42,6 @@ namespace android {
 
 namespace SessionConfigurationUtils = ::android::camera3::SessionConfigurationUtils;
 namespace flags = com::android::internal::camera::flags;
-namespace vd_flags = android::companion::virtualdevice::flags;
 
 using namespace aidl::android::hardware;
 using namespace hardware::camera;
@@ -140,7 +138,7 @@ status_t AidlProviderInfo::initializeAidlProvider(
             delete binderCookie;
         });
 
-    if (!vd_flags::virtual_camera_service_discovery() || interface->isRemote()) {
+    if (interface->isRemote()) {
         binder_status_t link = AIBinder_linkToDeath(
             interface->asBinder().get(), mDeathRecipient.get(), new AIBinderCookie{this});
         if (link != STATUS_OK) {
@@ -539,6 +537,8 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
 
     mCompositeJpegRDisabled = mCameraCharacteristics.exists(
             ANDROID_JPEGR_AVAILABLE_JPEG_R_STREAM_CONFIGURATIONS);
+    mCompositeHeicDisabled = mCameraCharacteristics.exists(
+            ANDROID_HEIC_AVAILABLE_HEIC_STREAM_CONFIGURATIONS);
     mCompositeHeicUltraHDRDisabled = mCameraCharacteristics.exists(
             ANDROID_HEIC_AVAILABLE_HEIC_ULTRA_HDR_STREAM_CONFIGURATIONS);
 
@@ -883,10 +883,11 @@ status_t AidlProviderInfo::AidlDeviceInfo3::isSessionConfigurationSupported(
 
     camera::device::StreamConfiguration streamConfiguration;
     bool earlyExit = false;
-    auto bRes = SessionConfigurationUtils::convertToHALStreamCombination(configuration,
-            mId, mCameraCharacteristics, mCompositeJpegRDisabled, getMetadata,
-            mPhysicalIds, streamConfiguration, overrideForPerfClass, mProviderTagid,
-            checkSessionParams, mAdditionalKeysForFeatureQuery, &earlyExit);
+    auto bRes = SessionConfigurationUtils::convertToHALStreamCombination(
+            configuration, mId, mCameraCharacteristics, mCompositeJpegRDisabled,
+            mCompositeHeicDisabled, mCompositeHeicUltraHDRDisabled, getMetadata, mPhysicalIds,
+            streamConfiguration, overrideForPerfClass, mProviderTagid, checkSessionParams,
+            mAdditionalKeysForFeatureQuery, &earlyExit);
 
     if (!bRes.isOk()) {
         return UNKNOWN_ERROR;
@@ -994,10 +995,11 @@ status_t AidlProviderInfo::AidlDeviceInfo3::getSessionCharacteristics(
         camera3::metadataGetter getMetadata, CameraMetadata* outChars) {
     camera::device::StreamConfiguration streamConfiguration;
     bool earlyExit = false;
-    auto res = SessionConfigurationUtils::convertToHALStreamCombination(configuration,
-            mId, mCameraCharacteristics, mCompositeJpegRDisabled, getMetadata,
-            mPhysicalIds, streamConfiguration, overrideForPerfClass, mProviderTagid,
-            /*checkSessionParams*/true, mAdditionalKeysForFeatureQuery, &earlyExit);
+    auto res = SessionConfigurationUtils::convertToHALStreamCombination(
+            configuration, mId, mCameraCharacteristics, mCompositeJpegRDisabled,
+            mCompositeHeicDisabled, mCompositeHeicUltraHDRDisabled, getMetadata, mPhysicalIds,
+            streamConfiguration, overrideForPerfClass, mProviderTagid,
+            /*checkSessionParams*/ true, mAdditionalKeysForFeatureQuery, &earlyExit);
 
     if (!res.isOk()) {
         return UNKNOWN_ERROR;
@@ -1082,7 +1084,9 @@ status_t AidlProviderInfo::convertToAidlHALStreamCombinationAndCameraIdsLocked(
             SessionConfigurationUtils::convertToHALStreamCombination(
                     cameraIdAndSessionConfig.mSessionConfiguration,
                     cameraId, deviceInfo,
-                    mManager->isCompositeJpegRDisabledLocked(cameraId), getMetadata,
+                    mManager->isCompositeJpegRDisabledLocked(cameraId),
+                    mManager->isCompositeHeicDisabledLocked(cameraId),
+                    mManager->isCompositeHeicUltraHDRDisabledLocked(cameraId), getMetadata,
                     physicalCameraIds, streamConfiguration,
                     overrideForPerfClass, mProviderTagid,
                     /*checkSessionParams*/false, /*additionalKeys*/{},

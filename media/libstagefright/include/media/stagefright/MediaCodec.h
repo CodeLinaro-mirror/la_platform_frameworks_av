@@ -108,6 +108,8 @@ struct MediaCodec : public AHandler {
         BUFFER_FLAG_PARTIAL_FRAME = 8,
         BUFFER_FLAG_MUXER_DATA    = 16,
         BUFFER_FLAG_DECODE_ONLY   = 32,
+        BUFFER_FLAG_EXTRADATA = 0x1000,
+        BUFFER_FLAG_DATACORRUPT = 0x2000,
     };
 
     enum CVODegree {
@@ -122,7 +124,7 @@ struct MediaCodec : public AHandler {
         CB_OUTPUT_AVAILABLE = 2,
         CB_ERROR = 3,
         CB_OUTPUT_FORMAT_CHANGED = 4,
-        CB_RESOURCE_RECLAIMED = 5,
+        CB_RESOURCE_RECLAIMED = 5,      // deprecated and not used
         CB_CRYPTO_ERROR = 6,
         CB_LARGE_FRAME_OUTPUT_AVAILABLE = 7,
 
@@ -380,6 +382,13 @@ private:
     mediametrics_handle_t createMediaMetrics(const sp<AMessage>& format,
                                              uint32_t flags,
                                              status_t* err);
+
+    // Get the required system resources for the current configuration.
+    bool getRequiredSystemResources();
+    // Convert all dynamic (non-constant) resource types into
+    // constant resource counts.
+    std::vector<InstanceResourceInfo> computeDynamicResources(
+            const std::vector<InstanceResourceInfo>& resources);
 
 private:
     enum State {
@@ -717,7 +726,7 @@ private:
     void onCryptoError(const sp<AMessage> &msg);
     void onError(status_t err, int32_t actionCode, const char *detail = NULL);
     void onOutputFormatChanged();
-    void onRequiredResourcesChanged(const std::vector<InstanceResourceInfo>& resourceInfo);
+    void onRequiredResourcesChanged();
 
     status_t onSetParameters(const sp<AMessage> &params);
 
@@ -819,6 +828,9 @@ private:
     CodecErrorLog mErrorLog;
     // Required resource info for this codec.
     Mutexed<std::vector<InstanceResourceInfo>> mRequiredResourceInfo;
+
+    // Default frame-rate.
+    float mFrameRate = 30.0;
 
     DISALLOW_EVIL_CONSTRUCTORS(MediaCodec);
 };

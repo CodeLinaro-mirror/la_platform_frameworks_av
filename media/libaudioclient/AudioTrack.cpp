@@ -40,6 +40,8 @@
 #include <media/AudioSystem.h>
 #include <media/MediaMetricsItem.h>
 #include <media/TypeConverter.h>
+#include <binder/MemoryDealer.h>
+#include "media/AVMediaExtensions.h"
 
 #define WAIT_PERIOD_MS                  10
 #define WAIT_STREAM_END_TIMEOUT_SEC     120
@@ -244,6 +246,10 @@ status_t AudioTrack::getMetrics(mediametrics::Item * &item)
 AudioTrack::AudioTrack(const AttributionSourceState& attributionSource)
     : mClientAttributionSource(attributionSource)
 {
+    mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
+    mAttributes.usage = AUDIO_USAGE_UNKNOWN;
+    mAttributes.flags = AUDIO_FLAG_NONE;
+    strlcpy(mAttributes.tags, "", AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
 }
 
 AudioTrack::AudioTrack(
@@ -271,46 +277,6 @@ AudioTrack::AudioTrack(
         doNotReconnect, maxRequiredSpeed, selectedDeviceId);
 }
 
-namespace {
-    class LegacyCallbackWrapper : public AudioTrack::IAudioTrackCallback {
-      const AudioTrack::legacy_callback_t mCallback;
-      void * const mData;
-      public:
-        LegacyCallbackWrapper(AudioTrack::legacy_callback_t callback, void* user)
-            : mCallback(callback), mData(user) {}
-        size_t onMoreData(const AudioTrack::Buffer & buffer) override {
-          AudioTrack::Buffer copy = buffer;
-          mCallback(AudioTrack::EVENT_MORE_DATA, mData, static_cast<void*>(&copy));
-          return copy.size();
-        }
-        void onUnderrun() override {
-            mCallback(AudioTrack::EVENT_UNDERRUN, mData, nullptr);
-        }
-        void onLoopEnd(int32_t loopsRemaining) override {
-            mCallback(AudioTrack::EVENT_LOOP_END, mData, &loopsRemaining);
-        }
-        void onMarker(uint32_t markerPosition) override {
-            mCallback(AudioTrack::EVENT_MARKER, mData, &markerPosition);
-        }
-        void onNewPos(uint32_t newPos) override {
-            mCallback(AudioTrack::EVENT_NEW_POS, mData, &newPos);
-        }
-        void onBufferEnd() override {
-            mCallback(AudioTrack::EVENT_BUFFER_END, mData, nullptr);
-        }
-        void onNewIAudioTrack() override {
-            mCallback(AudioTrack::EVENT_NEW_IAUDIOTRACK, mData, nullptr);
-        }
-        void onStreamEnd() override {
-            mCallback(AudioTrack::EVENT_STREAM_END, mData, nullptr);
-        }
-        size_t onCanWriteMoreData(const AudioTrack::Buffer & buffer) override {
-          AudioTrack::Buffer copy = buffer;
-          mCallback(AudioTrack::EVENT_CAN_WRITE_MORE_DATA, mData, static_cast<void*>(&copy));
-          return copy.size();
-        }
-    };
-}
 AudioTrack::AudioTrack(
         audio_stream_type_t streamType,
         uint32_t sampleRate,
@@ -556,6 +522,10 @@ status_t AudioTrack::set(
                     BAD_VALUE, StringPrintf("%s: Invalid stream type %d", __func__, streamType));
         }
         mOriginalStreamType = streamType;
+        mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
+        mAttributes.usage = AUDIO_USAGE_UNKNOWN;
+        mAttributes.flags = AUDIO_FLAG_NONE;
+        strlcpy(mAttributes.tags, "", AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
     } else {
         mOriginalStreamType = AUDIO_STREAM_DEFAULT;
     }
@@ -602,6 +572,8 @@ status_t AudioTrack::set(
         mOffloadInfoCopy.sample_rate = sampleRate;
         mOffloadInfoCopy.channel_mask = channelMask;
         mOffloadInfoCopy.stream_type = streamType;
+        mOffloadInfoCopy.usage = mAttributes.usage;
+        mOffloadInfoCopy.bit_width = audio_bytes_per_sample(format) * 8;
     }
 
     mVolume[AUDIO_INTERLEAVE_LEFT] = 1.0f;
@@ -648,6 +620,8 @@ status_t AudioTrack::set(
                     StringPrintf("%s: received invalid client attribution source uid", __func__));
         }
         mClientAttributionSource.uid = clientAttributionSourceUid.value();
+    } else {
+        mClientAttributionSource.uid = attributionSource.uid;
     }
     if (pid.value() == (pid_t)-1 || (callingPid != myPid)) {
         auto clientAttributionSourcePid = legacy2aidl_uid_t_int32_t(callingPid);
@@ -657,6 +631,8 @@ status_t AudioTrack::set(
                     StringPrintf("%s: received invalid client attribution source pid", __func__));
         }
         mClientAttributionSource.pid = clientAttributionSourcePid.value();
+    } else {
+        mClientAttributionSource.pid = attributionSource.pid;
     }
     mAuxEffectId = 0;
     mCallback = callback;
@@ -714,58 +690,6 @@ status_t AudioTrack::set(
     mVolumeHandler = new media::VolumeHandler();
 
     return logIfErrorAndReturnStatus(status, "");
-}
-
-
-status_t AudioTrack::set(
-        audio_stream_type_t streamType,
-        uint32_t sampleRate,
-        audio_format_t format,
-        uint32_t channelMask,
-        size_t frameCount,
-        audio_output_flags_t flags,
-        legacy_callback_t callback,
-        void* user,
-        int32_t notificationFrames,
-        const sp<IMemory>& sharedBuffer,
-        bool threadCanCallJava,
-        audio_session_t sessionId,
-        transfer_type transferType,
-        const audio_offload_info_t *offloadInfo,
-        uid_t uid,
-        pid_t pid,
-        const audio_attributes_t* pAttributes,
-        bool doNotReconnect,
-        float maxRequiredSpeed,
-        audio_port_handle_t selectedDeviceId)
-{
-    AttributionSourceState attributionSource;
-    auto attributionSourceUid = legacy2aidl_uid_t_int32_t(uid);
-    if (!attributionSourceUid.ok()) {
-        return logIfErrorAndReturnStatus(
-                BAD_VALUE,
-                StringPrintf("%s: received invalid attribution source uid, uid: %d, session id: %d",
-                             __func__, uid, sessionId));
-    }
-    attributionSource.uid = attributionSourceUid.value();
-    auto attributionSourcePid = legacy2aidl_pid_t_int32_t(pid);
-    if (!attributionSourcePid.ok()) {
-        return logIfErrorAndReturnStatus(
-                BAD_VALUE,
-                StringPrintf("%s: received invalid attribution source pid, pid: %d, sessionId: %d",
-                             __func__, pid, sessionId));
-    }
-    attributionSource.pid = attributionSourcePid.value();
-    attributionSource.token = sp<BBinder>::make();
-    if (callback) {
-        mLegacyCallbackWrapper = sp<LegacyCallbackWrapper>::make(callback, user);
-    } else if (user) {
-        LOG_ALWAYS_FATAL("Callback data provided without callback pointer!");
-    }
-    return set(streamType, sampleRate, format, static_cast<audio_channel_mask_t>(channelMask),
-               frameCount, flags, mLegacyCallbackWrapper, notificationFrames, sharedBuffer,
-               threadCanCallJava, sessionId, transferType, offloadInfo, attributionSource,
-               pAttributes, doNotReconnect, maxRequiredSpeed, selectedDeviceId);
 }
 
 // -------------------------------------------------------------------------
@@ -1373,6 +1297,12 @@ status_t AudioTrack::setPlaybackRate(const AudioPlaybackRate &playbackRate)
                 AMEDIAMETRICS_PROP_PLAYBACK_PITCH, (double)playbackRateTemp.mPitch)
         .record();
 
+
+    if (mTrackOffloaded &&
+        !isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
+        ALOGD("invalidate track-offloaded track on setPlaybackRate");
+        android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
+    }
     return NO_ERROR;
 }
 
@@ -1895,6 +1825,12 @@ status_t AudioTrack::createTrack_l()
             input.clientInfo.clientTid = mAudioTrackThread->getTid();
         }
     }
+    // Set offload_info to defaults if track not already offloaded but can be offloaded
+    if (mOffloadInfoCopy == AUDIO_INFO_INITIALIZER &&
+        audio_is_linear_pcm(mFormat) &&
+        isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
+        input.config.offload_info = AUDIO_INFO_INITIALIZER;
+    }
     input.sharedBuffer = mSharedBuffer;
     input.notificationsPerBuffer = mNotificationsPerBufferReq;
     input.speed = 1.0;
@@ -1939,6 +1875,7 @@ status_t AudioTrack::createTrack_l()
     }
     ALOG_ASSERT(output.audioTrack != 0);
 
+    mTrackOffloaded = AVMediaUtils::get()->AudioTrackIsTrackOffloaded(output.outputId);
     mFrameCount = output.frameCount;
     mNotificationFramesAct = (uint32_t)output.notificationFrameCount;
     mRoutedDeviceIds = output.selectedDeviceIds;
@@ -2880,14 +2817,20 @@ status_t AudioTrack::restoreTrack_l(const char *from, bool forceRestore)
             __func__, mPortId, isOffloadedOrDirect_l() ? "Offloaded or Direct" : "PCM", from);
     ++mSequence;
 
-    if (!forceRestore &&
-        (isOffloadedOrDirect_l() || mDoNotReconnect)) {
+
+    if (!forceRestore && (isOffloadedOrDirect_l() || mDoNotReconnect ||
+        (mOrigFlags & AUDIO_OUTPUT_FLAG_DIRECT) != 0)) {
         // FIXME re-creation of offloaded and direct tracks is not yet implemented;
-        // Disabled since (1) timestamp correction is not implemented for non-PCM and
-        // (2) We pre-empt existing direct tracks on resource constraint, so these tracks
-        // shouldn't reconnect.
-        result = DEAD_OBJECT;
-        return result;
+        // reconsider enabling for linear PCM encodings when position can be preserved.
+
+        // Tear down sink only for non-internal invalidation.
+        // Since new track could again have invalidation on setPlayback rate causing
+        // continuous creation and tear down.
+        if (!mTrackOffloaded ||
+              isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
+            result = DEAD_OBJECT;
+            return result;
+        }
     }
 
     // Save so we can return count since creation.
@@ -2909,7 +2852,8 @@ status_t AudioTrack::restoreTrack_l(const char *from, bool forceRestore)
     // See b/74409267. Connecting to a BT A2DP device supporting multiple codecs
     // causes a lot of churn on the service side, and it can reject starting
     // playback of a previously created track. May also apply to other cases.
-    const int INITIAL_RETRIES = 3;
+    const int INITIAL_RETRIES = 10;
+    const uint32_t RETRY_DELAY_US = 150000;
     int retries = INITIAL_RETRIES;
 retry:
     mFlags = mOrigFlags;
@@ -2986,7 +2930,7 @@ retry:
         ALOGW("%s(%d): failed status %d, retries %d", __func__, mPortId, result, retries);
         if (--retries > 0) {
             // leave time for an eventual race condition to clear before retrying
-            usleep(500000);
+            usleep(RETRY_DELAY_US);
             goto retry;
         }
         // if no retries left, set invalid bit to force restoring at next occasion
@@ -3217,7 +3161,7 @@ status_t AudioTrack::getTimestamp_l(AudioTimestamp& timestamp)
     // To avoid a race, read the presented frames first.  This ensures that presented <= consumed.
 
     status_t status;
-    if (isAfTrackOffloadedOrDirect_l()) {
+    if (isAfTrackOffloadedOrDirect_l() || mTrackOffloaded) {
         // use Binder to get timestamp
         media::AudioTimestampInternal ts;
         mAudioTrack->getTimestamp(&ts, &status);

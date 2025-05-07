@@ -20,6 +20,7 @@
 
 #include <media/MediaMetricsItem.h>
 #include <media/MediaRecorderBase.h>
+#include <media/stagefright/AudioSource.h>
 #include <camera/CameraParameters.h>
 #include <utils/String8.h>
 
@@ -89,7 +90,7 @@ struct StagefrightRecorder : public MediaRecorderBase {
             status_t getPortId(audio_port_handle_t *portId) const override;
     virtual status_t getRtpDataUsage(uint64_t *bytes);
 
-private:
+protected:
 
     enum privacy_sensitive_t {
         PRIVACY_SENSITIVE_DEFAULT = -1,
@@ -120,6 +121,7 @@ private:
     audio_encoder mAudioEncoder;
     video_encoder mVideoEncoder;
     bool mUse64BitFileOffset;
+    bool mEnabledCompressAudioRecording;
     int32_t mVideoWidth, mVideoHeight;
     int32_t mFrameRate;
     int32_t mVideoBitRate;
@@ -194,7 +196,7 @@ private:
 
     static const int kMaxHighSpeedFps = 1000;
 
-    status_t prepareInternal();
+    virtual status_t prepareInternal();
     status_t setupMPEG4orWEBMRecording();
     void setupMPEG4orWEBMMetaData(sp<MetaData> *meta);
     status_t setupAMRRecording();
@@ -216,7 +218,7 @@ private:
 
     // Encoding parameter handling utilities
     status_t setParameter(const String8 &key, const String8 &value);
-    status_t setParamAudioEncodingBitRate(int32_t bitRate);
+    virtual status_t setParamAudioEncodingBitRate(int32_t bitRate);
     status_t setParamAudioNumberOfChannels(int32_t channles);
     status_t setParamAudioSamplingRate(int32_t sampleRate);
     status_t setParamAudioTimeScale(int32_t timeScale);
@@ -261,6 +263,13 @@ private:
     void setDefaultProfileIfNecessary();
     void setDefaultVideoEncoderIfNecessary();
 
+    virtual status_t handleCustomOutputFormats() {return UNKNOWN_ERROR;}
+    virtual status_t handleCustomRecording() {return UNKNOWN_ERROR;}
+    virtual status_t handleCustomAudioSource(sp<AMessage> /*format*/) {return UNKNOWN_ERROR;}
+    virtual status_t handleCustomAudioEncoder() {return UNKNOWN_ERROR;}
+    virtual sp<MediaSource> setPCMRecording() {return NULL;}
+    virtual bool isCompressAudioRecordingSupported() { return false; }
+    virtual sp<AudioSource> setCompressAudioRecording() { return nullptr; }
 
     StagefrightRecorder(const StagefrightRecorder &);
     StagefrightRecorder &operator=(const StagefrightRecorder &);

@@ -94,6 +94,14 @@ public:
     virtual audio_mode_t getPhoneState() const = 0;
 
     /**
+     * Set whether display-port is connected and is allowed to be used
+     * for voice usecases
+     *
+     * @param[in] connAndAllowed: if display-port is connected and can be used
+     */
+    virtual void setDpConnAndAllowedForVoice(bool connAndAllowed) = 0;
+
+    /**
      * Set Force Use config for a given usage.
      *
      * @param[in] usage for which a configuration shall be forced.
@@ -192,6 +200,7 @@ public:
      */
     virtual sp<DeviceDescriptor> getInputDeviceForAttributes(
             const audio_attributes_t &attr,
+            bool ignorePreferredDevice = true,
             uid_t uid = 0,
             audio_session_t session = AUDIO_SESSION_NONE,
             sp<AudioPolicyMix> *mix = nullptr) const = 0;

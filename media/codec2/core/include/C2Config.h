@@ -80,6 +80,7 @@ struct C2Config {
 
 struct C2PlatformConfig {
     enum encoding_quality_level_t : uint32_t; ///< encoding quality level
+    enum resource_id_t : uint32_t;          ///< resource IDs defined by the platform
     enum tunnel_peek_mode_t: uint32_t;      ///< tunnel peek mode
 };
 
@@ -303,6 +304,9 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     // input surface
     kParamIndexCaptureFrameRate, // input-surface, float
     kParamIndexStopTimeOffset, // input-surface, int64_t
+
+    // display processing token
+    kParamIndexDisplayProcessingToken, // int64_t
 };
 
 }
@@ -1287,7 +1291,10 @@ C2ENUM(C2Config::resource_kind_t, uint32_t,
  * They represent any physical or abstract entities of limited availability
  * that is required for a component instance to execute and process work.
  *
- * Each defined resource has an id.
+ * Each defined resource has an id. In general, the id is defined by the vendor,
+ * but the platform also defines a limited set of IDs. Vendor IDs SHALL start
+ * from C2PlatformConfig::resource_id_t::VENDOR_START.
+ *
  * The use of a resource is specified by the amount and the kind (e.g. whether the amount
  * of resources is required for each frame processed, or whether they are required
  * regardless of the processing rate (const amount)).
@@ -1303,7 +1310,7 @@ struct C2SystemResourceStruct {
                            uint64_t amount_)
         : id(id_), kind(kind_), amount(amount_) { }
     C2SystemResourceStruct() : C2SystemResourceStruct(0, CONST, 0) {}
-    uint32_t id;
+    uint32_t id;            ///< resource ID (see C2PlatformConfig::resource_id_t)
     C2Config::resource_kind_t kind;
     uint64_t amount;
 
@@ -2488,6 +2495,16 @@ typedef C2GlobalParam<C2Setting, C2SimpleValueStruct<C2Config::platform_feature_
 constexpr char C2_PARAMKEY_PLATFORM_FEATURES[] = "api.platform-features";
 
 /**
+ * Resource IDs
+ */
+enum C2PlatformConfig::resource_id_t : uint32_t {
+    DMABUF_MEMORY = 16,  ///< memory allocated from a platform allocator (dmabuf or gralloc)
+
+    /// vendor defined resource IDs start from here
+    VENDOR_START = 0x1000,
+};
+
+/**
  * This structure describes the preferred ion allocation parameters for a given memory usage.
  */
 struct C2StoreIonUsageStruct {
@@ -2854,6 +2871,16 @@ C2ENUM(C2PlatformConfig::encoding_quality_level_t, uint32_t,
     NONE = 0,
     S_HANDHELD = 1              // corresponds to VMAF=70
 );
+
+/**
+ * Display processing token.
+ *
+ * An int64 token specifying the display processing configuration for the frame.
+ * This value is passed to IGraphicBufferProducer via QueueBufferInput::setPictureProfileHandle().
+ */
+typedef C2StreamParam<C2Info, C2Int64Value, kParamIndexDisplayProcessingToken>
+        C2StreamDisplayProcessingToken;
+constexpr char C2_PARAMKEY_DISPLAY_PROCESSING_TOKEN[] = "display-processing-token";
 
 /**
  * Video Encoding Statistics Export

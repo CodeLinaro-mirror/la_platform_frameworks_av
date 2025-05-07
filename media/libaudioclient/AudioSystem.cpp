@@ -1177,7 +1177,7 @@ void AudioSystem::onNewAudioModulesAvailable() {
 
 status_t AudioSystem::setDeviceConnectionState(audio_policy_dev_state_t state,
                                                const android::media::audio::common::AudioPort& port,
-                                               audio_format_t encodedFormat) {
+                                               audio_format_t encodedFormat, bool deviceSwitch) {
     const sp<IAudioPolicyService> aps = get_audio_policy_service();
 
     if (aps == nullptr) return AudioPolicyServiceTraits::getError();
@@ -1188,7 +1188,8 @@ status_t AudioSystem::setDeviceConnectionState(audio_policy_dev_state_t state,
                             legacy2aidl_audio_policy_dev_state_t_AudioPolicyDeviceState(state)),
                     port,
                     VALUE_OR_RETURN_STATUS(
-                            legacy2aidl_audio_format_t_AudioFormatDescription(encodedFormat))));
+                            legacy2aidl_audio_format_t_AudioFormatDescription(encodedFormat)),
+                    deviceSwitch));
 }
 
 audio_policy_dev_state_t AudioSystem::getDeviceConnectionState(audio_devices_t device,
@@ -1415,7 +1416,8 @@ status_t AudioSystem::getInputForAttr(const audio_attributes_t* attr,
                                       audio_config_base_t* config,
                                       audio_input_flags_t flags,
                                       audio_port_handle_t* selectedDeviceId,
-                                      audio_port_handle_t* portId) {
+                                      audio_port_handle_t* portId,
+                                      audio_source_t* source) {
     if (attr == NULL) {
         ALOGE("getInputForAttr NULL attr - shouldn't happen");
         return BAD_VALUE;
@@ -1463,7 +1465,7 @@ status_t AudioSystem::getInputForAttr(const audio_attributes_t* attr,
     *selectedDeviceId = VALUE_OR_RETURN_STATUS(
             aidl2legacy_int32_t_audio_port_handle_t(response.selectedDeviceId));
     *portId = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_audio_port_handle_t(response.portId));
-
+    *source = VALUE_OR_RETURN_STATUS(aidl2legacy_AudioSource_audio_source_t(response.source));
     return OK;
 }
 

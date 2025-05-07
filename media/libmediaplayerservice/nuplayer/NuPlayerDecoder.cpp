@@ -39,6 +39,8 @@
 #include <media/stagefright/MediaCodec.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/MediaErrors.h>
+#include <stagefright/AVExtensions.h>
+#include "mediaplayerservice/AVNuExtensions.h"
 #include <media/stagefright/SurfaceUtils.h>
 #include <mpeg2ts/ATSParser.h>
 #include <gui/Surface.h>
@@ -214,6 +216,28 @@ void NuPlayer::Decoder::onMessageReceived(const sp<AMessage> &msg) {
                     break;
                 }
 
+                case MediaCodec::CB_CRYPTO_ERROR:
+                {
+                    status_t err;
+                    CHECK(msg->findInt32("err", &err));
+                    AString comment;
+                    msg->findString("errorDetail", &comment);
+                    ALOGE("Decoder (%s) reported crypto error : 0x%x (%s)",
+                            mIsAudio ? "audio" : "video", err, comment.c_str());
+
+                    handleError(err);
+                    break;
+                }
+
+                case MediaCodec::CB_REQUIRED_RESOURCES_CHANGED:
+                case MediaCodec::CB_METRICS_FLUSHED:
+                {
+                    // Nothing to do. Informational. Safe to ignore.
+                    break;
+                }
+
+                case MediaCodec::CB_LARGE_FRAME_OUTPUT_AVAILABLE:
+                // unexpected as we are not using large frames
                 default:
                 {
                     TRESPASS();
@@ -316,8 +340,11 @@ void NuPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
     mComponentName.append(" decoder");
     ALOGV("[%s] onConfigure (surface=%p)", mComponentName.c_str(), mSurface.get());
 
-    mCodec = MediaCodec::CreateByType(
-            mCodecLooper, mime.c_str(), false /* encoder */, NULL /* err */, mPid, mUid, format);
+    mCodec = AVUtils::get()->createCustomComponentByName(mCodecLooper, mime.c_str(), false /* encoder */, format);
+    if (mCodec == NULL) {
+        mCodec = MediaCodec::CreateByType(
+        mCodecLooper, mime.c_str(), false /* encoder */, NULL /* err */, mPid, mUid);
+    }
     int32_t secure = 0;
     if (format->findInt32("secure", &secure) && secure != 0) {
         if (mCodec != NULL) {
@@ -821,6 +848,12 @@ bool NuPlayer::Decoder::handleAnOutputBuffer(
         }
 
         mSkipRenderingUntilMediaTimeUs = -1;
+    } else if ((flags & MediaCodec::BUFFER_FLAG_DATACORRUPT) &&
+            AVNuUtils::get()->dropCorruptFrame()) {
+        ALOGV("[%s] dropping corrupt buffer at time %lld as requested.",
+                     mComponentName.c_str(), (long long)timeUs);
+        reply->post();
+        return true;
     }
 
     // wait until 1st frame comes out to signal resume complete
@@ -938,6 +971,7 @@ status_t NuPlayer::Decoder::fetchInputData(sp<AMessage> &reply) {
                     // treat seamless format change separately
                     formatChange = !seamlessFormatChange;
                 }
+                AVNuUtils::get()->checkFormatChange(&formatChange, accessUnit);
 
                 // For format or time change, return EOS to queue EOS input,
                 // then wait for EOS on output.

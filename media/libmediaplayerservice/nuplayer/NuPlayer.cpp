@@ -62,6 +62,7 @@
 
 #include <media/esds/ESDS.h>
 #include <media/stagefright/Utils.h>
+#include "mediaplayerservice/AVNuExtensions.h"
 
 namespace android {
 
@@ -239,7 +240,7 @@ void NuPlayer::setDataSourceAsync(const sp<IStreamSource> &source) {
     mDataSourceType = DATA_SOURCE_TYPE_STREAM;
 }
 
-static bool IsHTTPLiveURL(const char *url) {
+bool NuPlayer::IsHTTPLiveURL(const char *url) {
     if (!strncasecmp("http://", url, 7)
             || !strncasecmp("https://", url, 8)
             || !strncasecmp("file://", url, 7)) {
@@ -881,8 +882,7 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
             if (mRenderer != NULL) {
                 // AudioSink allows only 1.f and 0.f for offload and direct modes.
                 // For other speeds, restart audio to fallback to supported paths
-                bool audioDirectOutput = (mAudioSink->getFlags() & AUDIO_OUTPUT_FLAG_DIRECT) != 0;
-                if ((mOffloadAudio || audioDirectOutput) &&
+                if ((mOffloadAudio || (mAudioSink->getFlags() & AUDIO_OUTPUT_FLAG_DIRECT)) &&
                         ((rate.mSpeed != 0.f && rate.mSpeed != 1.f) || rate.mPitch != 1.f)) {
 
                     int64_t currentPositionUs;
@@ -1368,6 +1368,9 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
                         FLUSH_CMD_SHUTDOWN /* video */));
 
             mDeferredActions.push_back(
+                    new SimpleAction(&NuPlayer::closeAudioSink));
+
+            mDeferredActions.push_back(
                     new SimpleAction(&NuPlayer::performReset));
 
             processDeferredActions();
@@ -1613,7 +1616,7 @@ void NuPlayer::onStart(int64_t startPositionUs, MediaPlayerSeekMode mode) {
     sp<AMessage> notify = new AMessage(kWhatRendererNotify, this);
     ++mRendererGeneration;
     notify->setInt32("generation", mRendererGeneration);
-    mRenderer = new Renderer(mAudioSink, mMediaClock, notify, flags);
+    mRenderer = AVNuFactory::get()->createRenderer(mAudioSink, mMediaClock, notify, flags);
     mRendererLooper = new ALooper;
     mRendererLooper->setName("NuPlayerRenderer");
     mRendererLooper->start(false, false, ANDROID_PRIORITY_AUDIO);
@@ -2010,12 +2013,13 @@ status_t NuPlayer::instantiateDecoder(
 
             const bool hasVideo = (mSource->getFormat(false /*audio */) != NULL);
             format->setInt32("has-video", hasVideo);
-            *decoder = new DecoderPassThrough(notify, mSource, mRenderer);
-            ALOGV("instantiateDecoder audio DecoderPassThrough  hasVideo: %d", hasVideo);
+            *decoder = AVNuFactory::get()->createPassThruDecoder(notify, mSource, mRenderer);
+            ALOGV("instantiateDecoder audio DecoderPassThrough hasVideo: %d", hasVideo);
         } else {
+            AVNuUtils::get()->setCodecOutputFormat(format);
             mSource->setOffloadAudio(false /* offload */);
 
-            *decoder = new Decoder(notify, mSource, mPID, mUID, mRenderer);
+           *decoder = AVNuFactory::get()->createDecoder(notify, mSource, mPID, mUID, mRenderer);
             ALOGV("instantiateDecoder audio Decoder");
         }
         mAudioDecoderError = false;
@@ -2091,25 +2095,34 @@ void NuPlayer::updateVideoSize(
         return;
     }
 
-    int32_t displayWidth, displayHeight;
+    int32_t displayWidth = 0, displayHeight = 0;
     if (outputFormat != NULL) {
-        int32_t width, height, cropLeft, cropTop, cropRight, cropBottom;
-        if (outputFormat->findInt32("width", &width)
-                && outputFormat->findInt32("height", &height)
-                && outputFormat->findRect(
-                    "crop",
-                    &cropLeft, &cropTop, &cropRight, &cropBottom)) {
+        int32_t width, height;
+        if (!outputFormat->findInt32("width", &width)
+                || !outputFormat->findInt32("height", &height)) {
+            ALOGW("Video output format missing dimension: %s",
+                    outputFormat->debugString().c_str());
+            notifyListener(MEDIA_SET_VIDEO_SIZE, 0, 0);
+            return;
+        }
 
+        int32_t cropLeft, cropTop, cropRight, cropBottom;
+        if (outputFormat->findRect(
+                "crop",
+                &cropLeft, &cropTop, &cropRight, &cropBottom)) {
             displayWidth = cropRight - cropLeft + 1;
             displayHeight = cropBottom - cropTop + 1;
+        } else {
+            displayWidth = width;
+            displayHeight = height;
+        }
 
-            ALOGV("Video output format changed to %d x %d "
+        ALOGV("Video output format changed to %d x %d "
                 "(crop: %d x %d @ (%d, %d))",
                 width, height,
                 displayWidth,
                 displayHeight,
                 cropLeft, cropTop);
-        }
     } else {
         if (!inputFormat->findInt32("width", &displayWidth)
             || !inputFormat->findInt32("height", &displayHeight)) {
@@ -2155,6 +2168,11 @@ void NuPlayer::updateVideoSize(
         int32_t tmp = displayWidth;
         displayWidth = displayHeight;
         displayHeight = tmp;
+    }
+
+    if (displayWidth <= 0 || displayHeight <= 0) {
+        ALOGE("video size is corrupted or bad, reset it to 0");
+        displayWidth = displayHeight = 0;
     }
 
     notifyListener(

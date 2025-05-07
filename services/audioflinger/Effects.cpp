@@ -1446,6 +1446,11 @@ void EffectChain::setVolumeForOutput_l(uint32_t left, uint32_t right)
 status_t EffectModule::sendSetAudioDevicesCommand(
         const AudioDeviceTypeAddrVector &devices, uint32_t cmdCode)
 {
+    // for AIDL, use setDevices to pass the AudioDeviceTypeAddrVector
+    if (!EffectConfiguration::isHidl()) {
+        return mEffectInterface->setDevices(devices);
+    }
+
     audio_devices_t deviceType = deviceTypesToBitMask(getAudioDeviceTypes(devices));
     if (deviceType == AUDIO_DEVICE_NONE) {
         return NO_ERROR;
@@ -2322,7 +2327,7 @@ void EffectChain::process_l() {
     // never process effects when:
     // - on an OFFLOAD thread
     // - no more tracks are on the session and the effect tail has been rendered
-    bool doProcess = !mEffectCallback->isOffloadOrMmap();
+    bool doProcess = !mEffectCallback->isOffloadOrMmap() && !mEffectCallback->isOffloadOrDirect();
     if (!audio_is_global_session(mSessionId)) {
         bool tracksOnSession = (trackCnt() != 0);
 

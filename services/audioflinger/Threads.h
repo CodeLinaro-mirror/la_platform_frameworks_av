@@ -741,9 +741,6 @@ protected:
                 // Updated by updateSuspendedSessions_l() only.
                 KeyedVector< audio_session_t, KeyedVector< int, sp<SuspendedSessionDesc> > >
                                         mSuspendedSessions;
-                // TODO: add comment and adjust size as needed
-                static const size_t     kLogSize = 4 * 1024;
-                sp<NBLog::Writer>       mNBLogWriter;
                 bool                    mSystemReady;
 
     // NO_THREAD_SAFETY_ANALYSIS - mTimestamp and mTimestampVerifier should be
@@ -1137,8 +1134,7 @@ public:
                     return mMixerChannelMask;
                 }
 
-    status_t getTimestamp_l(AudioTimestamp& timestamp) final
-            REQUIRES(mutex(), ThreadBase_ThreadLoop);
+    virtual     status_t    getTimestamp_l(AudioTimestamp& timestamp) REQUIRES(mutex(), ThreadBase_ThreadLoop);
 
     void addPatchTrack(const sp<IAfPatchTrack>& track) final EXCLUDES_ThreadBase_Mutex;
     void deletePatchTrack(const sp<IAfPatchTrack>& track) final EXCLUDES_ThreadBase_Mutex;
@@ -1550,9 +1546,6 @@ protected:
     sp<NBAIO_Sink>          mNormalSink;
 
     uint32_t                mScreenState;   // cached copy of gScreenState
-    // TODO: add comment and adjust size as needed
-    static const size_t     kFastMixerLogSize = 8 * 1024;
-    sp<NBLog::Writer>       mFastMixerNBLogWriter;
 
     // Downstream patch latency, available if mDownstreamLatencyStatMs.getN() > 0.
     audio_utils::Statistics<double> mDownstreamLatencyStatMs{0.999};
@@ -1814,6 +1807,10 @@ protected:
     float                   mMasterBalanceLeft = 1.f;
     float                   mMasterBalanceRight = 1.f;
 
+    uint64_t                mFramesWrittenAtStandby;// used to reset frames on track reset
+    uint64_t                mFramesWrittenForSleep; // used to reset frames on track removal
+                                                    // or underrun before entering standby
+
 public:
     virtual     bool        hasFastMixer() const { return false; }
 
@@ -1835,6 +1832,7 @@ public:
                     }
                     return INVALID_OPERATION;
                 }
+    virtual     status_t    getTimestamp_l(AudioTimestamp& timestamp) override;
 };
 
 class OffloadThread : public DirectOutputThread {
@@ -2003,6 +2001,7 @@ public:
     }
 
             RecordThread(const sp<IAfThreadCallback>& afThreadCallback,
+                    ThreadBase::type_t type,
                     AudioStreamIn *input,
                     audio_io_handle_t id,
                     bool systemReady
@@ -2234,6 +2233,13 @@ private:
             std::string                         mSharedAudioPackageName = {};
             int32_t                             mSharedAudioStartFrames = -1;
             audio_session_t                     mSharedAudioSessionId = AUDIO_SESSION_NONE;
+};
+
+class DirectRecordThread final : public RecordThread {
+  public:
+    DirectRecordThread(const sp<IAfThreadCallback>& afThreadCallback, AudioStreamIn* input,
+                       audio_io_handle_t id, bool systemReady);
+    ~DirectRecordThread() override;
 };
 
 class MmapThread : public ThreadBase, public virtual IAfMmapThread

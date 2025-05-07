@@ -181,7 +181,8 @@ void AudioPolicyService::doOnNewAudioModulesAvailable()
 Status AudioPolicyService::setDeviceConnectionState(
         media::AudioPolicyDeviceState stateAidl,
         const android::media::audio::common::AudioPort& port,
-        const AudioFormatDescription& encodedFormatAidl) {
+        const AudioFormatDescription& encodedFormatAidl,
+        bool deviceSwitch) {
     audio_policy_dev_state_t state = VALUE_OR_RETURN_BINDER_STATUS(
             aidl2legacy_AudioPolicyDeviceState_audio_policy_dev_state_t(stateAidl));
     audio_format_t encodedFormat = VALUE_OR_RETURN_BINDER_STATUS(
@@ -204,7 +205,7 @@ Status AudioPolicyService::setDeviceConnectionState(
     audio_utils::lock_guard _l(mMutex);
     AutoCallerClear acc;
     status_t status = mAudioPolicyManager->setDeviceConnectionState(
-            state, port, encodedFormat);
+            state, port, encodedFormat, deviceSwitch);
     if (status == NO_ERROR) {
         onCheckSpatializer_l();
     }
@@ -598,6 +599,16 @@ Status AudioPolicyService::startOutput(int32_t portIdAidl)
         return binderStatusFromStatusT(NO_INIT);
     }
     ALOGV("startOutput()");
+    mOutputCommandThread->startOutputCommand(portId);
+    return Status::ok();
+}
+
+status_t AudioPolicyService::doStartOutput(audio_port_handle_t portId)
+{
+    if (mAudioPolicyManager == NULL) {
+        return NO_INIT;
+    }
+    ALOGV("doStartOutput()");
     sp<AudioPlaybackClient> client;
     sp<AudioPolicyEffects> audioPolicyEffects;
 
@@ -622,7 +633,7 @@ Status AudioPolicyService::startOutput(int32_t portIdAidl)
         client->active = true;
         onUpdateActiveSpatializerTracks_l();
     }
-    return binderStatusFromStatusT(status);
+    return status;
 }
 
 Status AudioPolicyService::stopOutput(int32_t portIdAidl)
@@ -2902,6 +2913,11 @@ Status AudioPolicyService::getMmapPolicyForDevice(
     audio_utils::lock_guard _l(mMutex);
     return binderStatusFromStatusT(
             mAudioPolicyManager->getMmapPolicyForDevice(policyType, policyInfo));
+}
+
+Status AudioPolicyService::setEnableHardening(bool shouldEnable) {
+    mShouldEnableHardening.store(shouldEnable);
+    return Status::ok();
 }
 
 } // namespace android

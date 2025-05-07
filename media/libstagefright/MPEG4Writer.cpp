@@ -56,6 +56,7 @@
 #include <com_android_internal_camera_flags.h>
 #include <com_android_media_editing_flags.h>
 namespace editing_flags = com::android::media::editing::flags;
+#include <stagefright/AVExtensions.h>
 
 #ifndef __predict_false
 #define __predict_false(exp) __builtin_expect((exp) != 0, 0)
@@ -758,6 +759,12 @@ status_t MPEG4Writer::addSource(const sp<MediaSource> &source) {
         return ERROR_UNSUPPORTED;
     }
 
+    bool isAudio = !strncasecmp(mime, "audio/", 6);
+    if (isAudio && !AVUtils::get()->isAudioMuxFormatSupported(mime)) {
+        ALOGE("Muxing is not supported for %s", mime);
+        return ERROR_UNSUPPORTED;
+    }
+
     // This is a metadata track or the first track of either audio or video
     // Go ahead to add the track.
     Track *track = new Track(this, source, 1 + mTracks.size());
@@ -883,7 +890,7 @@ int64_t MPEG4Writer::estimateMoovBoxSize(int32_t bitRate) {
 
     // Max file size limit is set
     if (mMaxFileSizeLimitBytes != 0 && mIsFileSizeLimitExplicitlyRequested) {
-        size = mMaxFileSizeLimitBytes * 6 / 1000;
+        size = mMaxFileSizeLimitBytes / 1000 * 6;
     }
 
     // Max file duration limit is set
@@ -2640,6 +2647,11 @@ void MPEG4Writer::Track::addItemOffsetAndSize(off64_t offset, size_t size, bool 
     }
 
     if (mProperties.empty()) {
+        // Min length of hvcC CSD is 23. (ISO/IEC 14496-15:2014 Chapter 8.4.1.1.2)
+        if (mIsHeif && mCodecSpecificDataSize < 23) {
+            ALOGE("hvcC csd size is less than 23 bytes");
+            return;
+        }
         mProperties.push_back(mOwner->addProperty_l({
             .type = static_cast<uint32_t>(mIsAvif ?
                   FOURCC('a', 'v', '1', 'C') :
@@ -4334,8 +4346,10 @@ status_t MPEG4Writer::Track::threadEntry() {
     if (mIsAudio) {
         ALOGI("Audio track drift time: %" PRId64 " us", mOwner->getDriftTimeUs());
     }
-
-    if (err == ERROR_END_OF_STREAM) {
+    // if err is ERROR_IO (ex: during SSR), return OK to save the
+    // recorded file successfully. Session tear down will happen as part of
+    // client callback
+    if ((mIsAudio && (err == ERROR_IO)) || (err == ERROR_END_OF_STREAM)) {
         return OK;
     }
     return err;
@@ -5354,6 +5368,9 @@ void MPEG4Writer::Track::writeApvcBox() {
     CHECK_GE(mCodecSpecificDataSize, 4u);
 
     mOwner->beginBox("apvC");
+    // apvC extends FullBox and hence the need to write first
+    // 4 bytes here when compared with av1C which extends Box.
+    mOwner->writeInt32(0);  // version=0, flags=0
     mOwner->write(mCodecSpecificData, mCodecSpecificDataSize);
     mOwner->endBox();  // apvC
 }

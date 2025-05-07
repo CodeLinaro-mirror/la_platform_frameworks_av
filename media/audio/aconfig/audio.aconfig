@@ -41,6 +41,7 @@ flag {
     bug: "367667349"
 }
 
+# unused
 flag {
     name: "bluetooth_mac_address_anonymization"
     namespace: "media_audio"
@@ -89,6 +90,21 @@ flag {
     is_exported: true
     namespace: "media_audio"
     description: "Flag for overall implementation of hardening"
+    bug: "376480814"
+}
+
+flag {
+    name: "hardening_partial"
+    is_exported: true
+    namespace: "media_audio"
+    description: "Flag for partial enforcement of hardening"
+    bug: "376480814"
+}
+
+flag {
+    name: "hardening_partial_volume"
+    namespace: "media_audio"
+    description: "Flag for partial enforcement of volume hardening"
     bug: "376480814"
 }
 
