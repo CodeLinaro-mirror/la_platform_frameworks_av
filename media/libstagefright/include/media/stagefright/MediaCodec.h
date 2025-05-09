@@ -389,6 +389,8 @@ private:
     // constant resource counts.
     std::vector<InstanceResourceInfo> computeDynamicResources(
             const std::vector<InstanceResourceInfo>& resources);
+    void updateResourceUsage(const std::vector<InstanceResourceInfo>& oldResources,
+                             const std::vector<InstanceResourceInfo>& newResources);
 
 private:
     enum State {
@@ -547,6 +549,7 @@ private:
     void updateEphemeralMediametrics(mediametrics_handle_t item);
     void updateLowLatency(const sp<AMessage> &msg);
     void updateCodecImportance(const sp<AMessage>& msg);
+    void updatePictureProfile(const sp<AMessage>& msg, bool applyDefaultProfile);
     void onGetMetrics(const sp<AMessage>& msg);
     constexpr const char *asString(TunnelPeekState state, const char *default_string="?");
     void updateTunnelPeek(const sp<AMessage> &msg);
@@ -756,6 +759,8 @@ private:
     }
 
     void onReleaseCrypto(const sp<AMessage>& msg);
+
+    void stopCryptoAsync();
 
     // managing time-of-flight aka latency
     typedef struct {
