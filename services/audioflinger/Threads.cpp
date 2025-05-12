@@ -7544,6 +7544,10 @@ PlaybackThread::mixer_state OffloadThread::prepareTracks_l(
             if (track->isPausing()) {
                 track->setPaused();
             }
+            if (mHwSupportsPause && last && !mHwPaused) {
+                doHwPause = true;
+                mHwPaused = true;
+            }
             // Always perform pause if last, as an immediate flush will change
             // the pause state to be no longer isPausing().
         } else if (track->isPausing()) {
