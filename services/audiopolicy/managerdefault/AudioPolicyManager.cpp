@@ -1679,8 +1679,6 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
 
     sp<SwAudioOutputDescriptor> outputDesc = nullptr;
     // check if direct output for pcm/track offload or compress offload already exist
-    bool directSessionInUse = false;
-    bool offloadSessionInUse = false;
     // exclusive outputs for MMAP and Offload are enforced by different session ids.
     if (!(property_get_bool("vendor.audio.offload.multiple.enabled", false) &&
           ((flags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) &&
@@ -1701,32 +1699,35 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
                     *output = mOutputs.keyAt(i);
                     return NO_ERROR;
                 }
-                if (desc->mFlags == AUDIO_OUTPUT_FLAG_DIRECT) {
-                    directSessionInUse = true;
-                    ALOGD("%s Direct PCM already in use", __func__);
-                }
-                if (desc->mFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) {
-                    offloadSessionInUse = true;
-                    ALOGD("%s Compress Offload already in use", __func__);
-                }
-            }
-        }
-        if (outputDesc != nullptr) {
-            if ((((flags == AUDIO_OUTPUT_FLAG_DIRECT) && directSessionInUse) ||
-                ((flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) && offloadSessionInUse)) &&
-                 session != outputDesc->mDirectClientSession) {
-                 ALOGV("getOutput() do not reuse direct pcm output because current client (%d) "
-                       "is not the same as requesting client (%d) for different output conf",
-                 outputDesc->mDirectClientSession, session);
-                 return NAME_NOT_FOUND;
             }
         }
     }
+
+    if (!profile->canOpenNewIo()) {
+        if (!com::android::media::audioserver::direct_track_reprioritization()) {
+            return NAME_NOT_FOUND;
+        } else if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) != 0) {
+            // MMAP gracefully handles lack of an exclusive track resource by mixing
+            // above the audio framework. For AAudio to know that the limit is reached,
+            // return an error.
+            return NAME_NOT_FOUND;
+        } else {
+            // Close outputs on this profile, if available, to free resources for this request
+            for (int i = 0; i < mOutputs.size() && !profile->canOpenNewIo(); i++) {
+                const auto desc = mOutputs.valueAt(i);
+                if (desc->mProfile == profile) {
+                    closeOutput(desc->mIoHandle);
+                }
+            }
+        }
+    }
+
+    // Unable to close streams to find free resources for this request
     if (!profile->canOpenNewIo()) {
         return NAME_NOT_FOUND;
     }
 
-    outputDesc = new SwAudioOutputDescriptor(profile, mpClientInterface);
+    outputDesc = sp<SwAudioOutputDescriptor>::make(profile, mpClientInterface);
 
     // An MSD patch may be using the only output stream that can service this request. Release
     // all MSD patches to prioritize this request over any active output on MSD.
