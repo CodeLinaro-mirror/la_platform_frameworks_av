@@ -361,7 +361,7 @@ status_t AudioPolicyMixCollection::getOutputForAttr(
             continue; // Primary output already found
         }
 
-        if(!mixMatch(policyMix.get(), i, attributes, config, uid, session)) {
+        if(!mixMatch(policyMix.get(), i, attributes, flags, config, uid, session)) {
             ALOGV("%s: Mix %zu: does not match", __func__, i);
             continue; // skip the mix
         }
@@ -422,8 +422,8 @@ bool AudioPolicyMixCollection::mixDisallowsRequestedDevice(const AudioMix* mix,
 }
 
 bool AudioPolicyMixCollection::mixMatch(const AudioMix* mix, size_t mixIndex,
-    const audio_attributes_t& attributes, const audio_config_base_t& config,
-    uid_t uid, audio_session_t session) {
+    const audio_attributes_t& attributes, const audio_output_flags_t outputFlags,
+    const audio_config_base_t& config, uid_t uid, audio_session_t session) {
 
     if (mix->mMixType == MIX_TYPE_PLAYERS) {
         // Loopback render mixes are created from a public API and thus restricted
