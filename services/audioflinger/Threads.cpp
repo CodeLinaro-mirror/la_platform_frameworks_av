@@ -85,6 +85,7 @@
 #include <powermanager/PowerManager.h>
 #include <private/android_filesystem_config.h>
 #include <private/media/AudioTrackShared.h>
+#include <psh_utils/AudioPowerManager.h>
 #include <system/audio_effects/effect_aec.h>
 #include <system/audio_effects/effect_downmix.h>
 #include <system/audio_effects/effect_ns.h>
@@ -1204,6 +1205,8 @@ String16 ThreadBase::getWakeLockTag()
         return String16("MmapCapture");
     case SPATIALIZER:
         return String16("AudioSpatial");
+    case BIT_PERFECT:
+        return String16("AudioBitPerfect");
     default:
         ALOG_ASSERT(false);
         return String16("AudioUnknown");
@@ -1224,6 +1227,10 @@ void ThreadBase::acquireWakeLock_l()
                     {} /* historyTag */);
         if (status.isOk()) {
             mWakeLockToken = binder;
+            if (media::psh_utils::AudioPowerManager::enabled()) {
+                mThreadToken = media::psh_utils::createAudioThreadToken(
+                        getTid(), String8(getWakeLockTag()).c_str());
+            }
         }
         ALOGV("acquireWakeLock_l() %s status %d", mThreadName, status.exceptionCode());
     }
@@ -1249,6 +1256,7 @@ void ThreadBase::releaseWakeLock_l()
         }
         mWakeLockToken.clear();
     }
+    mThreadToken.reset();
 }
 
 void ThreadBase::getPowerManager_l() {
@@ -1585,14 +1593,13 @@ status_t PlaybackThread::checkEffectCompatibility_l(
         }
         break;
     case SPATIALIZER:
-        // Global effects (AUDIO_SESSION_OUTPUT_MIX) are not supported on spatializer mixer
-        // as there is no common accumulation buffer for sptialized and non sptialized tracks.
+        // Global effects (AUDIO_SESSION_OUTPUT_MIX) are supported on spatializer mixer, but only
+        // the spatialized track have global effects applied for now.
         // Post processing effects (AUDIO_SESSION_OUTPUT_STAGE or AUDIO_SESSION_DEVICE)
         // are supported and added after the spatializer.
         if (sessionId == AUDIO_SESSION_OUTPUT_MIX) {
-            ALOGW("%s: global effect %s not supported on spatializer thread %s",
-                    __func__, desc->name, mThreadName);
-            return BAD_VALUE;
+            ALOGD("%s: global effect %s on spatializer thread %s", __func__, desc->name,
+                  mThreadName);
         } else if (sessionId == AUDIO_SESSION_OUTPUT_STAGE) {
             // only post processing , downmixer or spatializer effects on output stage session
             if (IAfEffectModule::isSpatializer(&desc->type)
@@ -3830,19 +3837,31 @@ status_t PlaybackThread::addEffectChain_l(const sp<IAfEffectChain>& chain)
             ALOGV("addEffectChain_l() creating new input buffer %p session %d",
                     buffer, session);
         } else {
-            // A global session on a SPATIALIZER thread is either OUTPUT_STAGE or DEVICE
-            // - OUTPUT_STAGE session uses the mEffectBuffer as input buffer and
-            // mPostSpatializerBuffer as output buffer
-            // - DEVICE session uses the mPostSpatializerBuffer as input and output buffer.
-            status_t result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
-                    mEffectBuffer, mEffectBufferSize, &halInBuffer);
-            if (result != OK) return result;
-            result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
-                    mPostSpatializerBuffer, mPostSpatializerBufferSize, &halOutBuffer);
-            if (result != OK) return result;
+            status_t result = INVALID_OPERATION;
+            // Buffer configuration for global sessions on a SPATIALIZER thread:
+            // - AUDIO_SESSION_OUTPUT_MIX session uses the mEffectBuffer as input and output buffer
+            // - AUDIO_SESSION_OUTPUT_STAGE session uses the mEffectBuffer as input buffer and
+            //   mPostSpatializerBuffer as output buffer
+            // - AUDIO_SESSION_DEVICE session uses the mPostSpatializerBuffer as input and output
+            //   buffer
+            if (session == AUDIO_SESSION_OUTPUT_MIX || session == AUDIO_SESSION_OUTPUT_STAGE) {
+                result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
+                        mEffectBuffer, mEffectBufferSize, &halInBuffer);
+                if (result != OK) return result;
 
-            if (session == AUDIO_SESSION_DEVICE) {
-                halInBuffer = halOutBuffer;
+                if (session == AUDIO_SESSION_OUTPUT_MIX) {
+                    halOutBuffer = halInBuffer;
+                }
+            }
+
+            if (session == AUDIO_SESSION_OUTPUT_STAGE || session == AUDIO_SESSION_DEVICE) {
+                result = mAfThreadCallback->getEffectsFactoryHal()->mirrorBuffer(
+                        mPostSpatializerBuffer, mPostSpatializerBufferSize, &halOutBuffer);
+                if (result != OK) return result;
+
+                if (session == AUDIO_SESSION_DEVICE) {
+                    halInBuffer = halOutBuffer;
+                }
             }
         }
     } else {
@@ -4052,7 +4071,13 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
     // FIXME could this be made local to while loop?
     writeFrames = 0;
 
-    cacheParameters_l();
+    {
+        audio_utils::lock_guard l(mutex());
+
+        cacheParameters_l();
+        checkSilentMode_l();
+    }
+
     mSleepTimeUs = mIdleSleepTimeUs;
 
     if (mType == MIXER || mType == SPATIALIZER) {
@@ -4076,8 +4101,6 @@ NO_THREAD_SAFETY_ANALYSIS  // manual locking of AudioFlinger
     // Estimated time for next buffer to be written to hal. This is used only on
     // suspended mode (for now) to help schedule the wait time until next iteration.
     nsecs_t timeLoopNextNs = 0;
-
-    checkSilentMode_l();
 
     audio_patch_handle_t lastDownstreamPatchHandle = AUDIO_PATCH_HANDLE_NONE;
 
@@ -7912,6 +7935,9 @@ void DuplicatingThread::threadLoop_exit()
         audio_utils::lock_guard l(mutex());
         localTracks = std::move(mOutputTracks);
         mOutputTracks.clear();
+        for (size_t i = 0; i < localTracks.size(); ++i) {
+            localTracks[i]->destroy();
+        }
     }
     localTracks.clear();
     outputTracks.clear();
@@ -11648,6 +11674,7 @@ void BitPerfectThread::threadLoop_mix() {
 
 void BitPerfectThread::setTracksInternalMute(
         std::map<audio_port_handle_t, bool>* tracksInternalMute) {
+    audio_utils::lock_guard _l(mutex());
     for (auto& track : mTracks) {
         if (auto it = tracksInternalMute->find(track->portId()); it != tracksInternalMute->end()) {
             track->setInternalMute(it->second);
@@ -11664,6 +11691,11 @@ sp<IAfTrack> BitPerfectThread::getTrackToStreamBitPerfectly_l() {
         // Return the bit perfect track if all other tracks are muted
         for (const auto& track : mActiveTracks) {
             if (track->isBitPerfect()) {
+                if (track->getInternalMute()) {
+                    // There can only be one bit-perfect client active. If it is mute internally,
+                    // there is no need to stream bit-perfectly.
+                    break;
+                }
                 bitPerfectTrack = track;
             } else if (track->getFinalVolume() != 0.f) {
                 allOtherTracksMuted = false;

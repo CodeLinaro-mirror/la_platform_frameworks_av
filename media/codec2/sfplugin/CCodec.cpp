@@ -96,11 +96,14 @@ private:
 
 public:
     static sp<CCodecWatchdog> getInstance() {
-        static sp<CCodecWatchdog> instance(new CCodecWatchdog);
-        static std::once_flag flag;
-        // Call Init() only once.
-        std::call_once(flag, Init, instance);
-        return instance;
+        static sp<CCodecWatchdog> sInstance = [] {
+            sp<CCodecWatchdog> instance = new CCodecWatchdog;
+            // the instance should never get destructed
+            instance->incStrong((void *)CCodecWatchdog::getInstance);
+            instance->init();
+            return instance;
+        }();
+        return sInstance;
     }
 
     ~CCodecWatchdog() = default;
@@ -146,11 +149,11 @@ protected:
 private:
     CCodecWatchdog() : mLooper(new ALooper) {}
 
-    static void Init(const sp<CCodecWatchdog> &thiz) {
-        ALOGV("Init");
-        thiz->mLooper->setName("CCodecWatchdog");
-        thiz->mLooper->registerHandler(thiz);
-        thiz->mLooper->start();
+    void init() {
+        ALOGV("init");
+        mLooper->setName("CCodecWatchdog");
+        mLooper->registerHandler(this);
+        mLooper->start();
     }
 
     sp<ALooper> mLooper;
@@ -509,9 +512,14 @@ public:
         uint64_t usage = mConfig.mUsage;
         (void)(*node)->setConsumerUsage((int64_t)usage);
 
+        // AIDL does not define legacy dataspace.
+        android_dataspace_t dataspace = mDataSpace;
+        if (android::media::codec::provider_->dataspace_v0_partial()) {
+            ColorUtils::convertDataSpaceToV0(dataspace);
+        }
         return fromAidlStatus(mSource->configure(
                 (*node), static_cast<::aidl::android::hardware::graphics::common::Dataspace>(
-                        mDataSpace)));
+                        dataspace)));
     }
 
     void disconnect() override {

@@ -146,7 +146,7 @@ status_t DeviceHalAidl::getAudioRoutes(std::vector<media::AudioRoute> *routes) {
 }
 
 status_t DeviceHalAidl::getSupportedModes(std::vector<media::audio::common::AudioMode> *modes) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     RETURN_IF_TELEPHONY_NOT_INIT(INVALID_OPERATION);
@@ -170,7 +170,7 @@ status_t DeviceHalAidl::getSupportedDevices(uint32_t*) {
 }
 
 status_t DeviceHalAidl::initCheck() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     std::lock_guard l(mLock);
@@ -202,7 +202,7 @@ status_t DeviceHalAidl::setMasterVolume(float volume) {
 }
 
 status_t DeviceHalAidl::getMasterVolume(float *volume) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     if (volume == nullptr) {
@@ -233,7 +233,7 @@ status_t DeviceHalAidl::setMicMute(bool state) {
 }
 
 status_t DeviceHalAidl::getMicMute(bool *state) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -253,7 +253,7 @@ status_t DeviceHalAidl::setMasterMute(bool state) {
 }
 
 status_t DeviceHalAidl::getMasterMute(bool *state) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -312,7 +312,7 @@ status_t DeviceHalAidl::getParameters(const String8& keys, String8 *values) {
 }
 
 status_t DeviceHalAidl::getInputBufferSize(struct audio_config* config, size_t* size) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -468,6 +468,7 @@ status_t DeviceHalAidl::openOutputStream(
         sp<StreamOutHalInterface>* outStream,
         const std::vector<playback_track_metadata_v7_t>& sourceMetadata) {
     AUGMENT_LOG(D, "handle: %d devices %0x flags %0x", handle, devices, flags);
+
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     if (outStream == nullptr || config == nullptr) {
@@ -484,7 +485,7 @@ status_t DeviceHalAidl::openOutputStream(
     int32_t aidlOutputFlags = VALUE_OR_RETURN_STATUS(
             ::aidl::android::legacy2aidl_audio_output_flags_t_int32_t_mask(flags));
     SourceMetadata aidlMetadata = VALUE_OR_RETURN_STATUS(
-            ::aidl::android::legacy2aidl_SourceMetadata(sourceMetadata));
+            ::aidl::android::legacy2aidl_playback_track_metadata_v7_SourceMetadata(sourceMetadata));
     AudioIoFlags aidlFlags = AudioIoFlags::make<AudioIoFlags::Tag::output>(aidlOutputFlags);
     AudioPortConfig mixPortConfig;
     AudioPatch aidlPatch;
@@ -617,7 +618,7 @@ status_t DeviceHalAidl::openInputStream(
 }
 
 status_t DeviceHalAidl::supportsAudioPatches(bool* supportsPatches) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     if (supportsPatches == nullptr) {
         AUGMENT_LOG(E, "uninitialized supportsPatches");
@@ -733,7 +734,7 @@ status_t DeviceHalAidl::releaseAudioPatch(audio_patch_handle_t patch) {
 }
 
 status_t DeviceHalAidl::getAudioPort(struct audio_port* port) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     if (port == nullptr) {
         AUGMENT_LOG(E, "port not initialized");
@@ -746,7 +747,7 @@ status_t DeviceHalAidl::getAudioPort(struct audio_port* port) {
 }
 
 status_t DeviceHalAidl::getAudioPort(struct audio_port_v7 *port) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -778,7 +779,7 @@ status_t DeviceHalAidl::getAudioPort(struct audio_port_v7 *port) {
 
 status_t DeviceHalAidl::getAudioMixPort(const struct audio_port_v7 *devicePort,
                                         struct audio_port_v7 *mixPort) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
 
@@ -802,7 +803,7 @@ status_t DeviceHalAidl::getAudioMixPort(const struct audio_port_v7 *devicePort,
 }
 
 status_t DeviceHalAidl::setAudioPortConfig(const struct audio_port_config* config) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -834,7 +835,7 @@ status_t DeviceHalAidl::setAudioPortConfig(const struct audio_port_config* confi
 }
 
 MicrophoneInfoProvider::Info const* DeviceHalAidl::getMicrophoneInfo() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT({});
@@ -861,7 +862,7 @@ MicrophoneInfoProvider::Info const* DeviceHalAidl::getMicrophoneInfo() {
 
 status_t DeviceHalAidl::getMicrophones(
         std::vector<audio_microphone_characteristic_t>* microphones) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -885,7 +886,7 @@ status_t DeviceHalAidl::getMicrophones(
 
 status_t DeviceHalAidl::addDeviceEffect(
         const struct audio_port_config *device, sp<EffectHalInterface> effect) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -918,7 +919,7 @@ status_t DeviceHalAidl::addDeviceEffect(
 }
 status_t DeviceHalAidl::removeDeviceEffect(
         const struct audio_port_config *device, sp<EffectHalInterface> effect) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     if (device == nullptr || effect == nullptr) {
@@ -950,7 +951,7 @@ status_t DeviceHalAidl::removeDeviceEffect(
 status_t DeviceHalAidl::getMmapPolicyInfos(
         media::audio::common::AudioMMapPolicyType policyType,
         std::vector<media::audio::common::AudioMMapPolicyInfo>* policyInfos) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -972,7 +973,7 @@ status_t DeviceHalAidl::getMmapPolicyInfos(
 }
 
 int32_t DeviceHalAidl::getAAudioMixerBurstCount() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -984,7 +985,7 @@ int32_t DeviceHalAidl::getAAudioMixerBurstCount() {
 }
 
 int32_t DeviceHalAidl::getAAudioHardwareBurstMinUsec() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -996,7 +997,7 @@ int32_t DeviceHalAidl::getAAudioHardwareBurstMinUsec() {
 }
 
 error::Result<audio_hw_sync_t> DeviceHalAidl::getHwAvSync() {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -1015,7 +1016,7 @@ status_t DeviceHalAidl::dump(int fd, const Vector<String16>& args) {
 }
 
 status_t DeviceHalAidl::supportsBluetoothVariableLatency(bool* supports) {
-    LOG_ENTRY();
+    AUGMENT_LOG(D);
 
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
@@ -1027,7 +1028,7 @@ status_t DeviceHalAidl::supportsBluetoothVariableLatency(bool* supports) {
 
 status_t DeviceHalAidl::getSoundDoseInterface([[maybe_unused]] const std::string& module,
                                               ::ndk::SpAIBinder* soundDoseBinder) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
 
     if (soundDoseBinder == nullptr) {
@@ -1049,7 +1050,7 @@ status_t DeviceHalAidl::getSoundDoseInterface([[maybe_unused]] const std::string
 }
 
 status_t DeviceHalAidl::prepareToDisconnectExternalDevice(const struct audio_port_v7* port) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     if (port == nullptr) {
@@ -1088,7 +1089,7 @@ status_t DeviceHalAidl::prepareToDisconnectExternalDevice(const struct audio_por
 }
 
 status_t DeviceHalAidl::setConnectedState(const struct audio_port_v7 *port, bool connected) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     if (port == nullptr) {
@@ -1120,7 +1121,7 @@ status_t DeviceHalAidl::setConnectedState(const struct audio_port_v7 *port, bool
 }
 
 status_t DeviceHalAidl::setSimulateDeviceConnections(bool enabled) {
-    LOG_ENTRY_V();
+    AUGMENT_LOG(V);
     TIME_CHECK();
     RETURN_IF_MODULE_NOT_INIT(NO_INIT);
     {
