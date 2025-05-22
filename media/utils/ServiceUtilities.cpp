@@ -201,15 +201,25 @@ static bool checkRecordingInternal(const AttributionSourceState &attributionSour
 static constexpr int DEVICE_ID_DEFAULT = 0;
 
 bool recordingAllowed(const AttributionSourceState &attributionSource, audio_source_t source) {
-    return checkRecordingInternal(attributionSource, DEVICE_ID_DEFAULT, String16(), /*start*/ false,
+    auto permitted = checkRecordingInternal(attributionSource, DEVICE_ID_DEFAULT, String16(), /*start*/ false,
                                   source);
+    if (PERMISSION_GRANTED == permitted) {
+        ALOGV("%s() - PERMISSION_GRANTED", __func__);
+        return true;
+    }
+    return false;
 }
 
 bool recordingAllowed(const AttributionSourceState &attributionSource,
                       const uint32_t virtualDeviceId,
                       audio_source_t source) {
-    return checkRecordingInternal(attributionSource, virtualDeviceId,
+    auto permitted = checkRecordingInternal(attributionSource, virtualDeviceId,
                                   String16(), /*start*/ false, source);
+    if (PERMISSION_GRANTED == permitted) {
+        ALOGV("%s() - PERMISSION_GRANTED", __func__);
+        return true;
+    }
+    return false;
 }
 
 bool startRecording(const AttributionSourceState& attributionSource,
