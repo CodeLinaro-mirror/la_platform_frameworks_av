@@ -3939,6 +3939,9 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) != 0) {
                 outputOffloaded = outputLoop;
             }
+            if ((desc->mFlags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) {
+                outputDirect = outputLoop;
+            }
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_SPATIALIZER) != 0) {
                 if (SpatializerHelper::isStereoSpatializationFeatureEnabled()) {
                     outputSpatializer = outputLoop;
