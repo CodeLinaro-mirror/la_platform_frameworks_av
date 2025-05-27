@@ -1785,12 +1785,12 @@ void ThreadBase::disconnectEffectHandle(IAfEffectHandle* handle,
 }
 
 void ThreadBase::onEffectEnable(const sp<IAfEffectModule>& effect) {
-    if (isOffloadOrMmap()) {
+    if (isOffloadOrMmap() || mType == DIRECT) {
         audio_utils::lock_guard _l(mutex());
         broadcast_l();
     }
     if (!effect->isOffloadable()) {
-        if (mType == ThreadBase::OFFLOAD) {
+        if ((mType == ThreadBase::OFFLOAD) || (mType == ThreadBase::DIRECT)) {
             PlaybackThread *t = (PlaybackThread *)this;
             t->invalidateTracks(AUDIO_STREAM_MUSIC);
         }
