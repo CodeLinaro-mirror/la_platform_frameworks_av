@@ -992,15 +992,18 @@ Status AudioPolicyService::startInput(int32_t portIdAidl)
 
     std::stringstream msg;
     msg << "Audio recording on session " << client->session;
-
+    bool isRecordingGranted = false;
     // check calling permissions
-    if (!(startRecording(client->attributionSource, client->virtualDeviceId,
-                         String16(msg.str().c_str()), client->attributes.source)
-            || client->attributes.source == AUDIO_SOURCE_FM_TUNER
-            || client->attributes.source == AUDIO_SOURCE_REMOTE_SUBMIX
-            || client->attributes.source == AUDIO_SOURCE_ECHO_REFERENCE)) {
-        ALOGE("%s permission denied: recording not allowed for attribution source %s",
-                __func__, client->attributionSource.toString().c_str());
+    if (PERMISSION_GRANTED == startRecording(client->attributionSource, client->virtualDeviceId,
+                                             String16(msg.str().c_str()),
+                                             client->attributes.source)) {
+        isRecordingGranted = true;
+    }
+    if (!(isRecordingGranted || client->attributes.source == AUDIO_SOURCE_FM_TUNER ||
+          client->attributes.source == AUDIO_SOURCE_REMOTE_SUBMIX ||
+          client->attributes.source == AUDIO_SOURCE_ECHO_REFERENCE)) {
+        ALOGE("%s permission denied: recording not allowed for attribution source %s", __func__,
+              client->attributionSource.toString().c_str());
         return binderStatusFromStatusT(PERMISSION_DENIED);
     }
 
