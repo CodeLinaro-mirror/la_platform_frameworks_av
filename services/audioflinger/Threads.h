@@ -1184,6 +1184,8 @@ public:
 
     IAfTrack* getTrackById_l(audio_port_handle_t trackId) final REQUIRES(mutex());
 
+    std::vector<sp<IAfTrack>> getTracks_l() final REQUIRES(mutex());
+
     bool hasMixer() const final {
                     return mType == MIXER || mType == DUPLICATING || mType == SPATIALIZER;
                 }
@@ -1238,6 +1240,8 @@ public:
     }
 
     std::string getLocalLogHeader() const override;
+
+    void checkUpdateTrackMetadataForUid(uid_t uid) final EXCLUDES_ThreadBase_Mutex;
 
 protected:
     // updated by readOutputParameters_l()
@@ -2448,6 +2452,8 @@ public:
             REQUIRES(audio_utils::AudioFlinger_Mutex);
     void stopMelComputation_l() final
             REQUIRES(audio_utils::AudioFlinger_Mutex);
+
+    void checkUpdateTrackMetadataForUid(uid_t uid) final EXCLUDES_ThreadBase_Mutex;
 
 protected:
     void dumpInternals_l(int fd, const Vector<String16>& args) final REQUIRES(mutex());

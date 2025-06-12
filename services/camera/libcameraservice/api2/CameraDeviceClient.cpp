@@ -199,8 +199,10 @@ status_t CameraDeviceClient::initializeImpl(TProviderPtr providerPtr,
             mHighResolutionSensors.insert(physicalId);
         }
     }
-    int32_t resultMQSize =
-            property_get_int32("ro.vendor.camera.res.fmq.size", /*default*/METADATA_QUEUE_SIZE);
+    size_t fmqHalSize = mDevice->getCaptureResultFMQSize();
+    size_t resultMQSize =
+            property_get_int32("ro.camera.resultFmqSize", /*default*/0);
+    resultMQSize = resultMQSize > 0 ? resultMQSize : fmqHalSize;
     res = CreateMetadataQueue(&mResultMetadataQueue, resultMQSize);
     if (res != OK) {
         ALOGE("%s: Creating result metadata queue failed: %s(%d)", __FUNCTION__,
@@ -2025,19 +2027,17 @@ binder::Status CameraDeviceClient::setCameraAudioRestriction(int32_t mode) {
 }
 
 status_t CameraDeviceClient::CreateMetadataQueue(
-        std::unique_ptr<MetadataQueue>* metadata_queue, uint32_t default_size_bytes) {
+        std::unique_ptr<MetadataQueue>* metadata_queue, size_t size_bytes) {
         if (metadata_queue == nullptr) {
             ALOGE("%s: metadata_queue is nullptr", __FUNCTION__);
             return BAD_VALUE;
         }
 
-        int32_t size = default_size_bytes;
-
         *metadata_queue =
-                std::make_unique<MetadataQueue>(static_cast<size_t>(size),
+                std::make_unique<MetadataQueue>(size_bytes,
                         /*configureEventFlagWord*/ false);
         if (!(*metadata_queue)->isValid()) {
-            ALOGE("%s: Creating metadata queue (size %d) failed.", __FUNCTION__, size);
+            ALOGE("%s: Creating metadata queue (size %zu) failed.", __FUNCTION__, size_bytes);
             return NO_INIT;
         }
 
@@ -2485,6 +2485,26 @@ void CameraDeviceClient::detachDevice() {
                     camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MIN_ID,
                     camera2::FrameProcessorBase::FRAME_PROCESSOR_LISTENER_MAX_ID, /*listener*/this);
     }
+
+    if (flags::camera_multi_client() && mSharedMode) {
+        for (auto streamInfo : mStreamInfoMap) {
+            int streamToDelete = streamInfo.first;
+            std::vector<size_t> removedSurfaceIds;
+            for (size_t i = 0; i < mStreamMap.size(); ++i) {
+                if (streamToDelete == mStreamMap.valueAt(i).streamId()) {
+                    removedSurfaceIds.push_back(mStreamMap.valueAt(i).surfaceId());
+                }
+            }
+            status_t err = mDevice->removeSharedSurfaces(streamToDelete, removedSurfaceIds);
+            if (err != OK) {
+                std::string msg = fmt::sprintf("Camera %s: Unexpected error %s (%d) when removing"
+                        "shared surfaces from stream %d", mCameraIdStr.c_str(), strerror(-err),
+                        err, streamToDelete);
+                ALOGE("%s: %s", __FUNCTION__, msg.c_str());
+            }
+        }
+    }
+
     if (!flags::camera_multi_client() || !mSharedMode ||
             (mSharedMode && sCameraService->isOnlyClient(this))){
         ALOGV("Camera %s: Stopping processors", mCameraIdStr.c_str());
