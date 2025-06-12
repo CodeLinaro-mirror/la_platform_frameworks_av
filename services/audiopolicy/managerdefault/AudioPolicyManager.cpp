@@ -1870,11 +1870,15 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
     if (stream == AUDIO_STREAM_TTS) {
         *flags = AUDIO_OUTPUT_FLAG_TTS;
     } else if (stream == AUDIO_STREAM_VOICE_CALL &&
-               audio_is_linear_pcm(config->format)) {
+               audio_is_linear_pcm(config->format) &&
+               (*flags & AUDIO_OUTPUT_FLAG_INCALL_MUSIC) == 0) {
         if (*flags & AUDIO_OUTPUT_FLAG_FAST) {
             ALOGD("Fast output flags for PCM format");
         }
-        else if ((*flags & AUDIO_OUTPUT_FLAG_INCALL_MUSIC) == 0) {
+        else if(*flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ){
+            ALOGV("MMAP flag set, Ignoring Voip and direct output flags");
+        }
+        else {
             *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX |
                                             AUDIO_OUTPUT_FLAG_DIRECT);
             ALOGV("Set VoIP and Direct output flags for PCM format");
