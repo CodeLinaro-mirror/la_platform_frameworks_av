@@ -146,7 +146,7 @@ std::optional<AttributionSourceState> resolveAttributionSource(
     return std::optional<AttributionSourceState>{myAttributionSource};
 }
 
-static bool checkRecordingInternal(const AttributionSourceState &attributionSource,
+static int checkRecordingInternal(const AttributionSourceState &attributionSource,
                                        const uint32_t virtualDeviceId,
                                        const String16 &msg, bool start, audio_source_t source) {
     // Okay to not track in app ops as audio server or media server is us and if
@@ -180,7 +180,10 @@ static bool checkRecordingInternal(const AttributionSourceState &attributionSour
                         attributedOpCode) != permission::PermissionChecker::PERMISSION_HARD_DENIED);
         }
 
-        return permitted;
+        if (permitted)
+            return PERMISSION_GRANTED;
+        else
+            return PERMISSION_HARD_DENIED;
     } else {
         if (attributedOpCode == AppOpsManager::OP_NONE) return PERMISSION_GRANTED;  // nothing to do
         AppOpsManager ap{};
@@ -338,7 +341,8 @@ bool accessUltrasoundAllowed(const AttributionSourceState& attributionSource) {
 
 bool captureHotwordAllowed(const AttributionSourceState& attributionSource) {
     // CAPTURE_AUDIO_HOTWORD permission implies RECORD_AUDIO permission
-    bool ok = recordingAllowed(attributionSource);
+    const auto legacySource = aidl2legacy_AudioSource_audio_source_t(media::audio::common::AudioSource::HOTWORD).value();
+    bool ok = recordingAllowed(attributionSource, legacySource);
 
     if (ok) {
         static const String16 sCaptureHotwordAllowed("android.permission.CAPTURE_AUDIO_HOTWORD");
