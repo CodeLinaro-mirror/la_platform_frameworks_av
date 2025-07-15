@@ -197,8 +197,16 @@ sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmAidlConfigWithFallback
 // static
 sp<const AudioPolicyConfig> AudioPolicyConfig::loadFromApmXmlConfigWithFallback(
         const std::string& xmlFilePath) {
+    std::string audioPolicyXmlConfigFile;
+
+    if (property_get_bool("vendor.audio.gaming.enabled", false /* default_value */)) {
+        audioPolicyXmlConfigFile = "/vendor/etc/audio/audio_policy_configuration_gaming.xml";
+    } else {
+        audioPolicyXmlConfigFile = audio_get_audio_policy_config_file();
+    }
+
     const std::string filePath =
-            xmlFilePath.empty() ? audio_get_audio_policy_config_file() : xmlFilePath;
+          xmlFilePath.empty() ? audioPolicyXmlConfigFile : xmlFilePath;
     auto config = sp<AudioPolicyConfig>::make();
     if (status_t status = config->loadFromXml(filePath, false /*forVts*/); status == NO_ERROR) {
         return config;
