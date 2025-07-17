@@ -12,8 +12,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
-
 #define LOG_TAG "PolicyAidlConversion"
 //#define LOG_NDEBUG 0
 #include <utils/Log.h>
@@ -92,6 +95,8 @@ aidl2legacy_AudioMixRouteFlag_uint32_t(media::AudioMixRouteFlag aidl) {
             return MIX_ROUTE_FLAG_RENDER;
         case media::AudioMixRouteFlag::LOOP_BACK:
             return MIX_ROUTE_FLAG_LOOP_BACK;
+        case media::AudioMixRouteFlag::DISALLOWS:
+            return MIX_ROUTE_FLAG_DISALLOWS_PREFERRED_DEVICE;
     }
     return unexpected(BAD_VALUE);
 }
@@ -103,6 +108,8 @@ legacy2aidl_uint32_t_AudioMixRouteFlag(uint32_t legacy) {
             return media::AudioMixRouteFlag::RENDER;
         case MIX_ROUTE_FLAG_LOOP_BACK:
             return media::AudioMixRouteFlag::LOOP_BACK;
+        case MIX_ROUTE_FLAG_DISALLOWS_PREFERRED_DEVICE:
+            return media::AudioMixRouteFlag::DISALLOWS;
     }
     return unexpected(BAD_VALUE);
 }
@@ -118,8 +125,10 @@ aidl2legacy_AudioMixRouteFlag_uint32_t_mask(int32_t aidl) {
 
 ConversionResult<int32_t>
 legacy2aidl_uint32_t_AudioMixRouteFlag_mask(uint32_t legacy) {
+    // MIX_ROUTE_FLAG_DISALLOWS_PREFERRED_DEVICE is for internal user, and thus
+    // it is not converted.
     return convertBitmask<int32_t, uint32_t, media::AudioMixRouteFlag, uint32_t>(
-            legacy,
+            legacy & MIX_ROUTE_FLAG_LOOP_BACK_AND_RENDER,
             legacy2aidl_uint32_t_AudioMixRouteFlag,
             indexToEnum_bitmask<uint32_t>,
             enumToMask_index<int32_t, media::AudioMixRouteFlag>);
