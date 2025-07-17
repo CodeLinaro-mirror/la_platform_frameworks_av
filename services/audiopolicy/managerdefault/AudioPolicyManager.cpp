@@ -1402,31 +1402,15 @@ status_t AudioPolicyManager::getOutputForAttrInt(
         if (deviceDesc != nullptr) {
             bool requestOffloadOrDirect =
                 (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) || (*flags & AUDIO_OUTPUT_FLAG_DIRECT);
-            bool tryDirectForChannelMask = policyDesc != nullptr
-                 && (audio_channel_count_from_out_mask(policyDesc->getConfig().channel_mask) <
-                     audio_channel_count_from_out_mask(config->channel_mask))
-                 && !(*flags & AUDIO_OUTPUT_FLAG_FAST);
-            bool isDirectFlagAdded = false;
-            if (tryDirectForChannelMask) {
-                if (*flags & AUDIO_OUTPUT_FLAG_DIRECT) {
-                    ALOGD("%s: AUDIO_OUTPUT_FLAG_DIRECT already set", __func__);
-                } else {
-                    *flags = (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT);
-                    isDirectFlagAdded = true;
-                }
-            }
             sp<IOProfile> profile = getProfileForOutput(DeviceVector(deviceDesc),
                                                     config->sample_rate,
                                                     config->format,
                                                     config->channel_mask,
                                                     (audio_output_flags_t)*flags,
-                                                    (requestOffloadOrDirect || tryDirectForChannelMask));
+                                                    requestOffloadOrDirect);
             ALOGD("%s() profile %sfound sample rate: %u, format: 0x%x, channel_mask: 0x%x, flags: 0x%x",
                 __FUNCTION__, profile != 0 ? "" : "NOT ",
                 config->sample_rate, config->format, config->channel_mask, *flags);
-            if (profile == 0 && (tryDirectForChannelMask && isDirectFlagAdded)) {
-                *flags = (audio_output_flags_t)(*flags & ~(AUDIO_OUTPUT_FLAG_DIRECT));
-            }
             if ((deviceDesc->type() & AUDIO_DEVICE_OUT_BUS) && (*stream == AUDIO_STREAM_MUSIC) &&
                     (profile != 0) && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
                 ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
