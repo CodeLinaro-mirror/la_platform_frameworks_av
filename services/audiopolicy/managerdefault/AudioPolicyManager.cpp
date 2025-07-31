@@ -17,6 +17,11 @@
  * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
+/*
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
 
 #include "utils/Errors.h"
 #define LOG_TAG "APM_AudioPolicyManager"
@@ -1398,6 +1403,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                     policyDesc = nullptr;
                 } else {
                     policyDesc = mOutputs.valueFor(newOutput);
+                    primaryMix->setOutput(policyDesc);
                     mDirectOutput = policyDesc;
                 }
             }
@@ -1827,14 +1833,13 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
         *flags = AUDIO_OUTPUT_FLAG_TTS;
     } else if (stream == AUDIO_STREAM_VOICE_CALL &&
                audio_is_linear_pcm(config->format)) {
-        if (*flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
-            ALOGV("Set MMAP output flags for PCM format");
-        } else if (*flags & AUDIO_OUTPUT_FLAG_FAST) {
-            ALOGV("Set Fast output flags for PCM format");
-        } else if ((*flags & AUDIO_OUTPUT_FLAG_INCALL_MUSIC) == 0) {
-           *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX |
-                                       AUDIO_OUTPUT_FLAG_DIRECT);
-           ALOGV("Set VoIP and Direct output flags for PCM format");
+        if (*flags & AUDIO_OUTPUT_FLAG_FAST) {
+            ALOGD("Fast output flags for PCM format");
+        }
+        else if ((*flags & AUDIO_OUTPUT_FLAG_INCALL_MUSIC) == 0) {
+            *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX |
+                                            AUDIO_OUTPUT_FLAG_DIRECT);
+            ALOGV("Set VoIP and Direct output flags for PCM format");
         }
     }
 
@@ -2331,13 +2336,9 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
         if (samplingRate > SAMPLE_RATE_HZ_DEFAULT) {
             currentMatchCriteria[4] = outputDesc->getSamplingRate();
         }
-        if (flags & AUDIO_OUTPUT_FLAG_FAST && samplingRate <= SAMPLE_RATE_HZ_DEFAULT && (channelCount <= outputChannelCount)) {
+        if (flags & AUDIO_OUTPUT_FLAG_FAST && samplingRate <= SAMPLE_RATE_HZ_DEFAULT) {
             ALOGV("%s match criterion modifed for AUDIO_OUTPUT_FLAG_FAST, outputDesc->mSamplingRate=%d, samplingRate=%d",
                     __func__, outputDesc->getSamplingRate(), samplingRate);
-            currentMatchCriteria[4] = (outputDesc->getSamplingRate() == samplingRate);
-        }
-        if (flags & AUDIO_OUTPUT_FLAG_FAST && samplingRate <= SAMPLE_RATE_HZ_DEFAULT) {
-            ALOGV("%s match criterion modifed for AUDIO_OUTPUT_FLAG_FAST, outputDesc->mSamplingRate=%d, samplingRate=%d",                   __func__,  outputDesc->getSamplingRate(), samplingRate);
             currentMatchCriteria[4] = (outputDesc->getSamplingRate() == samplingRate);
         }
 
@@ -2345,9 +2346,9 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
         if (flags & AUDIO_OUTPUT_FLAG_FAST) {
             currentMatchCriteria[5] = popcount(outputDesc->mFlags & AUDIO_OUTPUT_FLAG_NONE);
         }
-	else {
-	    currentMatchCriteria[5] = popcount(outputDesc->mFlags & performanceFlags);
-	}
+        else {
+           currentMatchCriteria[5] = popcount(outputDesc->mFlags & performanceFlags);
+        }
 
         // format match
         if (format != AUDIO_FORMAT_INVALID) {
@@ -2361,9 +2362,9 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const SortedVector<audio_io_h
             currentMatchCriteria[7] = (outputDesc->mFlags == AUDIO_OUTPUT_FLAG_FAST);
             ALOGV("%s match criterion modified for AUDIO_OUTPUT_FLAG_FAST",  __func__);
         }
-	else {
+        else {
             currentMatchCriteria[7] = outputDesc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY;
-	}
+        }
 
         // compare match criteria by priority then value
         if (std::lexicographical_compare(bestMatchCriteria.begin(), bestMatchCriteria.end(),
@@ -3192,12 +3193,15 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             halInputSource = AUDIO_SOURCE_VOICE_RECOGNITION;
         }
     } else if (attributes.source == AUDIO_SOURCE_VOICE_COMMUNICATION &&
-               audio_is_linear_pcm(config->format) && (((flags & AUDIO_INPUT_FLAG_FAST) == 0))) {
+               audio_is_linear_pcm(config->format)) {
         if ((flags & AUDIO_INPUT_FLAG_MMAP_NOIRQ) != 0) {
             flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_MMAP_NOIRQ;
-        } else {
+        }
+        else if ((flags & AUDIO_INPUT_FLAG_FAST) != 0) {
+            flags = (audio_input_flags_t)AUDIO_INPUT_FLAG_FAST;
+        }
+        else {
             flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
-            ALOGV("Set VoIP flag for PCM format");
         }
     }
 
@@ -7917,6 +7921,12 @@ DeviceVector AudioPolicyManager::getNewOutputDevices(const sp<SwAudioOutputDescr
     }
 
     DeviceVector devices;
+    if (mDirectOutput != nullptr && outputDesc == mDirectOutput)
+    {
+        ALOGD("%s reusing direct output, select directoutput device!", __func__);
+        return mDirectOutput->devices();
+    }
+
     for (const auto &productStrategy : mEngine->getOrderedProductStrategies()) {
         StreamTypeVector streams = mEngine->getStreamTypesForProductStrategy(productStrategy);
         auto hasStreamActive = [&](auto stream) {
