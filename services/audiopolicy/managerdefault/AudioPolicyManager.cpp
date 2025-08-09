@@ -1331,6 +1331,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                     policyDesc = nullptr;
                 } else {
                     policyDesc = mOutputs.valueFor(newOutput);
+                    mDirectOutput = policyDesc;
                 }
             }
         }
@@ -7476,6 +7477,12 @@ DeviceVector AudioPolicyManager::getNewOutputDevices(const sp<SwAudioOutputDescr
     device = mPolicyMixes.getDeviceAndMixForOutput(outputDesc, mAvailableOutputDevices);
     if (device != nullptr) {
         return DeviceVector(device);
+    }
+
+    if (mDirectOutput != nullptr && outputDesc == mDirectOutput)
+    {
+        ALOGD("%s reusing direct output, select directoutput device!", __func__);
+        return mDirectOutput->devices();
     }
 
     for (const auto &productStrategy : mEngine->getOrderedProductStrategies()) {
