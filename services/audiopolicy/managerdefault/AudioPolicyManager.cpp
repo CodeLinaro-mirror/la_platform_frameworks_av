@@ -1677,7 +1677,8 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
     }
 
     sp<SwAudioOutputDescriptor> outputDesc = nullptr;
-    // check if direct output for pcm/track offload or compress offload already exist
+    // check if direct output for pcm/track offload already exist
+    bool directSessionInUse = false;
     // exclusive outputs for MMAP and Offload are enforced by different session ids.
     if (!(property_get_bool("vendor.audio.offload.multiple.enabled", false) &&
           ((flags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) &&
@@ -1698,6 +1699,19 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
                     *output = mOutputs.keyAt(i);
                     return NO_ERROR;
                 }
+                if (desc->mFlags == AUDIO_OUTPUT_FLAG_DIRECT) {
+                    directSessionInUse = true;
+                    ALOGD("%s Direct PCM already in use", __func__);
+                }
+            }
+        }
+        if (outputDesc != nullptr) {
+            if (((flags == AUDIO_OUTPUT_FLAG_DIRECT) && directSessionInUse) &&
+                 session != outputDesc->mDirectClientSession) {
+                 ALOGV("getOutput() do not reuse direct pcm output because current client (%d) "
+                       "is not the same as requesting client (%d) for different output conf",
+                 outputDesc->mDirectClientSession, session);
+                 return NAME_NOT_FOUND;
             }
         }
     }
