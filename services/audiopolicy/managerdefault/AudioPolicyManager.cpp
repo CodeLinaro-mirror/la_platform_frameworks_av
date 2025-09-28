@@ -1312,7 +1312,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
     DeviceVector outputDevices;
     const audio_port_handle_t requestedPortId = *selectedDeviceId;
     DeviceVector msdDevices = getMsdAudioOutDevices();
-    const sp<DeviceDescriptor> requestedDevice =
+    sp<DeviceDescriptor> requestedDevice =
         mAvailableOutputDevices.getDeviceFromId(requestedPortId);
 
     *outputType = API_OUTPUT_INVALID;
@@ -1331,7 +1331,19 @@ status_t AudioPolicyManager::getOutputForAttrInt(
           toString(*resultAttr).c_str(), toString(*stream).c_str(), session, requestedPortId);
 
     bool usePrimaryOutputFromPolicyMixes = false;
-
+    audio_usage_t usageFlagRequested = resultAttr->usage;
+    /* if usage flag type is media/game and port id is zero
+    (i.e no preferred device by client/app) then prefer a2dp device */
+    if (!requestedPortId &&
+        (usageFlagRequested == AUDIO_USAGE_MEDIA || usageFlagRequested == AUDIO_USAGE_GAME)) {
+        outputDevices = mEngine->getOutputDevicesForAttributes(*resultAttr, requestedDevice, false);
+        if (outputDevices.containsDeviceAmongTypes({AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,
+                                                    AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES,
+                                                    AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER})) {
+            ALOGV("device type is among A2DP device, setting requested device: A2DP");
+            requestedDevice = outputDevices.getDeviceForOpening();
+        }
+    }
     //Check for preferred devices in output devices list and if present, skip policy mixes
     sp<DeviceDescriptor> preferredDevice = mAvailableOutputDevices.getFirstExistingDevice({
                                             AUDIO_DEVICE_OUT_BLE_HEADSET,
