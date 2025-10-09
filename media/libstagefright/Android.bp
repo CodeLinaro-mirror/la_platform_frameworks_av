@@ -336,6 +336,7 @@ cc_library {
         "libstagefright_xmlparser_headers",
         "media_ndk_headers",
         "libmediaformatshaper_headers",
+        "bionic_libc_platform_headers",
     ],
 
     export_shared_lib_headers: [
