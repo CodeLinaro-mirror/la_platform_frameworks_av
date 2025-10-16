@@ -7590,6 +7590,7 @@ PlaybackThread::mixer_state OffloadThread::prepareTracks_l(
                 mPausedBytesRemaining = mBytesRemaining;
                 mBytesRemaining = 0;    // stop writing
             }
+            tracksToRemove->add(track);
         } else if (track->isPausing()) {
             track->setPaused();
             if (last) {
