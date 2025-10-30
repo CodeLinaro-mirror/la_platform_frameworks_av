@@ -13,13 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Changes from Qualcomm Innovation Center are provided under the following license:
- * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
- * SPDX-License-Identifier: BSD-3-Clause-Clear
- */
-/*
- * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
- * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -1381,15 +1375,34 @@ status_t AudioPolicyManager::getOutputForAttrInt(
         if (deviceDesc != nullptr) {
             bool requestOffloadOrDirect =
                 (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) || (*flags & AUDIO_OUTPUT_FLAG_DIRECT);
+            bool tryDirectForFlags = policyDesc == nullptr ||
+                (policyDesc->mFlags & AUDIO_OUTPUT_FLAG_DIRECT);
+            bool tryDirectForChannelMask = policyDesc != nullptr
+                 && (audio_channel_count_from_out_mask(policyDesc->getConfig().channel_mask) <
+                     audio_channel_count_from_out_mask(config->channel_mask))
+                 && !(*flags & AUDIO_OUTPUT_FLAG_FAST);
+            bool isDirectFlagAdded = false;
+            if (tryDirectForChannelMask || tryDirectForFlags) {
+                if (*flags & AUDIO_OUTPUT_FLAG_DIRECT) {
+                    ALOGD("%s: AUDIO_OUTPUT_FLAG_DIRECT already set", __func__);
+                } else {
+                    *flags = (audio_output_flags_t)(*flags | AUDIO_OUTPUT_FLAG_DIRECT);
+                    isDirectFlagAdded = true;
+                }
+            }
             sp<IOProfile> profile = getProfileForOutput(DeviceVector(deviceDesc),
                                                     config->sample_rate,
                                                     config->format,
                                                     config->channel_mask,
                                                     (audio_output_flags_t)*flags,
-                                                    requestOffloadOrDirect);
+                                                    (requestOffloadOrDirect || tryDirectForChannelMask ||
+                                                    tryDirectForFlags));
             ALOGD("%s() profile %sfound sample rate: %u, format: 0x%x, channel_mask: 0x%x, flags: 0x%x",
                 __FUNCTION__, profile != 0 ? "" : "NOT ",
                 config->sample_rate, config->format, config->channel_mask, *flags);
+            if (profile == 0 && ((tryDirectForFlags || tryDirectForChannelMask) && isDirectFlagAdded)) {
+                *flags = (audio_output_flags_t)(*flags & ~(AUDIO_OUTPUT_FLAG_DIRECT));
+            }
             if ((deviceDesc->type() & AUDIO_DEVICE_OUT_BUS) && (*stream == AUDIO_STREAM_MUSIC) &&
                     (profile != 0) && (*flags & AUDIO_OUTPUT_FLAG_DIRECT)) {
                 ALOGW("getOutputForAttr() bypass dynamic audio policy for device 0x%x query engine for output",
@@ -1677,7 +1690,8 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
     }
 
     sp<SwAudioOutputDescriptor> outputDesc = nullptr;
-    // check if direct output for pcm/track offload or compress offload already exist
+    // check if direct output for pcm/track offload already exist
+    bool directSessionInUse = false;
     // exclusive outputs for MMAP and Offload are enforced by different session ids.
     if (!(property_get_bool("vendor.audio.offload.multiple.enabled", false) &&
           ((flags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) &&
@@ -1698,6 +1712,19 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
                     *output = mOutputs.keyAt(i);
                     return NO_ERROR;
                 }
+                if (desc->mFlags == AUDIO_OUTPUT_FLAG_DIRECT) {
+                    directSessionInUse = true;
+                    ALOGD("%s Direct PCM already in use", __func__);
+                }
+            }
+        }
+        if (outputDesc != nullptr) {
+            if (((flags == AUDIO_OUTPUT_FLAG_DIRECT) && directSessionInUse) &&
+                 session != outputDesc->mDirectClientSession) {
+                 ALOGV("getOutput() do not reuse direct pcm output because current client (%d) "
+                       "is not the same as requesting client (%d) for different output conf",
+                 outputDesc->mDirectClientSession, session);
+                 return NAME_NOT_FOUND;
             }
         }
     }
