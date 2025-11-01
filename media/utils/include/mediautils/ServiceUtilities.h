@@ -116,6 +116,8 @@ bool callAudioInterceptionAllowed(const AttributionSourceState& attributionSourc
 void purgePermissionCache();
 int32_t getOpForSource(audio_source_t source);
 
+bool isRecordOpRequired(audio_source_t source);
+
 AttributionSourceState getCallingAttributionSource();
 
 status_t checkIMemory(const sp<IMemory>& iMemory);
