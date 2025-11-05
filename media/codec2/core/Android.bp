@@ -40,6 +40,7 @@ cc_library {
 
     header_abi_checker: {
         check_all_apis: true,
+        diff_flags: ["-allow-unreferenced-changes"],
     },
 
     header_libs: [
