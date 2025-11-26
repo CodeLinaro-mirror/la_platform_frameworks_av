@@ -1579,6 +1579,7 @@ status_t AudioTrack::getPosition(uint32_t *position)
         }
 
         uint32_t dspFrames = 0;
+        status_t status;
         if (mOutput != AUDIO_IO_HANDLE_NONE) {
             uint32_t halFrames; // actually unused
             // FIXME: on getRenderPosition() error, we return OK with frame position 0.

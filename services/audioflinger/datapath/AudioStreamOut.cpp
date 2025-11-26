@@ -32,7 +32,6 @@ namespace android {
 // ----------------------------------------------------------------------------
 AudioStreamOut::AudioStreamOut(AudioHwDevice *dev)
         : audioHwDev(dev)
-        , flags(flags)
 {
 }
 
@@ -75,7 +74,7 @@ status_t AudioStreamOut::getPresentationPosition(uint64_t *frames, struct timesp
     }
 
 
-    if (mHalFormatHasProportionalFrames) &&
+    if (mHalFormatHasProportionalFrames &&
             (flags & AUDIO_OUTPUT_FLAG_DIRECT) == AUDIO_OUTPUT_FLAG_DIRECT) {
         // For DirectTrack reset position to 0 on standby.
         const uint64_t adjustedPosition = (halPosition <= mFramesWrittenAtStandby) ?

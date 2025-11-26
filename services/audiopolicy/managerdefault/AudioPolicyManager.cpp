@@ -1920,7 +1920,11 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
     if (stream != AUDIO_STREAM_MUSIC) {
         *flags = (audio_output_flags_t)(*flags &~AUDIO_OUTPUT_FLAG_DEEP_BUFFER);
     } else if (/* stream == AUDIO_STREAM_MUSIC && */
-            *flags == AUDIO_OUTPUT_FLAG_NONE && mConfig->useDeepBufferForMedia()
+        *flags == AUDIO_OUTPUT_FLAG_NONE && mConfig->useDeepBufferForMedia()
+        && audio_channel_count_from_out_mask(config->channel_mask) == 2
+        && config->sample_rate <= SAMPLE_RATE_HZ_MAX) {
+            // use DEEP_BUFFER as default output for music stream type
+            *flags = (audio_output_flags_t)AUDIO_OUTPUT_FLAG_DEEP_BUFFER;
     } else if ((*flags == AUDIO_OUTPUT_FLAG_NONE || *flags == AUDIO_OUTPUT_FLAG_DIRECT ||
                 (*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD)) && !isInCall() &&
                 property_get_bool("audio.deep_buffer.media", false /* default_value */)) {
@@ -5315,7 +5319,6 @@ bool AudioPolicyManager::isOffloadPossible(const audio_offload_info_t &offloadIn
                 return AUDIO_OFFLOAD_NOT_SUPPORTED;
             }
         }
-    }
     }
 
     // Do not allow offloading if one non offloadable effect is enabled. This prevents from
@@ -9909,9 +9912,7 @@ void AudioPolicyManager::chkDpConnAndAllowedForVoice(audio_devices_t device,
 
 void AudioPolicyManager::updateClientsInternalMute(
         const sp<android::SwAudioOutputDescriptor> &desc) {
-    if (!desc->isBitPerfect() ||
-        !com::android::media::audioserver::
-                fix_concurrent_playback_behavior_with_bit_perfect_client()) {
+    if (!desc->isBitPerfect()) {
         // This is only used for bit perfect output now.
         return;
     }
