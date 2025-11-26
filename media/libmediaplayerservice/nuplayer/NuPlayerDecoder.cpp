@@ -45,7 +45,7 @@
 #include <mpeg2ts/ATSParser.h>
 #include <gui/Surface.h>
 
-#define ATRACE_TAG ATRACE_TAG_AUDIO
+//#define ATRACE_TAG ATRACE_TAG_AUDIO
 #include <utils/Trace.h>
 
 #include <android-base/stringprintf.h>
