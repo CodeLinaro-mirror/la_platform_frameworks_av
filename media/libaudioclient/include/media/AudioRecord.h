@@ -60,7 +60,6 @@ public:
                                     //    frames to be read
                                     // on input to releaseBuffer() it is currently ignored
 
-    private:
         size_t      mSize;          // input/output in bytes == frameCount * frameSize
                                     // on input to obtainBuffer() it is ignored
                                     // on output from obtainBuffer() it is the number of available

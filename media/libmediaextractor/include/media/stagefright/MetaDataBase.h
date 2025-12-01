@@ -59,22 +59,18 @@ enum {
     kKeyAACProfile        = 'aacp',  // int32_t
     kKeyAVCC              = 'avcc',  // raw data
     kKeyHVCC              = 'hvcc',  // raw data
-    kKeyDVCC              = 'dvcc',  // raw data
-    kKeyDVVC              = 'dvvc',  // raw data
-    kKeyDVWC              = 'dvwc',  // raw data
-    kKeyAV1C              = 'av1c',  // raw data
-    kKeyAPVC              = 'apvc',  // raw data
     kKeyThumbnailHVCC     = 'thvc',  // raw data
-    kKeyThumbnailAV1C     = 'tav1',  // raw data
     kKeyD263              = 'd263',  // raw data
+    kKeyVorbisInfo        = 'vinf',  // raw data
+    kKeyVorbisBooks       = 'vboo',  // raw data
     kKeyOpusHeader        = 'ohdr',  // raw data
     kKeyOpusCodecDelay    = 'ocod',  // uint64_t (codec delay in ns)
     kKeyOpusSeekPreRoll   = 'ospr',  // uint64_t (seek preroll in ns)
+    kKeyFlacMetadata      = 'flMd',  // raw data
     kKeyVp9CodecPrivate   = 'vp9p',  // raw data (vp9 csd information)
     kKeyIsSyncFrame       = 'sync',  // int32_t (bool)
     kKeyIsCodecConfig     = 'conf',  // int32_t (bool)
     kKeyIsMuxerData       = 'muxd',  // int32_t (bool)
-    kKeyIsEndOfStream     = 'feos',  // int32_t (bool)
     kKeyTime              = 'time',  // int64_t (usecs)
     kKeyDecodingTime      = 'decT',  // int64_t (decoding timestamp in usecs)
     kKeyNTPTime           = 'ntpT',  // uint64_t (ntp-timestamp)
@@ -85,7 +81,6 @@ enum {
     kKeyPixelFormat       = 'pixf',  // int32_t
     kKeyColorFormat       = 'colf',  // int32_t
     kKeyColorSpace        = 'cols',  // int32_t
-    kKeyGainmap           = 'gmap',  // int32_t
     kKeyPlatformPrivate   = 'priv',  // pointer
     kKeyDecoderComponent  = 'decC',  // cstring
     kKeyBufferID          = 'bfID',
@@ -119,12 +114,8 @@ enum {
     kKeyVideoProfile      = 'vprf',  // int32_t
     kKeyVideoLevel        = 'vlev',  // int32_t
 
-    // audio profile and level
-    // The codec framework doesn't distinguish between video and audio profiles,
-    // so there is no need to define a separate key
-    kKeyAudioProfile      = 'vprf',  // int32_t
-    kKeyAudioLevel        = 'vlev',  // int32_t
-
+    // Set this key to enable authoring files in 64-bit offset
+    kKey64BitFileOffset   = 'fobt',  // int32_t (bool)
     kKey2ByteNalLength    = '2NAL',  // int32_t (bool)
 
     // Identify the file output format for authoring
@@ -137,8 +128,6 @@ enum {
     kKeyTrackTimeStatus   = 'tktm',  // int64_t
 
     kKeyRealTimeRecording = 'rtrc',  // bool (int32_t)
-    kKeyBackgroundMode = 'bkmd',  // bool (int32_t)
-
     kKeyNumBuffers        = 'nbbf',  // int32_t
 
     // Ogg files can be tagged to be automatically looping...
@@ -154,8 +143,8 @@ enum {
     // The language code for this media
     kKeyMediaLanguage     = 'lang',  // cstring
 
-    // The manufacturer code for this media
-    kKeyManufacturer  = 'manu',  // cstring
+    // The manufacture code for this media
+    kKeyMediaManufacture  = 'manu',  // cstring
 
     // To store the timed text format data
     kKeyTextFormatData    = 'text',  // raw data
@@ -164,10 +153,6 @@ enum {
 
     kKeyIsADTS            = 'adts',  // bool (int32_t)
     kKeyAACAOT            = 'aaot',  // int32_t
-
-    kKeyMpeghProfileLevelIndication = 'hpli', // int32_t
-    kKeyMpeghReferenceChannelLayout = 'hrcl', // int32_t
-    kKeyMpeghCompatibleSets         = 'hcos', // raw data
 
     // If a MediaBuffer's data represents (at least partially) encrypted
     // data, the following fields aid in decryption.
@@ -239,10 +224,7 @@ enum {
     kKeyFrameCount       = 'nfrm', // int32_t, total number of frame in video track
     kKeyExifOffset       = 'exof', // int64_t, Exif data offset
     kKeyExifSize         = 'exsz', // int64_t, Exif data size
-    kKeyExifTiffOffset   = 'thdr', // int32_t, if > 0, buffer contains exif data block with
-                                   // tiff hdr at specified offset
-    kKeyXmpOffset        = 'xmof', // int64_t, XMP data offset
-    kKeyXmpSize          = 'xmsz', // int64_t, XMP data size
+    kKeyIsExif           = 'exif', // bool (int32_t) buffer contains exif data block
     kKeyPcmBigEndian     = 'pcmb', // bool (int32_t)
 
     // Key for ALAC Magic Cookie
@@ -252,65 +234,14 @@ enum {
     // AC-4 AudioPresentationInfo
     kKeyAudioPresentationInfo = 'audP',  // raw data
 
-    // opaque codec specific data being passed from extractor to codec
-    kKeyOpaqueCSD0       = 'csd0',
-    kKeyOpaqueCSD1       = 'csd1',
-    kKeyOpaqueCSD2       = 'csd2',
-
-    kKeyHapticChannelCount = 'hapC',
-
-    /* MediaRecorder.h, error notifications can represent track ids with 4 bits only.
-     * | track id | reserved |     error or info type     |
-     * 31         28         16                           0
-     */
-    kKey4BitTrackIds = '4bid',
-
-    // Treat empty track as malformed for MediaRecorder.
-    kKeyEmptyTrackMalFormed = 'nemt', // bool (int32_t)
-
-    kKeyVps              = 'sVps', // int32_t, indicates that a buffer has vps.
-    kKeySps              = 'sSps', // int32_t, indicates that a buffer has sps.
-    kKeyPps              = 'sPps', // int32_t, indicates that a buffer has pps.
-    kKeySelfID           = 'sfid', // int32_t, source ID to identify itself on RTP protocol.
-    kKeyPayloadType      = 'pTyp', // int32_t, SDP negotiated payload type.
-    kKeyRtpExtMap        = 'extm', // int32_t, rtp extension ID for cvo on RTP protocol.
-    kKeyRtpCvoDegrees    = 'cvod', // int32_t, rtp cvo degrees as per 3GPP 26.114.
-    kKeyRtpDscp          = 'dscp', // int32_t, DSCP(Differentiated services codepoint) of RFC 2474.
-    kKeyRtpEcn           = 'sEcn', // int32_t, ECN (Explicit Congestion Notification) of RFC 3168
-    kKeySocketNetwork    = 'sNet', // int64_t, socket will be bound to network handle.
-
-    // Slow-motion markers
-    kKeySlowMotionMarkers = 'slmo', // raw data, byte array following spec for
-                                    // MediaFormat#KEY_SLOW_MOTION_MARKERS
-
-    kKeySampleFileOffset = 'sfof', // int64_t, sample's offset in a media file.
-    kKeyLastSampleIndexInChunk = 'lsic',  //int64_t, index of last sample in a chunk.
-    kKeySampleTimeBeforeAppend = 'lsba', // int64_t, timestamp of last sample of a track.
-
-    // DVB component tag
-    kKeyDvbComponentTag = 'copt', // int32_t, component tag for DVB video/audio/subtitle
-
-    // DVB audio description
-    kKeyDvbAudioDescription = 'addt', // bool (int32_t), DVB audio description only defined for
-                                      // audio component
-
-    // DVB teletext magazine number
-    kKeyDvbTeletextMagazineNumber = 'ttxm', // int32_t, DVB teletext magazine number
-
-    // DVB teletext page number
-    kKeyDvbTeletextPageNumber = 'ttxp', // int32_t, DVB teletext page number
+    kKeyVendorFeatureNalLength = 'vfnl',
 };
 
 enum {
     kTypeESDS        = 'esds',
     kTypeAVCC        = 'avcc',
     kTypeHVCC        = 'hvcc',
-    kTypeAV1C        = 'av1c',
-    kTypeDVCC        = 'dvcc',
-    kTypeDVVC        = 'dvvc',
-    kTypeDVWC        = 'dvwc',
     kTypeD263        = 'd263',
-    kTypeHCOS        = 'hcos',
 };
 
 enum {
@@ -384,10 +315,8 @@ private:
     struct Rect;
     struct MetaDataInternal;
     MetaDataInternal *mInternalData;
-#ifndef __ANDROID_VNDK__
     status_t writeToParcel(Parcel &parcel);
     status_t updateFromParcel(const Parcel &parcel);
-#endif
 };
 
 }  // namespace android
