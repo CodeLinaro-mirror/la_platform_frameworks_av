@@ -1068,6 +1068,7 @@ protected:
         // list of descriptors for outputs currently opened
 
         sp<SwAudioOutputDescriptor> mSpatializerOutput;
+        sp<SwAudioOutputDescriptor> mDirectOutput;
 
         SwAudioOutputCollection mOutputs;
         // copy of mOutputs before setDeviceConnectionState() opens new outputs
