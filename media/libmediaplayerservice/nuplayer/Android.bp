@@ -98,7 +98,6 @@ cc_library_static {
         "libmedia",
         "libmediadrm",
         "libpowermanager",
-        "android.hardware.drm-V1-ndk",
         "libhidlmemory",
         "libcrypto",
         "libcamera_client",

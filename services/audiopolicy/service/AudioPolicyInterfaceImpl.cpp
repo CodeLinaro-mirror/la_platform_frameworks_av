@@ -570,6 +570,8 @@ Status AudioPolicyService::startOutput(
     }
     ALOGV("startOutput()");
     mOutputCommandThread->startOutputCommand(portId);
+    _aidl_return->volume = 1.f;
+    _aidl_return->muted = false;
     return Status::ok();
 }
 
@@ -604,8 +606,6 @@ status_t AudioPolicyService::doStartOutput(audio_port_handle_t portId)
                 client->attributes, nullptr /* callback */);
         client->active = true;
         onUpdateActiveSpatializerTracks_l();
-        _aidl_return->volume = volume;
-        _aidl_return->muted = muted;
     }
     return status;
 }

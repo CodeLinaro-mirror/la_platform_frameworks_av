@@ -1534,11 +1534,6 @@ status_t ThreadBase::checkEffectCompatibility_l(
     case DIRECT:
         // Treat direct threads similar to offload threads,
         // since mixing and post processing should be done by DSP here as well.
-    case OFFLOAD:
-        // nothing actionable on offload threads, if the effect:
-        //   - is offloadable: the effect can be created
-        //   - is NOT offloadable: the effect should still be created, but EffectHandle::enable()
-        //     will take care of invalidating the tracks of the thread
         break;
     case DUPLICATING:
         if (audio_is_global_session(sessionId)) {
@@ -6708,7 +6703,6 @@ DirectOutputThread::DirectOutputThread(const sp<IAfThreadCallback>& afThreadCall
         AudioStreamOut* output, audio_io_handle_t id, ThreadBase::type_t type, bool systemReady,
         const audio_offload_info_t& offloadInfo)
     :   PlaybackThread(afThreadCallback, output, id, type, systemReady)
-        , mOffloadInfo(offloadInfo)
         , mVolumeShaperActive(false)
         , mFramesWrittenAtStandby(0)
         , mFramesWrittenForSleep(0)
@@ -7161,7 +7155,6 @@ bool DirectOutputThread::shouldStandby_l()
 
     bool trackPaused = false;
     bool trackStopped = false;
-    bool trackDisabled = false;
 
     if (mStandby) {
         return false; // already in standby
@@ -7179,7 +7172,6 @@ bool DirectOutputThread::shouldStandby_l()
 
         trackPaused = mainTrack->isPaused();
         trackStopped = mainTrack->isStopped() || mainTrack->state() == IAfTrackBase::IDLE;
-        trackDisabled = (mType == OFFLOAD) && mainTrack->isDisabled();
     }
 
     standbyWhenIdle = trackStopped || (!trackPaused && !mHwPaused);
