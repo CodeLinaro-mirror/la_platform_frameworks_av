@@ -13,6 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
 
 #ifndef ANDROID_AUDIOPOLICYSERVICE_H
 #define ANDROID_AUDIOPOLICYSERVICE_H
@@ -397,7 +402,7 @@ public:
 
     void doOnNewAudioModulesAvailable();
     status_t doStopOutput(audio_port_handle_t portId);
-    status_t doStartOutput(audio_port_handle_t portId);
+    status_t doStartOutput(audio_port_handle_t portId, float *volume, bool *muted);
     void doReleaseOutput(audio_port_handle_t portId);
     status_t doForceReleaseDirectOutput(audio_io_handle_t outputId);
 
@@ -660,7 +665,8 @@ private:
                     status_t    parametersCommand(audio_io_handle_t ioHandle,
                                             const char *keyValuePairs, int delayMs = 0);
                     status_t    voiceVolumeCommand(float volume, int delayMs = 0);
-                    status_t    startOutputCommand(audio_port_handle_t portId);
+                    status_t    startOutputCommand(audio_port_handle_t portId, float *volume,
+                                                   bool *muted);
                     void        stopOutputCommand(audio_port_handle_t portId);
                     void        releaseOutputCommand(audio_port_handle_t portId);
                     status_t    forceReleaseDirectOutputCommand(audio_io_handle_t outputId);
@@ -764,6 +770,8 @@ private:
         class StartOutputData : public AudioCommandData {
         public:
             audio_port_handle_t mPortId;
+            float *mVolume;
+            bool *mMuted;
         };
 
         class StopOutputData : public AudioCommandData {

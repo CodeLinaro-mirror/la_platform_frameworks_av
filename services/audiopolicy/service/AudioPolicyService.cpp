@@ -13,6 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
 
 #define LOG_TAG "AudioPolicyService"
 //#define LOG_NDEBUG 0
@@ -1895,7 +1900,10 @@ bool AudioPolicyService::AudioCommandThread::threadLoop()
                         break;
                     }
                     mMutex.unlock();
-                    command->mStatus = svc->doStartOutput(data->mPortId);
+                    command->mStatus = svc->doStartOutput(data->mPortId, data->mVolume,
+                                                            data->mMuted);
+                    ALOGV("AudioCommandThread() processed start output volume %f muted %d",
+                            *(data->mVolume), *(data->mMuted));
                     mMutex.lock();
                     }break;
                 case STOP_OUTPUT: {
@@ -2256,12 +2264,15 @@ status_t AudioPolicyService::AudioCommandThread::voiceVolumeCommand(float volume
     return sendCommand(command, delayMs);
 }
 
-status_t AudioPolicyService::AudioCommandThread::startOutputCommand(audio_port_handle_t portId)
+status_t AudioPolicyService::AudioCommandThread::startOutputCommand(audio_port_handle_t portId,
+                                                                    float *volume, bool *muted)
 {
     sp<AudioCommand> command = new AudioCommand();
     command->mCommand = START_OUTPUT;
     sp<StartOutputData> data = new StartOutputData();
     data->mPortId = portId;
+    data->mVolume = volume;
+    data->mMuted = muted;
     command->mParam = data;
     command->mWaitStatus = true;
     ALOGV("AudioCommandThread() adding start output portId %d", portId);
