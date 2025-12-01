@@ -7523,6 +7523,22 @@ PlaybackThread::mixer_state OffloadThread::prepareTracks_l(
             }
             // Always perform pause if last, as an immediate flush will change
             // the pause state to be no longer isPausing().
+            if (last) {
+                if (mHwSupportsPause && !mHwPaused) {
+                    doHwPause = true;
+                    mHwPaused = true;
+                }
+                // If we were part way through writing the mixbuffer to
+                // the HAL we must save this until we resume
+                // BUG - this will be wrong if a different track is made active,
+                // in that case we want to discard the pending data in the
+                // mixbuffer and tell the client to present it again when the
+                // track is resumed
+                mPausedWriteLength = mCurrentWriteLength;
+                mPausedBytesRemaining = mBytesRemaining;
+                mBytesRemaining = 0;    // stop writing
+            }
+            tracksToRemove->push_back(track);
         } else if (track->isPausing()) {
             track->setPaused();
             if (last) {
