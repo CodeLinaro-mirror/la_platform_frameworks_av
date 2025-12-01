@@ -1049,7 +1049,7 @@ void AudioPolicyManager::setPhoneState(audio_mode_t state)
                 ALOGD("voice_conc:calling closeOutput on call mode for DSD COMPRESS output");
                 closeOutput(mOutputs.keyAt(i));
                 // call invalidate for music, so that DSD compress will fallback to deep-buffer.
-                mpClientInterface->invalidateStream(AUDIO_STREAM_MUSIC);
+                invalidateStreams({AUDIO_STREAM_MUSIC});
             }
         }
     }
@@ -1705,8 +1705,8 @@ status_t AudioPolicyManager::getOutputForAttr(const audio_attributes_t *attr,
 
     status_t status = getOutputForAttrInt(&resultAttr, output, session, attr, stream, uid,
             &directConfig, flags, selectedDeviceId, &isRequestedDeviceForExclusiveUse,
-            secondaryOutputs != nullptr ? &secondaryMixes : nullptr, outputType, isSpatialized);
-//            isBitPerfect);
+            secondaryOutputs != nullptr ? &secondaryMixes : nullptr, outputType, isSpatialized,
+            isBitPerfect);
     if (status != NO_ERROR) {
         return status;
     }
@@ -2537,7 +2537,12 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const std::set<audio_io_handl
         }
 
         // performance flags match
-        currentMatchCriteria[5] = popcount(outputDesc->mFlags & performanceFlags);
+        if (flags & AUDIO_OUTPUT_FLAG_FAST) {
+            currentMatchCriteria[5] = popcount(outputDesc->mFlags & AUDIO_OUTPUT_FLAG_NONE);
+        }
+	else {
+	    currentMatchCriteria[5] = popcount(outputDesc->mFlags & performanceFlags);
+	}
 
         // format match
         if (format != AUDIO_FORMAT_INVALID) {
@@ -2547,7 +2552,13 @@ audio_io_handle_t AudioPolicyManager::selectOutput(const std::set<audio_io_handl
         }
 
         // primary output match
-        currentMatchCriteria[7] = outputDesc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY;
+        if (flags & AUDIO_OUTPUT_FLAG_FAST && (outputDesc->getSamplingRate() == samplingRate) && (channelCount <= outputChannelCount)) {
+            currentMatchCriteria[7] = (outputDesc->mFlags == AUDIO_OUTPUT_FLAG_FAST);
+            ALOGV("%s match criterion modified for AUDIO_OUTPUT_FLAG_FAST",  __func__);
+        }
+	else {
+            currentMatchCriteria[7] = outputDesc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY;
+	}
 
         // compare match criteria by priority then value
         if (std::lexicographical_compare(bestMatchCriteria.begin(), bestMatchCriteria.end(),
@@ -5137,38 +5148,85 @@ status_t AudioPolicyManager::setAllowedCapturePolicy(uid_t uid, audio_flags_mask
 // of the system.
 audio_offload_mode_t AudioPolicyManager::getOffloadSupport(const audio_offload_info_t& offloadInfo)
 {
-    ALOGV("%s: SR=%u, CM=0x%x, Format=0x%x, StreamType=%d,"
-     " BitRate=%u, duration=%" PRId64 " us, has_video=%d",
-     __func__, offloadInfo.sample_rate, offloadInfo.channel_mask,
-     offloadInfo.format,
-     offloadInfo.stream_type, offloadInfo.bit_rate, offloadInfo.duration_us,
-     offloadInfo.has_video);
+     ALOGV("%s: SR=%u, CM=0x%x, Format=0x%x, StreamType=%d,"
+      " BitRate=%u, duration=%" PRId64 " us, has_video=%d",
+      __func__, offloadInfo.sample_rate, offloadInfo.channel_mask,
+      offloadInfo.format,
+      offloadInfo.stream_type, offloadInfo.bit_rate, offloadInfo.duration_us,
+      offloadInfo.has_video);
 
-    if (!isOffloadPossible(offloadInfo)) {
-        return AUDIO_OFFLOAD_NOT_SUPPORTED;
-    }
+     if (mMasterMono) {
+         return AUDIO_OFFLOAD_NOT_SUPPORTED; // no offloading if mono is set.
+     }
 
-    if (!isOffloadSupportedInternal(offloadInfo)) {
-        return AUDIO_OFFLOAD_NOT_SUPPORTED;
-    }
-    // See if there is a profile to support this.
-    // AUDIO_DEVICE_NONE
-    sp<IOProfile> profile = getProfileForOutput(DeviceVector() /*ignore device */,
-                                            offloadInfo.sample_rate,
-                                            offloadInfo.format,
-                                            offloadInfo.channel_mask,
-                                            AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD,
-                                            true /* directOnly */);
-    ALOGV("%s: profile %sfound%s", __func__, profile != nullptr ? "" : "NOT ",
-            (profile != nullptr && (profile->getFlags() & AUDIO_OUTPUT_FLAG_GAPLESS_OFFLOAD) != 0)
-            ? ", supports gapless" : "");
-    if (profile == nullptr) {
-        return AUDIO_OFFLOAD_NOT_SUPPORTED;
-    }
-    if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_GAPLESS_OFFLOAD) != 0) {
-        return AUDIO_OFFLOAD_GAPLESS_SUPPORTED;
-    }
-    return AUDIO_OFFLOAD_SUPPORTED;
+     // Check if offload has been disabled
+     if (property_get_bool("audio.offload.disable", false /* default_value */)) {
+         ALOGV("%s: offload disabled by audio.offload.disable", __func__);
+         return AUDIO_OFFLOAD_NOT_SUPPORTED;
+     }
+
+     // Check if stream type is music, then only allow offload as of now.
+     if (offloadInfo.stream_type != AUDIO_STREAM_MUSIC)
+     {
+         ALOGV("%s: stream_type != MUSIC, returning false", __func__);
+         return AUDIO_OFFLOAD_NOT_SUPPORTED;
+     }
+
+     //TODO: enable audio offloading with video when ready
+     const bool allowOffloadWithVideo =
+             property_get_bool("audio.offload.video", false /* default_value */);
+     if (offloadInfo.has_video && !allowOffloadWithVideo) {
+         ALOGV("%s: has_video == true, returning false", __func__);
+         return AUDIO_OFFLOAD_NOT_SUPPORTED;
+     }
+
+     if (isOffloadSupportedInternal(offloadInfo)) {
+         ALOGD("%s: offload is support internal, skip check duration", __func__);
+     } else {
+         //If duration is less than minimum value defined in property, return false
+         const int min_duration_secs = property_get_int32(
+             "audio.offload.min.duration.secs", -1 /* default_value */);
+         if (min_duration_secs >= 0) {
+             if (offloadInfo.duration_us < min_duration_secs * 1000000LL) {
+                 ALOGV("%s: Offload denied by duration < audio.offload.min.duration.secs(=%d)",
+                       __func__, min_duration_secs);
+                 return AUDIO_OFFLOAD_NOT_SUPPORTED;
+             }
+         } else if (offloadInfo.duration_us < OFFLOAD_DEFAULT_MIN_DURATION_SECS * 1000000) {
+             ALOGV("%s: Offload denied by duration < default min(=%u)",
+                   __func__, OFFLOAD_DEFAULT_MIN_DURATION_SECS);
+             return AUDIO_OFFLOAD_NOT_SUPPORTED;
+         }
+     }
+
+     // Do not allow offloading if one non offloadable effect is enabled. This prevents from
+     // creating an offloaded track and tearing it down immediately after start when audioflinger
+     // detects there is an active non offloadable effect.
+     // FIXME: We should check the audio session here but we do not have it in this context.
+     // This may prevent offloading in rare situations where effects are left active by apps
+     // in the background.
+     if (mEffects.isNonOffloadableEffectEnabled()) {
+         return AUDIO_OFFLOAD_NOT_SUPPORTED;
+     }
+
+     // See if there is a profile to support this.
+     // AUDIO_DEVICE_NONE
+     sp<IOProfile> profile = getProfileForOutput(DeviceVector() /*ignore device */,
+                                             offloadInfo.sample_rate,
+                                             offloadInfo.format,
+                                             offloadInfo.channel_mask,
+                                             AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD,
+                                             true /* directOnly */);
+     ALOGV("%s: profile %sfound%s", __func__, profile != nullptr ? "" : "NOT ",
+             (profile != nullptr && (profile->getFlags() & AUDIO_OUTPUT_FLAG_GAPLESS_OFFLOAD) != 0)
+             ? ", supports gapless" : "");
+     if (profile == nullptr) {
+         return AUDIO_OFFLOAD_NOT_SUPPORTED;
+     }
+     if ((profile->getFlags() & AUDIO_OUTPUT_FLAG_GAPLESS_OFFLOAD) != 0) {
+         return AUDIO_OFFLOAD_GAPLESS_SUPPORTED;
+     }
+     return AUDIO_OFFLOAD_SUPPORTED;
 }
 
 bool AudioPolicyManager::isOffloadSupportedInternal(const audio_offload_info_t& offloadInfo)
@@ -5228,6 +5286,17 @@ bool AudioPolicyManager::isOffloadSupportedInternal(const audio_offload_info_t& 
             ALOGD("%s offload disabled for WMA_PRO/WMA_LOSSLESS bit rate exceeding", __func__);
             return false;
         }
+
+	if ((offloadInfo.format == AUDIO_FORMAT_MP3) ||
+	    ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC) ||
+	    ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_FLAC) ||
+	    ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_VORBIS) ||
+	    ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_DSD) ||
+	    ((offloadInfo.format & AUDIO_FORMAT_MAIN_MASK) == AUDIO_FORMAT_AAC_ADTS)) {
+		ALOGD("Offload denied internal for MP3/AAC/VORBIS/FLAC format %0x",
+				offloadInfo.format & AUDIO_FORMAT_MAIN_MASK);
+		return false;
+	}
     }
     return true;
 }
