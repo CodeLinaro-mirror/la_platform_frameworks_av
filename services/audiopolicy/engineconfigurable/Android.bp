@@ -27,7 +27,11 @@ cc_library_shared {
         "-Wall",
         "-Werror",
         "-Wextra",
-    ],
+        "-DENABLE_CAP_AIDL_HYBRID_MODE",
+    ] + select(release_flag("RELEASE_HARDWARE_AUDIO_USE_CAP_AIDL"), {
+        true: [],
+        default: ["-DDISABLE_CAP_AIDL"],
+    }),
     local_include_dirs: ["include"],
     header_libs: [
         "libaudiopolicycommon",
@@ -56,5 +60,19 @@ cc_library_shared {
     ],
     defaults: [
         "aconfig_lib_cc_static_link.defaults",
+        "latest_android_media_audio_common_types_cpp_shared",
     ],
+    required: [
+    ] + select(release_flag("RELEASE_HARDWARE_AUDIO_USE_CAP_AIDL"), {
+        true: [
+            "CapClass.xml",
+            "CapProductStrategies.xml",
+            "CapSubsystem-CommonTypes.xml",
+            "CapSubsystem.xml",
+            "ParameterFrameworkConfigurationCap.xml",
+        ],
+        default: [
+            // empty, provisionned by the vendor
+        ],
+    }),
 }
