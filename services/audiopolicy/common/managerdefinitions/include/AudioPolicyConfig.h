@@ -45,10 +45,15 @@ public:
 
     // The source used to indicate the configuration from the AIDL HAL.
     static const constexpr char* const kAidlConfigSource = "AIDL HAL";
+#ifdef ENABLE_CAP_AIDL_HYBRID_MODE
+    // The source used to indicate the configuration from the AIDL HAL but engine still use XML.
+    static const constexpr char* const kHybridAidlConfigSource = "AIDL HAL Hybrid CAP";
+#endif
     // The source used to indicate the default fallback configuration.
     static const constexpr char* const kDefaultConfigSource = "AudioPolicyConfig::setDefault";
     // The suffix of the "engine default" implementation shared library name.
     static const constexpr char* const kDefaultEngineLibraryNameSuffix = "default";
+    static const constexpr char* const kCapEngineLibraryNameSuffix = "configurable";
 
     // Creates the default (fallback) configuration.
     static sp<const AudioPolicyConfig> createDefault();
