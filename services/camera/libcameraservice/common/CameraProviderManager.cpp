@@ -1867,7 +1867,7 @@ bool CameraProviderManager::ProviderInfo::DeviceInfo3::isAutomotiveDevice() {
 status_t CameraProviderManager::ProviderInfo::DeviceInfo3::addSharedSessionConfigurationTags(
         const std::string &cameraId) {
     status_t res = OK;
-    if (flags::camera_multi_client()) {
+    {
         SharedSessionConfigReader configReader;
         ErrorCode status =
                 configReader.parseSharedSessionConfig(

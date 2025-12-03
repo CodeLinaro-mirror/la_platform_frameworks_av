@@ -128,7 +128,7 @@ status_t Camera2ClientBase<TClientBase>::initializeImpl(TProviderPtr providerPtr
                             TClientBase::mRotationOverride, mLegacyClient);
             break;
         case IPCTransport::AIDL:
-            if (flags::camera_multi_client() && TClientBase::mSharedMode) {
+            if (TClientBase::mSharedMode) {
                 mDevice = AidlCamera3SharedDevice::getInstance(mCameraServiceProxyWrapper,
                             TClientBase::mAttributionAndPermissionUtils,
                             TClientBase::mCameraIdStr, mOverrideForPerfClass,
@@ -182,7 +182,7 @@ template <typename TClientBase>
 Camera2ClientBase<TClientBase>::~Camera2ClientBase() {
     ATRACE_CALL();
 
-    if (!flags::camera_multi_client() || !TClientBase::mDisconnected) {
+    if (!TClientBase::mDisconnected) {
         TClientBase::mDestructionStarted = true;
         disconnect();
     }
@@ -273,7 +273,7 @@ status_t Camera2ClientBase<TClientBase>::dumpDevice(
 template <typename TClientBase>
 binder::Status Camera2ClientBase<TClientBase>::disconnect() {
 
-   if (!flags::camera_multi_client() || !TClientBase::mDisconnected) {
+   if ( !TClientBase::mDisconnected) {
        return disconnectImpl();
    }
    return binder::Status::ok();
@@ -314,7 +314,7 @@ binder::Status Camera2ClientBase<TClientBase>::disconnectImpl() {
 template <typename TClientBase>
 void Camera2ClientBase<TClientBase>::detachDevice() {
     if (mDevice == 0) return;
-    if (flags::camera_multi_client() && TClientBase::mSharedMode) {
+    if (TClientBase::mSharedMode) {
         mDevice->disconnectClient(TClientBase::getClientPid());
     } else {
         mDevice->disconnect();

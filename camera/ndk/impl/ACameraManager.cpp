@@ -843,9 +843,6 @@ camera_status_t
 ACameraManager::isCameraDeviceSharingSupported(
         const char* cameraId,
         /*out*/bool* isSharingSupported) {
-    if (!flags::camera_multi_client()) {
-        return ACAMERA_ERROR_UNSUPPORTED_OPERATION;
-    }
     sp<ACameraMetadata> spChars;
     camera_status_t ret = getCameraCharacteristics(cameraId, &spChars);
     if (ret != ACAMERA_OK) {
@@ -951,7 +948,7 @@ ACameraManager::openCamera(
         return ACAMERA_ERROR_CAMERA_DISCONNECTED;
     }
     device->setRemoteDevice(deviceRemote);
-    if (flags::camera_multi_client() && sharedMode) {
+    if (sharedMode) {
         binder::Status remoteRet = deviceRemote->isPrimaryClient(primaryClient);
         if (!remoteRet.isOk()) {
             delete device;
