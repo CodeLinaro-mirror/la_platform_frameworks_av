@@ -28,6 +28,7 @@
 #include <C2Debug.h>
 #include <C2PlatformSupport.h>
 #include <SimpleC2Interface.h>
+#include <libyuv.h>
 
 #include "C2SoftMpeg4Dec.h"
 #include "mp4dec_api.h"
@@ -161,11 +162,17 @@ public:
                 .withConstValue(defaultColorInfo)
                 .build());
 
-        // TODO: support more formats?
+        // Currently supported output pixel formats:
+        // RGBX_8888 - default for ADP platform
+        // YCBCR_420_888 - required by Android
+        std::vector<uint32_t> pixelFormats = {static_cast<uint32_t> (HAL_PIXEL_FORMAT_RGBX_8888), 
+                                              static_cast<uint32_t> (HAL_PIXEL_FORMAT_YCBCR_420_888)};
         addParameter(
                 DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
-                .withConstValue(new C2StreamPixelFormatInfo::output(
-                                     0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
+                .withDefault(new C2StreamPixelFormatInfo::output(
+                                0u, static_cast<uint32_t> (HAL_PIXEL_FORMAT_RGBX_8888)))
+                .withFields({C2F(mPixelFormat, value).oneOf(pixelFormats)})
+                .withSetter((Setter<decltype(*mPixelFormat)>::StrictValueWithNoDeps))
                 .build());
     }
 
@@ -212,6 +219,8 @@ public:
 
     uint32_t getMaxWidth() const { return mMaxSize->width; }
     uint32_t getMaxHeight() const { return mMaxSize->height; }
+    // Get the current value of output pixel format requested by client.
+    uint32_t getOutputPixelFormat() const { return static_cast<uint32_t> (mPixelFormat->value); }
 
 private:
     std::shared_ptr<C2StreamProfileLevelInfo::input> mProfileLevel;
@@ -363,7 +372,10 @@ c2_status_t C2SoftMpeg4Dec::ensureDecoderState(const std::shared_ptr<C2BlockPool
         mOutBlock.reset();
     }
     if (!mOutBlock) {
-        uint32_t format = HAL_PIXEL_FORMAT_YV12;
+        // Two pixel formats are currently supported: RGBX_8888 and YCBCR_420_888.
+        // For RGBX create graphic buffer as it is.
+        // For YCBCR_420 create multi-planer YV12 graphic buffer required by Android.  
+        uint32_t format = (mIntf->getOutputPixelFormat() != HAL_PIXEL_FORMAT_RGBX_8888) ? HAL_PIXEL_FORMAT_YV12 : HAL_PIXEL_FORMAT_RGBX_8888;
         C2MemoryUsage usage = { C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE };
         c2_status_t err = pool->fetchGraphicBlock(align(mWidth, 16), mHeight, format, usage, &mOutBlock);
         if (err != C2_OK) {
@@ -599,14 +611,6 @@ void C2SoftMpeg4Dec::process(
             return;
         }
 
-        uint8_t *outputBufferY = wView.data()[C2PlanarLayout::PLANE_Y];
-        uint8_t *outputBufferU = wView.data()[C2PlanarLayout::PLANE_U];
-        uint8_t *outputBufferV = wView.data()[C2PlanarLayout::PLANE_V];
-
-        C2PlanarLayout layout = wView.layout();
-        size_t dstYStride = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
-        size_t dstUStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
-        size_t dstVStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
         size_t srcYStride = align(mWidth, 16);
         size_t srcUStride = srcYStride / 2;
         size_t srcVStride = srcYStride / 2;
@@ -615,9 +619,33 @@ void C2SoftMpeg4Dec::process(
         const uint8_t *srcU = (const uint8_t *)srcY + vStride * srcYStride;
         const uint8_t *srcV = (const uint8_t *)srcY + vStride * srcYStride * 5 / 4;
 
-        convertYUV420Planar8ToYV12(outputBufferY, outputBufferU, outputBufferV, srcY, srcU, srcV,
+        C2PlanarLayout layout = wView.layout();
+
+        if (mIntf->getOutputPixelFormat() == HAL_PIXEL_FORMAT_RGBX_8888) {
+            // Convert YUV420 decoder output to RGB format.
+            uint8_t *dst = wView.data()[C2PlanarLayout::PLANE_R];
+
+            size_t dstStride = layout.planes[C2PlanarLayout::PLANE_R].rowInc;
+            
+            libyuv::I420ToABGR(srcY, srcYStride, 
+                               srcU, srcUStride, 
+                               srcV, srcVStride, 
+                               dst, dstStride, 
+                               mWidth, mHeight);
+        } else {
+            // Convert YUV420 decoder output to YV12 format.
+            uint8_t *outputBufferY = wView.data()[C2PlanarLayout::PLANE_Y];
+            uint8_t *outputBufferU = wView.data()[C2PlanarLayout::PLANE_U];
+            uint8_t *outputBufferV = wView.data()[C2PlanarLayout::PLANE_V];
+
+            size_t dstYStride = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
+            size_t dstUStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
+            size_t dstVStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
+
+            convertYUV420Planar8ToYV12(outputBufferY, outputBufferU, outputBufferV, srcY, srcU, srcV,
                                    srcYStride, srcUStride, srcVStride, dstYStride, dstUStride,
                                    dstVStride, mWidth, mHeight);
+        }
 
         inPos += inSize - (size_t)tmpInSize;
         finishWork(workIndex, work);
