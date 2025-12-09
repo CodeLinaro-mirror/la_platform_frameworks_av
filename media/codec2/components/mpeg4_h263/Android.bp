@@ -26,7 +26,10 @@ cc_library {
 
     srcs: ["C2SoftMpeg4Dec.cpp"],
 
-    static_libs: ["libstagefright_m4vh263dec"],
+    static_libs: [
+        "libstagefright_m4vh263dec", 
+        "libyuv_static"
+    ],
 
     cflags: [
         "-DOSCL_IMPORT_REF=",
@@ -43,7 +46,10 @@ cc_library {
 
     srcs: ["C2SoftMpeg4Dec.cpp"],
 
-    static_libs: ["libstagefright_m4vh263dec"],
+    static_libs: [
+        "libstagefright_m4vh263dec", 
+        "libyuv_static"
+    ],
 
     cflags: [
         "-DOSCL_IMPORT_REF=",
