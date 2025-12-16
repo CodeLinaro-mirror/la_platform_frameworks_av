@@ -86,6 +86,7 @@ cc_defaults {
         "libstagefright_rtsp_headers",
         "libstagefright_webm_headers",
         "media_plugin_headers",
+        "libstagefright_mpeg2support_headers",
     ],
 
     static_libs: [
@@ -96,6 +97,10 @@ cc_defaults {
         "libstagefright_nuplayer",
         "libstagefright_rtsp",
         "libstagefright_timedtext",
+    ],
+
+    whole_static_libs: [
+        "libavmediaserviceextensions",
     ],
 
     cflags: [
@@ -127,6 +132,14 @@ cc_library {
 
     export_include_dirs: [
         ".",
+    ],
+
+    include_dirs: [
+        "frameworks/av/media/libstagefright/rtsp",
+        "frameworks/av/media/libstagefright/webm",
+        "frameworks/av/media/libavextensions",
+        "frameworks/av/media/libmediaextractor",
+        "frameworks/av/media/module/mpeg2ts",
     ],
 
     local_include_dirs: ["include"],

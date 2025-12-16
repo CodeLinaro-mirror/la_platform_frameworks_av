@@ -71,6 +71,7 @@
 #include <media/stagefright/rtsp/ARTPWriter.h>
 #include <android_media_mediarecorder.h>
 #include <com_android_media_editing_flags.h>
+#include <stagefright/AVExtensions.h>
 
 namespace android {
 
@@ -555,7 +556,7 @@ status_t StagefrightRecorder::setParamAudioSamplingRate(int32_t sampleRate) {
 
 status_t StagefrightRecorder::setParamAudioNumberOfChannels(int32_t channels) {
     ALOGV("setParamAudioNumberOfChannels: %d", channels);
-    if (channels <= 0 || channels >= 3) {
+    if (channels <= 0 || channels > 6) {
         ALOGE("Invalid number of audio channels: %d", channels);
         return BAD_VALUE;
     }
@@ -1384,8 +1385,7 @@ sp<MediaCodecSource> StagefrightRecorder::createAudioSource() {
         }
     }
 
-    sp<AudioSource> audioSource =
-        new AudioSource(
+    sp<AudioSource> audioSource = AVFactory::get()->createAudioSource(
                 &attr,
                 mAttributionSource,
                 sourceSampleRate,
@@ -1455,14 +1455,15 @@ sp<MediaCodecSource> StagefrightRecorder::createAudioSource() {
 
     sp<MediaCodecSource> audioEncoder =
             MediaCodecSource::Create(mLooper, format, audioSource);
-    sp<AudioSystem::AudioDeviceCallback> callback = mAudioDeviceCallback.promote();
-    if (mDeviceCallbackEnabled && callback != 0) {
-        audioSource->addAudioDeviceCallback(callback);
-    }
-    mAudioSourceNode = audioSource;
-
     if (audioEncoder == NULL) {
-        ALOGE("Failed to create audio encoder");
+	ALOGE("Failed to create audio encoder");
+    } else {
+    	sp<AudioSystem::AudioDeviceCallback> callback = mAudioDeviceCallback.promote();
+
+    	if (mDeviceCallbackEnabled && callback != 0) {
+        	audioSource->addAudioDeviceCallback(callback);
+    	}
+    	mAudioSourceNode = audioSource;
     }
 
     return audioEncoder;
@@ -1539,13 +1540,23 @@ status_t StagefrightRecorder::setupRawAudioRecording() {
     }
 
     sp<MediaCodecSource> audioEncoder = createAudioSource();
-    if (audioEncoder == NULL) {
-        return UNKNOWN_ERROR;
+    if (audioEncoder != NULL) {
+	CHECK(mWriter != 0);
+	mWriter->addSource(audioEncoder);
+	mAudioEncoderSource = audioEncoder;
+    } else if (audioEncoder == NULL && mAudioEncoder == AUDIO_ENCODER_LPCM) {
+	CHECK(mWriter != 0);
+	sp<MediaSource> src = setPCMRecording();
+	if (src == NULL) {
+		ALOGE("Recording source is null");
+		return UNKNOWN_ERROR;
+	}
+	mAudioSourceNode =  reinterpret_cast<AudioSource* > (src.get());
+	mWriter->addSource(src);
+    } else if (audioEncoder == NULL) {
+	return UNKNOWN_ERROR;
     }
 
-    CHECK(mWriter != 0);
-    mWriter->addSource(audioEncoder);
-    mAudioEncoderSource = audioEncoder;
 
     if (mMaxFileDurationUs != 0) {
         mWriter->setMaxFileDuration(mMaxFileDurationUs);

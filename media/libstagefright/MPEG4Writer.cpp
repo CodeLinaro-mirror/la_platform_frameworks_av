@@ -56,6 +56,7 @@
 #include <com_android_internal_camera_flags.h>
 #include <com_android_media_editing_flags.h>
 namespace editing_flags = com::android::media::editing::flags;
+#include <stagefright/AVExtensions.h>
 
 #ifndef __predict_false
 #define __predict_false(exp) __builtin_expect((exp) != 0, 0)
@@ -754,6 +755,12 @@ status_t MPEG4Writer::addSource(const sp<MediaSource> &source) {
         mHasDolbyVision = true;
     } else if (Track::getFourCCForMime(mime) == NULL) {
         ALOGE("Unsupported mime '%s'", mime);
+        return ERROR_UNSUPPORTED;
+    }
+
+    bool isAudio = !strncasecmp(mime, "audio/", 6);
+    if (isAudio && !AVUtils::get()->isAudioMuxFormatSupported(mime)) {
+        ALOGE("Muxing is not supported for %s", mime);
         return ERROR_UNSUPPORTED;
     }
 
@@ -4337,8 +4344,10 @@ status_t MPEG4Writer::Track::threadEntry() {
     if (mIsAudio) {
         ALOGI("Audio track drift time: %" PRId64 " us", mOwner->getDriftTimeUs());
     }
-
-    if (err == ERROR_END_OF_STREAM) {
+    // if err is ERROR_IO (ex: during SSR), return OK to save the
+    // recorded file successfully. Session tear down will happen as part of
+    // client callback
+    if ((mIsAudio && (err == ERROR_IO)) || (err == ERROR_END_OF_STREAM)) {
         return OK;
     }
     return err;

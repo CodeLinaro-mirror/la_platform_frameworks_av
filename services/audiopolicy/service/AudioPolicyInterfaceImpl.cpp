@@ -13,6 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
 
 #define LOG_TAG "AudioPolicyInterfaceImpl"
 //#define LOG_NDEBUG 0
@@ -569,6 +574,20 @@ Status AudioPolicyService::startOutput(
         return binderStatusFromStatusT(NO_INIT);
     }
     ALOGV("startOutput()");
+    float volume;
+    bool muted;
+    mOutputCommandThread->startOutputCommand(portId, &volume, &muted);
+    _aidl_return->volume = volume;
+    _aidl_return->muted = muted;
+    return Status::ok();
+}
+
+status_t AudioPolicyService::doStartOutput(audio_port_handle_t portId, float *volume, bool *muted)
+{
+    if (mAudioPolicyManager == NULL) {
+        return NO_INIT;
+    }
+    ALOGV("doStartOutput()");
     sp<AudioPlaybackClient> client;
     sp<AudioPolicyEffects> audioPolicyEffects;
 
@@ -584,9 +603,7 @@ Status AudioPolicyService::startOutput(
     }
     audio_utils::lock_guard _l(mMutex);
     AutoCallerClear acc;
-    float volume;
-    bool muted;
-    status_t status = mAudioPolicyManager->startOutput(portId, &volume, &muted);
+    status_t status = mAudioPolicyManager->startOutput(portId, volume, muted);
     if (status == NO_ERROR) {
         //TODO b/257922898: decide if/how we need to handle attributes update when playback starts
         // or during playback
@@ -594,10 +611,8 @@ Status AudioPolicyService::startOutput(
                 client->attributes, nullptr /* callback */);
         client->active = true;
         onUpdateActiveSpatializerTracks_l();
-        _aidl_return->volume = volume;
-        _aidl_return->muted = muted;
     }
-    return binderStatusFromStatusT(status);
+    return status;
 }
 
 Status AudioPolicyService::stopOutput(int32_t portIdAidl)

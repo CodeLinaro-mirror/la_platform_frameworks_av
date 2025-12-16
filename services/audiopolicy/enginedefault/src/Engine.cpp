@@ -406,7 +406,8 @@ DeviceVector Engine::getDevicesForStrategyInt(legacy_strategy strategy,
             if ((remoteSubmix = availableOutputDevices.getDevice(
                     AUDIO_DEVICE_OUT_REMOTE_SUBMIX, String8("0"),
                     AUDIO_FORMAT_DEFAULT)) != nullptr) {
-                devices2.add(remoteSubmix);
+                //devices2.add(remoteSubmix);
+                ALOGD("%s ignoring device REMOTE_SUBMIX ", __func__);
             }
         }
 

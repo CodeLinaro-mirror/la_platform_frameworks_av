@@ -94,6 +94,7 @@
 #include <private/android_filesystem_config.h>
 #include <server_configurable_flags/get_flags.h>
 #include <utils/Singleton.h>
+#include <stagefright/AVExtensions.h>
 
 namespace android {
 
@@ -2490,7 +2491,7 @@ static CodecBase *CreateCCodec() {
 sp<CodecBase> MediaCodec::GetCodecBase(const AString &name, const char *owner) {
     if (owner) {
         if (strcmp(owner, "default") == 0) {
-            return new ACodec;
+            return AVFactory::get()->createACodec();
         } else if (strncmp(owner, "codec2", 6) == 0) {
             return CreateCCodec();
         }

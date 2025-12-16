@@ -73,6 +73,7 @@ status_t AudioStreamOut::getPresentationPosition(uint64_t *frames, struct timesp
         return status;
     }
 
+
     if (mHalFormatHasProportionalFrames &&
             (flags & AUDIO_OUTPUT_FLAG_DIRECT) == AUDIO_OUTPUT_FLAG_DIRECT) {
         // For DirectTrack reset position to 0 on standby.
@@ -160,15 +161,12 @@ audio_config_base_t AudioStreamOut::getAudioProperties() const
 
 int AudioStreamOut::flush()
 {
-    mFramesWritten = 0;
-    mFramesWrittenAtStandby = 0;
-    const status_t result = stream->flush();
+    status_t result = stream->flush();
     return result != INVALID_OPERATION ? result : NO_ERROR;
 }
 
 int AudioStreamOut::standby()
 {
-    mFramesWrittenAtStandby = mFramesWritten;
     return stream->standby();
 }
 
@@ -179,10 +177,7 @@ void AudioStreamOut::presentationComplete() {
 ssize_t AudioStreamOut::write(const void *buffer, size_t numBytes)
 {
     size_t bytesWritten;
-    const status_t result = stream->write(buffer, numBytes, &bytesWritten);
-    if (result == OK && bytesWritten > 0 && mHalFrameSize > 0) {
-        mFramesWritten += bytesWritten / mHalFrameSize;
-    }
+    status_t result = stream->write(buffer, numBytes, &bytesWritten);
     return result == OK ? bytesWritten : result;
 }
 

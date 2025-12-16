@@ -329,6 +329,7 @@ public:
 
         status_t setAllowedCapturePolicy(uid_t uid, audio_flags_mask_t capturePolicy) override;
         virtual audio_offload_mode_t getOffloadSupport(const audio_offload_info_t& offloadInfo);
+        bool isOffloadSupportedInternal(const audio_offload_info_t& offloadInfo);
 
         virtual bool isDirectOutputSupported(const audio_config_base_t& config,
                                              const audio_attributes_t& attributes);
@@ -826,6 +827,8 @@ protected:
          */
         void checkAudioSourceForAttributes(const audio_attributes_t &attr);
 
+        bool isInvalidationOfMusicStreamNeeded(const audio_attributes_t &attr);
+
         bool followsSameRouting(const audio_attributes_t &lAttr,
                                 const audio_attributes_t &rAttr) const;
 
@@ -1065,6 +1068,7 @@ protected:
         // list of descriptors for outputs currently opened
 
         sp<SwAudioOutputDescriptor> mSpatializerOutput;
+        sp<SwAudioOutputDescriptor> mDirectOutput;
 
         SwAudioOutputCollection mOutputs;
         // copy of mOutputs before setDeviceConnectionState() opens new outputs
@@ -1168,6 +1172,7 @@ protected:
 private:
 
         void onNewAudioModulesAvailableInt(DeviceVector *newDevices);
+        void chkDpConnAndAllowedForVoice(audio_devices_t device, audio_policy_dev_state_t state);
 
         // Add or remove AC3 DTS encodings based on user preferences.
         void modifySurroundFormats(const sp<DeviceDescriptor>& devDesc, FormatVector *formatsPtr);
@@ -1281,6 +1286,12 @@ private:
          */
         bool isOutputOnlyAvailableRouteToSomeDevice(const sp<SwAudioOutputDescriptor>& outputDesc);
 
+        // Internal method checking If direct pcm track's offloadInfo needs to be updated.
+        void checkAndUpdateOffloadInfoForDirectTracks(
+                const audio_attributes_t *attr,
+                audio_stream_type_t *stream,
+                audio_config_t *config,
+                audio_output_flags_t *flags);
         /**
          * @brief getInputForDevice selects an input handle for a given input device and
          * requester context
