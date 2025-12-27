@@ -13,6 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/*
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
 
 #define LOG_TAG "APM_AudioPolicyManager"
 
@@ -1398,7 +1403,7 @@ status_t AudioPolicyManager::getOutputForAttrInt(
     audio_port_handle_t requestedPortId = getFirstDeviceId(*selectedDeviceIds);
     selectedDeviceIds->clear();
     DeviceVector msdDevices = getMsdAudioOutDevices();
-    const sp<DeviceDescriptor> requestedDevice =
+    sp<DeviceDescriptor> requestedDevice =
         mAvailableOutputDevices.getDeviceFromId(requestedPortId);
 
     *outputType = API_OUTPUT_INVALID;
@@ -1417,7 +1422,19 @@ status_t AudioPolicyManager::getOutputForAttrInt(
           toString(*resultAttr).c_str(), toString(*stream).c_str(), session, requestedPortId);
 
     bool usePrimaryOutputFromPolicyMixes = false;
-
+    audio_usage_t usageFlagRequested = resultAttr->usage;
+    /* if usage flag type is media/game and port id is zero
+    (i.e no preferred device by client/app) then prefer a2dp device */
+    if (!requestedPortId &&
+        (usageFlagRequested == AUDIO_USAGE_MEDIA || usageFlagRequested == AUDIO_USAGE_GAME)) {
+        outputDevices = mEngine->getOutputDevicesForAttributes(*resultAttr, requestedDevice, false);
+        if (outputDevices.containsDeviceAmongTypes({AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,
+                                                    AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES,
+                                                    AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER})) {
+            ALOGV("device type is among A2DP device, setting requested device: A2DP");
+            requestedDevice = outputDevices.getDeviceForOpening();
+        }
+    }
     //Check for preferred devices in output devices list and if present, skip policy mixes
     sp<DeviceDescriptor> preferredDevice = mAvailableOutputDevices.getFirstExistingDevice({
                                             AUDIO_DEVICE_OUT_BLE_HEADSET,
@@ -1505,7 +1522,6 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                 } else {
                     policyDesc = mOutputs.valueFor(newOutput);
                     mDirectOutput = policyDesc;
-                    primaryMix->setOutput(policyDesc);
                 }
             }
         }
@@ -5116,6 +5132,41 @@ status_t AudioPolicyManager::setAllowedCapturePolicy(uid_t uid, audio_flags_mask
     return NO_ERROR;
 }
 
+bool isWmaOffloadSupported(const audio_offload_info_t& offloadInfo)
+{
+    const audio_format_t audioFormat = audio_get_main_format(offloadInfo.format);
+    // check against wma std bit rate restriction
+    if (audioFormat == AUDIO_FORMAT_WMA) {
+        int32_t srIndex = -1;
+        int channelCount = popcount(offloadInfo.channel_mask);
+        for (int i = 0; i < kWmaStandardFrequencies; i++) {
+            if (offloadInfo.sample_rate == kWMASupportedSampleRates[i]) {
+                srIndex = i;
+                break;
+            }
+        }
+        if (srIndex < 0 || channelCount > 2 || channelCount <= 0) {
+            ALOGE("%s,Offload denied for WMA std, invalid sampleRate/channelCount", __func__);
+            return false;
+        }
+        uint32_t minBitRate = kWMASupportedMinByteRates[srIndex][channelCount - 1];
+        uint32_t maxBitRate = kWMASupportedMaxByteRates[srIndex][channelCount - 1];
+        if ((offloadInfo.bit_rate > maxBitRate) || (offloadInfo.bit_rate < minBitRate)) {
+            ALOGD("%s Offload denied for WMA unsupported bitRate %d, maxBitRate %d,"
+                        "minBitRate%d", __func__, offloadInfo.bit_rate, maxBitRate, minBitRate);
+            return false;
+        }
+    }
+    // check against wma pro/lossless bit rate restriction
+    if (audioFormat == AUDIO_FORMAT_WMA_PRO && (offloadInfo.bit_rate > kWmaProMaxBitrate ||
+            offloadInfo.bit_rate > kWmaLosslessMaxBitrate)) {
+        ALOGD("%s offload disabled for WMA_PRO/WMA_LOSSLESS bit rate exceeding", __func__);
+        return false;
+    }
+
+    return true;
+}
+
 // This function checks for the parameters which can be offloaded.
 // This can be enhanced depending on the capability of the DSP and policy
 // of the system.
@@ -5170,6 +5221,10 @@ audio_offload_mode_t AudioPolicyManager::getOffloadSupport(const audio_offload_i
                    __func__, OFFLOAD_DEFAULT_MIN_DURATION_SECS);
              return AUDIO_OFFLOAD_NOT_SUPPORTED;
          }
+     }
+     // check if offload supported for wma std and wma pro/lossless
+     if(!isWmaOffloadSupported(offloadInfo)) {
+        return AUDIO_OFFLOAD_NOT_SUPPORTED;
      }
 
      // Do not allow offloading if one non offloadable effect is enabled. This prevents from
@@ -5228,36 +5283,6 @@ bool AudioPolicyManager::isOffloadSupportedInternal(const audio_offload_info_t& 
                         __func__, audioFormat, channelCount, offloadInfo.sample_rate);
                 return false;
             }
-        }
-        // check against wma std bit rate restriction
-        if (audioFormat == AUDIO_FORMAT_WMA) {
-            int32_t srIndex = -1;
-            for (int i = 0; i < kWmaStandardFrequencies; i++) {
-                if (offloadInfo.sample_rate == kWMASupportedSampleRates[i]) {
-                    srIndex = i;
-                    break;
-                }
-            }
-            if (srIndex < 0 || channelCount > 2 || channelCount <= 0) {
-                ALOGD("%s,Offload denied for WMA, invalid sampleRate/channelCount", __func__);
-                return false;
-            }
-
-            uint32_t minBitRate = kWMASupportedMinByteRates[srIndex][channelCount - 1];
-            uint32_t maxBitRate = kWMASupportedMaxByteRates[srIndex][channelCount - 1];
-            if ((offloadInfo.bit_rate > maxBitRate) || (offloadInfo.bit_rate < minBitRate)) {
-                ALOGD("%s Offload denied for WMA unsupported bitRate %d, maxBitRate %d,"
-                        "minBitRate%d", __func__, offloadInfo.bit_rate, maxBitRate, minBitRate);
-                return false;
-            }
-        }
-
-        // Safely choose the min bitrate as threshold and leave the restriction to NT decoder
-        // as we can't distinguish wma pro and wma lossless here.
-        if (audioFormat == AUDIO_FORMAT_WMA_PRO && (offloadInfo.bit_rate > kWmaProMaxBitrate ||
-                offloadInfo.bit_rate > kWmaLosslessMaxBitrate)) {
-            ALOGD("%s offload disabled for WMA_PRO/WMA_LOSSLESS bit rate exceeding", __func__);
-            return false;
         }
 
 	if ((offloadInfo.format == AUDIO_FORMAT_MP3) ||
@@ -8315,6 +8340,12 @@ DeviceVector AudioPolicyManager::getNewOutputDevices(const sp<SwAudioOutputDescr
     }
 
     DeviceVector devices;
+    if (mDirectOutput != nullptr && outputDesc == mDirectOutput)
+    {
+        ALOGD("%s reusing direct output, select directoutput device!", __func__);
+        return mDirectOutput->devices();
+    }
+
     for (const auto &productStrategy : mEngine->getOrderedProductStrategies()) {
         StreamTypeVector streams = mEngine->getStreamTypesForProductStrategy(productStrategy);
         auto hasStreamActive = [&](auto stream) {
