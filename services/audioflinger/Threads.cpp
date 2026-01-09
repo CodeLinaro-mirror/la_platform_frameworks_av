@@ -10939,9 +10939,9 @@ status_t MmapThread::stop(audio_port_handle_t handle)
 
     mActiveTracks.remove(track);
     eraseClientSilencedState_l(track->portId());
-    track->stop();
 
     mutex().unlock();
+    track->stop();
     if (isOutput()) {
         AudioSystem::stopOutput(track->portId());
         AudioSystem::releaseOutput(track->portId());
