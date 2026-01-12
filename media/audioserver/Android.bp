@@ -8,7 +8,17 @@ package {
     default_applicable_licenses: ["frameworks_av_license"],
 }
 
-cc_binary {
+soong_config_module_type {
+    name: "audioserver_cc_binary",
+    module_type: "cc_binary",
+    config_namespace: "qcomfeatureconfig",
+    bool_variables: ["iotlowram"],
+    properties: [
+        "cflags",
+    ],
+}
+
+audioserver_cc_binary {
     name: "audioserver",
 
     srcs: [
@@ -19,7 +29,11 @@ cc_binary {
         "-Wall",
         "-Werror",
     ],
-
+    soong_config_variables: {
+        iotlowram: {
+            cflags: ["-DTARGET_QCOM_IOT_LOW_RAM"],
+        },
+    },
     defaults: [
         "latest_android_hardware_audio_core_sounddose_ndk_shared",
         "latest_android_media_audio_common_types_cpp_shared",
