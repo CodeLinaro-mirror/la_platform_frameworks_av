@@ -10915,6 +10915,7 @@ status_t MmapThread::start(const AudioClient& client,
 status_t MmapThread::stop(audio_port_handle_t handle)
 {
     ALOGV("%s handle %d", __FUNCTION__, handle);
+    sp<IAfMmapTrack> track;
     audio_utils::lock_guard l(mutex());
 
     if (mHalStream == 0) {
@@ -10926,7 +10927,6 @@ status_t MmapThread::stop(audio_port_handle_t handle)
         return NO_ERROR;
     }
 
-    sp<IAfMmapTrack> track;
     for (const sp<IAfMmapTrack>& t : mActiveTracks) {
         if (handle == t->portId()) {
             track = t;
@@ -10939,9 +10939,9 @@ status_t MmapThread::stop(audio_port_handle_t handle)
 
     mActiveTracks.remove(track);
     eraseClientSilencedState_l(track->portId());
+    track->stop();
 
     mutex().unlock();
-    track->stop();
     if (isOutput()) {
         AudioSystem::stopOutput(track->portId());
         AudioSystem::releaseOutput(track->portId());
