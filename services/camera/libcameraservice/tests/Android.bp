@@ -112,6 +112,7 @@ cc_test {
         "Camera3StreamSplitterTest.cpp",
         "CameraPermissionsTest.cpp",
         "CameraProviderManagerTest.cpp",
+        "SharedSessionConfigUtilsTest.cpp",
     ],
 
 }

@@ -63,7 +63,7 @@ class CameraDevice final : public RefBase {
   public:
     CameraDevice(const char* id, ACameraDevice_StateCallbacks* cb,
                   sp<ACameraMetadata> chars,
-                  ACameraDevice* wrapper);
+                  ACameraDevice* wrapper, bool sharedMode);
     ~CameraDevice();
 
     inline const char* getId() const { return mCameraId.c_str(); }
@@ -98,6 +98,7 @@ class CameraDevice final : public RefBase {
         binder::Status onRequestQueueEmpty() override;
         binder::Status onRepeatingRequestError(int64_t lastFrameNumber,
                 int32_t stoppedSequenceId) override;
+        binder::Status onClientSharedAccessPriorityChanged(bool isPrimaryClient) override;
       private:
         const wp<CameraDevice> mDevice;
     };
@@ -112,6 +113,10 @@ class CameraDevice final : public RefBase {
 
     // Stop the looper thread and unregister the handler
     void stopLooperAndDisconnect();
+
+    void setPrimaryClient(bool isPrimary) {mIsPrimaryClient = isPrimary;};
+    bool isPrimaryClient() {return mIsPrimaryClient;};
+    bool isSharedMode() {return mSharedMode;};
 
   private:
     friend ACameraCaptureSession;
@@ -128,6 +133,15 @@ class CameraDevice final : public RefBase {
 
     camera_status_t waitUntilIdleLocked();
 
+    camera_status_t stopStreamingLocked();
+
+    template<class T>
+    camera_status_t startStreamingLocked(ACameraCaptureSession* session,
+            /*optional*/T* callbacks,
+            int numOutputWindows, ANativeWindow** windows, /*optional*/int* captureSequenceId);
+
+    ACaptureRequest* mPreviewRequest = nullptr;
+    std::vector<ACameraOutputTarget*> mPreviewRequestOutputs;
 
     template<class T>
     camera_status_t captureLocked(sp<ACameraCaptureSession> session,
@@ -186,6 +200,8 @@ class CameraDevice final : public RefBase {
     const sp<ACameraMetadata> mChars;                 // Camera characteristics
     const sp<ServiceCallback> mServiceCallback;
     ACameraDevice* mWrapper;
+    bool mSharedMode;
+    bool mIsPrimaryClient;
 
     // stream id -> pair of (ANW* from application, OutputConfiguration used for camera service)
     std::map<int, std::pair<ANativeWindow*, OutputConfiguration>> mConfiguredOutputs;
@@ -227,7 +243,8 @@ class CameraDevice final : public RefBase {
         kWhatCaptureBufferLost, // onCaptureBufferLost
         kWhatPreparedCb, // onWindowPrepared
         // Internal cleanup
-        kWhatCleanUpSessions   // Cleanup cached sp<ACameraCaptureSession>
+        kWhatCleanUpSessions,   // Cleanup cached sp<ACameraCaptureSession>
+        kWhatClientSharedAccessPriorityChanged
     };
     static const char* kContextKey;
     static const char* kDeviceKey;
@@ -403,8 +420,8 @@ class CameraDevice final : public RefBase {
  */
 struct ACameraDevice {
     ACameraDevice(const char* id, ACameraDevice_StateCallbacks* cb,
-                  sp<ACameraMetadata> chars) :
-            mDevice(new android::acam::CameraDevice(id, cb, chars, this)) {}
+                  sp<ACameraMetadata> chars, bool sharedMode) :
+            mDevice(new android::acam::CameraDevice(id, cb, chars, this, sharedMode)) {}
 
     ~ACameraDevice();
 
@@ -445,7 +462,19 @@ struct ACameraDevice {
         mDevice->setRemoteDevice(remote);
     }
 
-  private:
+    inline void setPrimaryClient(bool isPrimary) {
+        mDevice->setPrimaryClient(isPrimary);
+    }
+
+    inline bool isPrimaryClient() const {
+        return mDevice->isPrimaryClient();
+    }
+
+    inline bool isSharedMode() const{
+        return mDevice->isSharedMode();
+    }
+
+ private:
     android::sp<android::acam::CameraDevice> mDevice;
 };
 
