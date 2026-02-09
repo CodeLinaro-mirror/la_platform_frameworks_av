@@ -1789,7 +1789,7 @@ status_t AudioPolicyManager::openDirectOutput(audio_stream_type_t stream,
     // in the background.
     sp<IOProfile> profile;
     if (((flags & (AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD | AUDIO_OUTPUT_FLAG_DIRECT)) == 0) ||
-            !(mEffects.isNonOffloadableEffectEnabled() || mMasterMono)) {
+            !(mEffects.isNonOffloadableEffectEnabled(session) || mMasterMono)) {
         profile = getProfileForOutput(
                 devices, config->sample_rate, config->format, config->channel_mask,
                 flags, true /* directOnly */);
@@ -4273,13 +4273,16 @@ audio_io_handle_t AudioPolicyManager::selectOutputForMusicEffects()
             if ((desc->mFlags & AUDIO_OUTPUT_FLAG_PRIMARY) != 0) {
                 outputPrimary = outputLoop;
             }
+            if ((desc->mFlags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) {
+                outputDirect = outputLoop;
+            }
         }
         if (outputOffloaded != AUDIO_IO_HANDLE_NONE) {
             output = outputOffloaded;
         } else if (outputSpatializer != AUDIO_IO_HANDLE_NONE) {
             output = outputSpatializer;
-	} else if (outputDirect != AUDIO_IO_HANDLE_NONE){
-	    output = outputDirect;
+        } else if (outputDirect != AUDIO_IO_HANDLE_NONE) {
+            output = outputDirect;
         } else if (outputDeepBuffer != AUDIO_IO_HANDLE_NONE) {
             output = outputDeepBuffer;
         } else if (outputPrimary != AUDIO_IO_HANDLE_NONE) {
