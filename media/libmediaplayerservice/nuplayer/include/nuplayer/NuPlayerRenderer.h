@@ -337,6 +337,7 @@ protected:
 
 private:
     bool mNeedVideoClearAnchor;
+    float mVideoRenderFps;
 };
 
 } // namespace android
