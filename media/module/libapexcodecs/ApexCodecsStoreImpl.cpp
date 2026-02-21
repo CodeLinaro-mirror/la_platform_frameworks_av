@@ -23,13 +23,19 @@
 #include <sys/mman.h>
 
 #include <android-base/no_destructor.h>
+#include <android-base/properties.h>
 #include <android_media_swcodec_flags.h>
 #include <apex/ApexCodecsImpl.h>
 
 #ifdef ENABLE_APEX_CODECS
+#include <android/api-level.h>
 #include <util/C2InterfaceHelper.h>
 #include "C2ApexAacDec.h"
+
+#ifdef __aarch64__
 #include "C2ApexOpusDec.h"
+#endif
+
 #endif
 
 namespace android::apexcodecs {
@@ -37,6 +43,12 @@ namespace android::apexcodecs {
 #ifdef ENABLE_APEX_CODECS
 
 namespace {
+
+static int GetApiLevel() {
+    int apiLevel = android_get_device_api_level();
+    bool isPreview = (android::base::GetIntProperty("ro.build.version.preview_sdk", 0) != 0);
+    return isPreview ? apiLevel + 1 : apiLevel;
+}
 
 struct ComponentDesc {
     std::shared_ptr<const C2Component::Traits> traits;
@@ -95,12 +107,20 @@ private:
 
     static std::map<std::string, ComponentDesc> BuildCodecs() {
         std::map<std::string, ComponentDesc> codecs;
+#ifdef __aarch64__
         if (android::media::swcodec::flags::opus_inproc_software_decoder()) {
-            AddCodec<C2ApexOpusDec>(&codecs);
+            static bool sIs64bitOnly = []() {
+                return ::android::base::GetProperty("ro.product.cpu.abilist32", "").empty();
+            }();
+            if (GetApiLevel() >= 37 && sIs64bitOnly ) {
+                AddCodec<C2ApexOpusDec>(&codecs);
+            }
         }
+#endif
         if (android::media::swcodec::flags::rust_aac_software_decoder()) {
-            // FIXME
-            // AddCodec<C2ApexAacDec>(&codecs);
+            if (GetApiLevel() >= 37) {
+                AddCodec<C2ApexAacDec>(&codecs);
+            }
         }
         std::erase_if(codecs, [](const auto &pair) {
             return pair.second.traits == nullptr;
