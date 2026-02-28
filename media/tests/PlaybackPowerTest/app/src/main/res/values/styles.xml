@@ -13,6 +13,8 @@
      See the License for the specific language governing permissions and
      limitations under the License.
 -->
-<resources>
-    <string name="app_name">Playback Power Test</string>
+<resources xmlns:android="http://schemas.android.com/apk/res/android">
+  <style name="PlayerTheme" parent="Theme.AppCompat.NoActionBar">
+    <item name="android:windowBackground">@android:color/black</item>
+  </style>
 </resources>

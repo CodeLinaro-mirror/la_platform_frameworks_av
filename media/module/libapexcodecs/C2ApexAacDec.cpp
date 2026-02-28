@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-//#define LOG_NDEBUG 0
+// #define LOG_NDEBUG 0
 #define LOG_TAG "C2ApexAacDec"
 #include <log/log.h>
 
@@ -37,6 +37,7 @@
 #include <util/C2InterfaceHelper.h>
 
 #include "C2ApexAacDec.h"
+#include "DrcPresModeWrapRustAac.h"
 #include "private/apex/ApexCodecsImpl.h"
 
 namespace android {
@@ -46,28 +47,27 @@ using ::android::apexcodecs::ApexConfigurableImpl;
 using ::android::apexcodecs::ApexConfigurableIntf;
 
 namespace {
-    constexpr float DRC_DEFAULT_MOBILE_REF_LEVEL = -16.0;
-    constexpr float DRC_DEFAULT_MOBILE_DRC_CUT = 1.0;
-    constexpr float DRC_DEFAULT_MOBILE_DRC_BOOST = 1.0;
-    constexpr C2Config::drc_compression_mode_t DRC_DEFAULT_MOBILE_DRC_HEAVY
-            = C2Config::DRC_COMPRESSION_HEAVY;
+    constexpr int32_t DRC_DEFAULT_MOBILE_REF_LEVEL = 64;
+    constexpr int32_t DRC_DEFAULT_MOBILE_DRC_CUT = 127;
+    constexpr int32_t DRC_DEFAULT_MOBILE_DRC_BOOST = 127;
+    constexpr int32_t DRC_DEFAULT_MOBILE_DRC_HEAVY = 1;
     constexpr int32_t DRC_DEFAULT_MOBILE_DRC_EFFECT = 3;
     constexpr int32_t DRC_DEFAULT_MOBILE_DRC_ALBUM = 0;
     constexpr float DRC_DEFAULT_MOBILE_OUTPUT_LOUDNESS = 0.25;
-    constexpr float DRC_DEFAULT_MOBILE_ENC_LEVEL = 0.25;
+    constexpr int32_t DRC_DEFAULT_MOBILE_ENC_LEVEL = -1;
     constexpr int32_t MAX_CHANNEL_COUNT = 8;
     constexpr size_t MAX_SAMPLES_PER_FRAME = 4096;
-    constexpr size_t TMP_BUFFER_COUNT = MAX_SAMPLES_PER_FRAME * MAX_CHANNEL_COUNT;
+    constexpr size_t MAX_FRAMES_TO_DECODE_PER_PROCESS_CALL = 3;
+    constexpr size_t TMP_BUFFER_COUNT = MAX_SAMPLES_PER_FRAME * MAX_CHANNEL_COUNT
+                                       * MAX_FRAMES_TO_DECODE_PER_PROCESS_CALL;
     constexpr char PROP_DRC_OVERRIDE_REF_LEVEL[] = "aac_drc_reference_level";
     constexpr char PROP_DRC_OVERRIDE_CUT[] = "aac_drc_cut";
     constexpr char PROP_DRC_OVERRIDE_BOOST[] = "aac_drc_boost";
     constexpr char PROP_DRC_OVERRIDE_HEAVY[] = "aac_drc_heavy";
     constexpr char PROP_DRC_OVERRIDE_ENC_LEVEL[] = "aac_drc_enc_target_level";
     constexpr char PROP_DRC_OVERRIDE_EFFECT[] = "ro.aac_drc_effect_type";
-
     constexpr size_t kDefaultOutputPortDelay = 2;
     constexpr size_t kMaxOutputPortDelay = 16;
-    constexpr size_t kNumDelayBlocksMax = 8;
 
     // definitions based on android.media.AudioFormat.CHANNEL_OUT_*
     constexpr uint32_t CHANNEL_OUT_FL  = 0x4;
@@ -177,10 +177,15 @@ public:
                 })
                 .calculatedAs(MaxInputSizeSetter, mAacFormat, mChannelCount)
                 .build());
+        C2Config::drc_compression_mode_t defaultDrcCompressionMode =
+                property_get_int32(PROP_DRC_OVERRIDE_HEAVY,
+                                   DRC_DEFAULT_MOBILE_DRC_HEAVY) == 1
+                        ? C2Config::DRC_COMPRESSION_HEAVY
+                        : C2Config::DRC_COMPRESSION_LIGHT;
         addParameter(
                 DefineParam(mDrcCompressMode, C2_PARAMKEY_DRC_COMPRESSION_MODE)
                 .withDefault(new C2StreamDrcCompressionModeTuning::input(
-                        0u, C2Config::DRC_COMPRESSION_HEAVY))
+                        0u, defaultDrcCompressionMode))
                 .withFields({
                     C2F(mDrcCompressMode, value).oneOf({
                             C2Config::DRC_COMPRESSION_ODM_DEFAULT,
@@ -190,38 +195,57 @@ public:
                 })
                 .withSetter(Setter<decltype(*mDrcCompressMode)>::StrictValueWithNoDeps)
                 .build());
+
+        float defaultDrcTargetRefLevel = -0.25 * property_get_int32(
+                PROP_DRC_OVERRIDE_REF_LEVEL,
+                DRC_DEFAULT_MOBILE_REF_LEVEL);
         addParameter(
                 DefineParam(mDrcTargetRefLevel, C2_PARAMKEY_DRC_TARGET_REFERENCE_LEVEL)
                 .withDefault(new C2StreamDrcTargetReferenceLevelTuning::input(
-                        0u, DRC_DEFAULT_MOBILE_REF_LEVEL))
+                        0u, defaultDrcTargetRefLevel))
                 .withFields({C2F(mDrcTargetRefLevel, value).inRange(-31.75, 0.25)})
                 .withSetter(Setter<decltype(*mDrcTargetRefLevel)>::StrictValueWithNoDeps)
                 .build());
+
+        float defaultDrcEncTargetLevel = -0.25 * property_get_int32(
+                PROP_DRC_OVERRIDE_ENC_LEVEL,
+                DRC_DEFAULT_MOBILE_ENC_LEVEL);
         addParameter(
                 DefineParam(mDrcEncTargetLevel, C2_PARAMKEY_DRC_ENCODED_TARGET_LEVEL)
                 .withDefault(new C2StreamDrcEncodedTargetLevelTuning::input(
-                        0u, DRC_DEFAULT_MOBILE_ENC_LEVEL))
+                        0u, defaultDrcEncTargetLevel))
                 .withFields({C2F(mDrcEncTargetLevel, value).inRange(-31.75, 0.25)})
                 .withSetter(Setter<decltype(*mDrcEncTargetLevel)>::StrictValueWithNoDeps)
                 .build());
+
+        float defaultDrcBoostFactor = property_get_int32(
+                PROP_DRC_OVERRIDE_BOOST,
+                DRC_DEFAULT_MOBILE_DRC_BOOST) / 127.;
         addParameter(
                 DefineParam(mDrcBoostFactor, C2_PARAMKEY_DRC_BOOST_FACTOR)
                 .withDefault(new C2StreamDrcBoostFactorTuning::input(
-                        0u, DRC_DEFAULT_MOBILE_DRC_BOOST))
+                        0u, defaultDrcBoostFactor))
                 .withFields({C2F(mDrcBoostFactor, value).inRange(0, 1.)})
                 .withSetter(Setter<decltype(*mDrcBoostFactor)>::StrictValueWithNoDeps)
                 .build());
+
+        float defaultDrcAttenuationFactor = property_get_int32(
+                PROP_DRC_OVERRIDE_CUT,
+                DRC_DEFAULT_MOBILE_DRC_CUT) / 127.;
         addParameter(
                 DefineParam(mDrcAttenuationFactor, C2_PARAMKEY_DRC_ATTENUATION_FACTOR)
                 .withDefault(new C2StreamDrcAttenuationFactorTuning::input(
-                        0u, DRC_DEFAULT_MOBILE_DRC_CUT))
+                        0u, defaultDrcAttenuationFactor))
                 .withFields({C2F(mDrcAttenuationFactor, value).inRange(0, 1.)})
                 .withSetter(Setter<decltype(*mDrcAttenuationFactor)>::StrictValueWithNoDeps)
                 .build());
+        C2Config::drc_effect_type_t defaultDrcEffectType =
+                (C2Config::drc_effect_type_t)property_get_int32(
+                        PROP_DRC_OVERRIDE_EFFECT, DRC_DEFAULT_MOBILE_DRC_EFFECT);
         addParameter(
                 DefineParam(mDrcEffectType, C2_PARAMKEY_DRC_EFFECT_TYPE)
                 .withDefault(new C2StreamDrcEffectTypeTuning::input(
-                        0u, C2Config::DRC_EFFECT_LIMITED_PLAYBACK_RANGE))
+                        0u, defaultDrcEffectType))
                 .withFields({
                     C2F(mDrcEffectType, value).oneOf({
                             C2Config::DRC_EFFECT_ODM_DEFAULT,
@@ -384,22 +408,20 @@ private:
 
 C2ApexAacDec::C2ApexAacDec(const std::shared_ptr<IntfImpl> &intfImpl)
     : mConfigurable(std::make_unique<ApexConfigurableImpl>(
-              std::make_shared<SimpleC2Interface<IntfImpl>>(COMPONENT_NAME, 0, intfImpl))),
-      mIntf(intfImpl),
-      mAACDecoder(nullptr),
-      mIsFirst(true),
-      mInputBufferCount(0),
-      mOutputBufferCount(0),
-      mSignalledError(false),
-      mOutputPortDelay(kDefaultOutputPortDelay),
-      mEndOfInput(false),
-      mEndOfOutput(false),
-      mOutputDelayCompensated(0),
-      mOutputDelayRingBufferSize(0),
-      mOutputDelayRingBuffer(nullptr),
-      mOutputDelayRingBufferWritePos(0),
-      mOutputDelayRingBufferReadPos(0),
-      mOutputDelayRingBufferFilled(0) {
+            std::make_shared<SimpleC2Interface<IntfImpl>>(COMPONENT_NAME, 0, intfImpl))),
+        mIntf(intfImpl),
+        mAACDecoder(nullptr),
+        mIsFirstInput(true),
+        mIsFirstOutput(true),
+        mSignalledError(false),
+        mEndOfInput(false),
+        mEndOfOutput(false),
+        mCurrentTimestampUs(0),
+        mCurrentFrameIndex(0),
+        mSamplesToDiscard(0),
+        mLeftoverSamples(0),
+        mDeviceApiLevel(android_get_device_api_level()) {
+    mLeftoverBuffer.resize(TMP_BUFFER_COUNT);
     ALOGV("C2ApexAacDec created");
 }
 
@@ -452,13 +474,21 @@ ApexCodec_Status C2ApexAacDec::start() {
 
 ApexCodec_Status C2ApexAacDec::flush() {
     ALOGV("flush");
-    mOutputDelayRingBufferReadPos = mOutputDelayRingBufferWritePos;
-    mOutputDelayRingBufferFilled = 0;
-    mPendingFrameInfos.clear();
-    mRingBufferFrameInfos.clear();
-    mEndOfInput = false;
-    mEndOfOutput = false;
-    mSignalledError = false;
+    if (mAACDecoder) {
+        if (aacDecoder_Clear(mAACDecoder) != AAC_DEC_OK) {
+            ALOGE("aacDecoder_Clear failed");
+            return APEXCODEC_STATUS_CORRUPTED;
+        }
+        mEndOfInput = false;
+        mEndOfOutput = false;
+        ALOGV("flush: clearing leftover %zu samples and %zu pending timestamps",
+                mLeftoverSamples, mPendingTimestamps.size());
+        mLeftoverSamples = 0;
+        mPendingTimestamps = {};
+        mLeftoverBuffer.resize(TMP_BUFFER_COUNT);
+        mIsFirstInput = true;
+        mIsFirstOutput = true;
+    }
     return APEXCODEC_STATUS_OK;
 }
 
@@ -468,12 +498,23 @@ ApexCodec_Status C2ApexAacDec::reset() {
         aacDecoder_Close(mAACDecoder);
         mAACDecoder = nullptr;
     }
-    mPendingFrameInfos.clear();
-    mRingBufferFrameInfos.clear();
     mSignalledError = false;
     mEndOfInput = false;
     mEndOfOutput = false;
-    return initDecoder();
+    mSamplesToDiscard = 0;
+    ALOGV("reset: clearing leftover %zu samples and %zu pending timestamps",
+            mLeftoverSamples, mPendingTimestamps.size());
+    mLeftoverSamples = 0;
+    mLeftoverBuffer.resize(TMP_BUFFER_COUNT);
+    mPendingTimestamps = {};
+    mIsFirstInput = true;
+    mIsFirstOutput = true;
+    mCurrentTimestampUs = 0;
+    mCurrentFrameIndex = 0;
+    mOutputInfo = CAacDecoderOutputInfo_default();
+    mStreamInfo = CAacDecoderStreamInfo_default();
+    mMetadataInfo = CAacDecoderMetadataInfo_default();
+    return APEXCODEC_STATUS_OK;
 }
 
 std::unique_ptr<ApexConfigurableIntf> C2ApexAacDec::getConfigurable() {
@@ -486,30 +527,90 @@ ApexCodec_Status C2ApexAacDec::process(
         ApexCodec_Buffer* output,
         size_t* consumed,
         size_t* produced) {
+    ALOGV("process: input=%p, output=%p", input, output);
+    constexpr size_t kMaxOutputBufferSize = TMP_BUFFER_COUNT * sizeof(float);
     if (mSignalledError) {
         ALOGE("process called in error state");
         return APEXCODEC_STATUS_CORRUPTED;
     }
     *consumed = 0;
     *produced = 0;
-    ALOGV("process: input=%p, output=%p", input, output);
+
+    ApexCodec_LinearBuffer configUpdates;
+    if (input) {
+        ApexCodec_LinearBuffer configUpdates;
+        bool ownedByClient;
+        if (input->getConfigUpdates(&configUpdates, &ownedByClient) == APEXCODEC_STATUS_OK &&
+                configUpdates.size > 0) {
+            ALOGV("configUpdates.size: %zu", configUpdates.size);
+            std::vector<C2Param *> c2Params;
+            uint8_t *data = configUpdates.data;
+            size_t size = configUpdates.size;
+            constexpr size_t PARAMS_ALIGNMENT = 8;
+            while (size > 0) {
+                ALOGV("configUpdates size: %zu", size);
+                size_t paramSize = ((C2Param *)data)->size();
+                if (paramSize > size || paramSize == 0) {
+                    mSignalledError = true;
+                    return APEXCODEC_STATUS_CORRUPTED;
+                }
+                c2Params.emplace_back(C2Param::From(data, paramSize));
+                data += align(paramSize, PARAMS_ALIGNMENT);
+                size -= align(paramSize, PARAMS_ALIGNMENT);
+            }
+            if (!c2Params.empty()) {
+                ALOGV("config: %zu params", c2Params.size());
+                std::vector<std::unique_ptr<C2SettingResult>> failures;
+                (void)mIntf->config(c2Params, C2_MAY_BLOCK, &failures);
+                ALOGV("config done");
+            }
+        }
+    }
+
     ApexCodec_BufferFlags inFlags = (ApexCodec_BufferFlags)0;
     uint64_t frameIndex = 0, timestamp = 0;
+
+    uint32_t prevSampleRate = mOutputInfo.sampling_rate;
+    uint8_t prevNumChannels = mOutputInfo.num_channels;
+    int16_t prevOutLoudness = mOutputInfo.output_loudness;
+    AUDIO_OBJECT_TYPE prevExtAot = mStreamInfo.extAot;
+    // SBR and PS are dual rate systems, so the sample rate is doubled.
+    if (prevExtAot == AOT_SBR || prevExtAot == AOT_PS) {
+        prevSampleRate *= 2;
+    }
+
+    ApexCodec_LinearBuffer outLinearBuffer;
+    if (output->getLinearBuffer(&outLinearBuffer) != APEXCODEC_STATUS_OK) {
+        ALOGE("output->getLinearBuffer failed");
+        return APEXCODEC_STATUS_BAD_VALUE;
+    }
+
+    if (outLinearBuffer.size < kMaxOutputBufferSize) {
+        std::vector<uint8_t> configUpdate;
+        C2StreamMaxBufferSizeInfo::output outSize(0u, kMaxOutputBufferSize);
+        AppendParamsToVector(&configUpdate, &outSize);
+        output->setOwnedConfigUpdates(std::move(configUpdate));
+        return APEXCODEC_STATUS_NO_MEMORY;
+    }
+
     if (input) {
         input->getBufferInfo(&inFlags, &frameIndex, &timestamp);
-        ALOGV("process input: flags=%x, frameIndex=%" PRIu64 ","
-                "timestamp=%" PRIu64, inFlags, frameIndex, timestamp);
     }
-
-    int numSamples = outputDelayRingBufferSamplesAvailable();
-    ALOGV("numSamples available: %d", numSamples);
-    if (numSamples > 0 && output) {
-        ApexCodec_Status status = outputFromRingBuffer(output, produced, frameIndex, timestamp);
-        return status;
-    }
+    ALOGV("process input: flags=%x, frameIndex=%" PRIu64 ","
+            "timestamp=%" PRIu64, inFlags, frameIndex, timestamp);
 
     ApexCodec_LinearBuffer inBuffer;
-    // Decode data from the input buffer and place it in the ring buffer.
+    AAC_DECODER_ERROR decoderErr = AAC_DEC_OK;
+    OutputInfo output_info = CAacDecoderOutputInfo_default();
+    std::vector<float> tmpOutBuffer(TMP_BUFFER_COUNT);
+    bool decoded = false;
+    bool codecConfig = (inFlags & APEXCODEC_FLAG_CODEC_CONFIG) != 0;
+    ALOGV("codecConfig: %d", codecConfig);
+
+    if (inFlags & APEXCODEC_FLAG_END_OF_STREAM) {
+        mEndOfInput = true;
+    }
+
     if (!mEndOfInput && input &&
             input->getLinearBuffer(&inBuffer) == APEXCODEC_STATUS_OK &&
             inBuffer.size > 0) {
@@ -517,56 +618,50 @@ ApexCodec_Status C2ApexAacDec::process(
             ALOGE("input buffer type is not linear");
             return APEXCODEC_STATUS_BAD_VALUE;
         }
+
         ALOGV("input buffer size: %zu", inBuffer.size);
-        bool codecConfig = (inFlags & APEXCODEC_FLAG_CODEC_CONFIG) != 0;
-        ALOGV("codecConfig: %d", codecConfig);
         if (codecConfig) {
             ALOGV("processing codec config buffer (size=%zu)", inBuffer.size);
-            AAC_DECODER_ERROR decoderErr =
-                aacDecoder_ConfigRaw(mAACDecoder,
+            decoderErr = aacDecoder_ConfigRaw(mAACDecoder,
                                      const_cast<uint8_t *>(inBuffer.data),
                                      static_cast<uint32_t>(inBuffer.size));
             if (decoderErr != AAC_DEC_OK) {
                 ALOGE("aacDecoder_ConfigRaw decoderErr = 0x%4.4x", decoderErr);
                 mSignalledError = true;
+                ALOGV("codec config buffer size: %zu", inBuffer.size);
+                for (size_t i = 0; i < inBuffer.size; ++i) {
+                    ALOGV("codec config buffer data[%zu]: %02x", i, inBuffer.data[i]);
+                }
                 return APEXCODEC_STATUS_CORRUPTED;
             }
             *consumed = inBuffer.size;
         } else {
-            mPendingFrameInfos.push_back({frameIndex, timestamp, 0});
+            mPendingTimestamps.emplace(timestamp, frameIndex);
             size_t offset = 0;
             size_t size = inBuffer.size;
-            ALOGV("process loop: offset=%zu, size=%zu", offset, size);
             while (size > 0) {
-                uint8_t* inPtr = const_cast<uint8_t *>(inBuffer.data + offset);
-                uint32_t inBufferLength = std::min(
-                       size, static_cast<size_t>(std::numeric_limits<uint32_t>::max()));
+                uint8_t* inPtr = const_cast<uint8_t *>(inBuffer.data) + offset;
+                uint32_t inBufferLength = size;
                 uint32_t bytesValid = inBufferLength;
-                ALOGV("inPtr=%p, inBufferLength=%u, bytesValid=%u",
-                        inPtr, inBufferLength, bytesValid);
+                unsigned aac_frame_length = 0;
                 if (mIntf->isAdts()) {
+                    // ADTS parsing logic
                     ALOGV("ADTS input");
                     size_t adtsHeaderSize = 0;
-                    // skip 30 bits, aac_frame_length follows.
-                    // ssssssss ssssiiip ppffffPc ccohCCll llllllll lll?????
-
                     const uint8_t *adtsHeader = inBuffer.data + offset;
                     if (size < 7) {
-                        ALOGE("ADTS header too small: %zu", size);
-                        mSignalledError = true;
-                        return APEXCODEC_STATUS_CORRUPTED;
+                        ALOGV("ADTS header too small: %zu. Leftover", size);
+                        break;
                     }
                     bool protectionAbsent = (adtsHeader[1] & 1);
-                    unsigned aac_frame_length =
+                    aac_frame_length =
                         ((adtsHeader[3] & 3) << 11) | (adtsHeader[4] << 3) | (adtsHeader[5] >> 5);
                     ALOGV("protectionAbsent=%d, aac_frame_length=%u",
                             protectionAbsent, aac_frame_length);
                     if (size < aac_frame_length) {
-                        ALOGE("Incomplete ADTS frame: %zu < %u", size, aac_frame_length);
-                        mSignalledError = true;
-                        return APEXCODEC_STATUS_CORRUPTED;
+                        ALOGV("Incomplete ADTS frame: %zu < %u. Leftover", size, aac_frame_length);
+                        break;
                     }
-                    // Add two bytes for the CRC (Cyclic Redundancy Check) if protection is absent.
                     adtsHeaderSize = (protectionAbsent ? 7 : 9);
                     ALOGV("adtsHeaderSize: %zu", adtsHeaderSize);
                     if (aac_frame_length < adtsHeaderSize) {
@@ -576,240 +671,281 @@ ApexCodec_Status C2ApexAacDec::process(
                     }
                     inPtr = const_cast<uint8_t *>(adtsHeader + adtsHeaderSize);
                     inBufferLength = aac_frame_length - adtsHeaderSize;
-                    offset += adtsHeaderSize;
-                    size -= adtsHeaderSize;
-                    ALOGV("inPtr=%p, inBufferLength=%u, offset=%zu, size=%zu",
-                            inPtr, inBufferLength, offset, size);
                 }
-                uint32_t prevSampleRate = mOutputInfo.sampling_rate;
-                uint8_t prevNumChannels = mOutputInfo.num_channels;
-                int16_t prevOutLoudness = mOutputInfo.output_loudness;
-                ALOGV("prevSampleRate=%u, prevNumChannels=%u, prevOutLoudness=%d",
-                        prevSampleRate, prevNumChannels, prevOutLoudness);
-                ALOGV("Calling aacDecoder_Fill");
+                bytesValid = inBufferLength;
                 aacDecoder_Fill(mAACDecoder, inPtr, inBufferLength, &bytesValid);
-                uint32_t inBufferUsedLength = inBufferLength - bytesValid;
-                size -= inBufferUsedLength;
-                offset += inBufferUsedLength;
-                ALOGV("inBufferUsedLength=%u, size=%zu, offset=%zu",
-                        inBufferUsedLength, size, offset);
-                AAC_DECODER_ERROR decoderErr;
-                bool didDecode = false;
-                do {
-                    if (outputDelayRingBufferSpaceLeft() <
-                            (mOutputInfo.frame_size * mOutputInfo.num_channels)) {
-                        ALOGV("skipping decode: not enough space left in ringbuffer");
-                        size = 0;
-                        break;
-                    }
-                    float tmpOutBuffer[TMP_BUFFER_COUNT];
-                    StreamInfo stream_info = CAacDecoderStreamInfo_default();
-                    OutputInfo output_info = CAacDecoderOutputInfo_default();
-                    ALOGV("Calling aacDecoder_Decode");
-                    decoderErr = aacDecoder_Decode(mAACDecoder, tmpOutBuffer,
-                                                   TMP_BUFFER_COUNT,
-                                                   &output_info, &stream_info, NULL);
-                    ALOGV("aacDecoder_Decode returned 0x%4.4x", decoderErr);
-                    ALOGV("stream_info: numElements=%u, pcmChOrder=%d, aacSampleRate=%u, "
-                            "aot=%d, channelConfig=%d, aacSamplesPerFrame=%u, aacNumChannels=%u, "
-                            "extAot=%d, extSamplingRate=%u, flags=%u, num_consumed_bytes=%u",
-                            stream_info.numElements, stream_info.pcmChOrder,
-                            stream_info.aacSampleRate, stream_info.aot,
-                            stream_info.channelConfig, stream_info.aacSamplesPerFrame,
-                            stream_info.aacNumChannels, stream_info.extAot,
-                            stream_info.extSamplingRate, stream_info.flags,
-                            stream_info.num_consumed_bytes);
-                    ALOGV("output_info: sampling_rate=%u, frame_size=%u, num_channels=%u, "
-                          "output_delay=%u, output_loudness=%d",
-                          output_info.sampling_rate, output_info.frame_size,
-                          output_info.num_channels, output_info.output_delay,
-                          output_info.output_loudness);
-                    if (decoderErr == AAC_DEC_NOT_ENOUGH_BITS) break;
-                    if (IS_OUTPUT_VALID(decoderErr)) mOutputInfo = output_info;
-                    size_t generatedSamples =
-                            mOutputInfo.frame_size * mOutputInfo.num_channels;
-                    if (generatedSamples > std::size(tmpOutBuffer)) {
-                        ALOGE("too many samples output: %zu", generatedSamples);
-                        mSignalledError = true;
-                        return APEXCODEC_STATUS_CORRUPTED;
-                    }
-                    if (decoderErr == AAC_DEC_OK) {
-                        didDecode = true;
-                        if (!outputDelayRingBufferPutSamples(tmpOutBuffer, generatedSamples)) {
-                            ALOGE("outputDelayRingBufferPutSamples failed");
-                            mSignalledError = true;
-                            return APEXCODEC_STATUS_CORRUPTED;
-                        }
-                        if (!mPendingFrameInfos.empty()) {
-                            FrameInfo info = mPendingFrameInfos.front();
-                            mPendingFrameInfos.pop_front();
-                            info.numSamples = generatedSamples;
-                            mRingBufferFrameInfos.push_back(info);
-                        }
-                    } else {
-                        ALOGW("aacDecoder_Decode returned error 0x%4.4x, outputting silence",
-                                decoderErr);
-                        size_t numOutBytes = generatedSamples * sizeof(float);
-                        ALOGV("numOutBytes: %zu", numOutBytes);
-                        memset(tmpOutBuffer, 0, numOutBytes);
-                        if (!outputDelayRingBufferPutSamples(tmpOutBuffer, generatedSamples)) {
-                            ALOGE("outputDelayRingBufferPutSamples failed for silence");
-                            mSignalledError = true;
-                            return APEXCODEC_STATUS_CORRUPTED;
-                        }
-                        if (!mPendingFrameInfos.empty()) {
-                            FrameInfo info = mPendingFrameInfos.front();
-                            mPendingFrameInfos.pop_front();
-                            info.numSamples = generatedSamples;
-                            mRingBufferFrameInfos.push_back(info);
-                        }
-                        ALOGE("Interrupting the codec and updating params");
-                        aacDecoder_Clear(mAACDecoder);
-                        *consumed = 0;
-                    }
-                    std::vector<uint8_t> configUpdate;
-                    if (isConfigured() && (mOutputInfo.sampling_rate != prevSampleRate
-                            || mOutputInfo.num_channels != prevNumChannels)) {
-                        ALOGD("config changed: sampleRate %d->%d, channels %d->%d",
-                              prevSampleRate, mOutputInfo.sampling_rate, prevNumChannels,
-                              mOutputInfo.num_channels);
-                        C2StreamSampleRateInfo::output sampleRateInfo(
-                                0u, mOutputInfo.sampling_rate);
-                        C2StreamChannelCountInfo::output channelCountInfo(
-                                0u, mOutputInfo.num_channels);
-                        C2StreamChannelMaskInfo::output channelMaskInfo(
-                                0u, maskFromCount(mOutputInfo.num_channels));
-                        AppendParamsToVector(&configUpdate, &sampleRateInfo,
-                                             &channelCountInfo, &channelMaskInfo);
-                    }
-                    if (mOutputInfo.output_loudness != prevOutLoudness) {
-                        ALOGD("loudness changed: %d->%d", prevOutLoudness,
-                                mOutputInfo.output_loudness);
-                        C2StreamDrcOutputLoudnessTuning::output drcOutLoudness(0u,
-                                (float)(mOutputInfo.output_loudness * -0.25));
-                        AppendParamsToVector(&configUpdate, &drcOutLoudness);
-                    }
-                    if (!configUpdate.empty()) {
-                        ALOGD("sending config update");
-                        output->setOwnedConfigUpdates(std::move(configUpdate));
-                    }
-                } while (decoderErr == AAC_DEC_OK);
 
-                if (size > 0 && inBufferUsedLength == 0 &&
-                        decoderErr == AAC_DEC_NOT_ENOUGH_BITS && !didDecode) {
-                    ALOGW("aacDecoder_Fill consumed 0 bytes and decoder needs more bits, stopping");
+                size_t consumedInFill = inBufferLength - bytesValid;
+                if (mIntf->isAdts()) {
+                    offset += aac_frame_length;
+                    size -= aac_frame_length;
+                } else {
+                    offset += consumedInFill;
+                    size -= consumedInFill;
+                }
+                if (consumedInFill != inBufferLength && !mIntf->isAdts()) {
+                    ALOGE("aacDecoder_Fill did not consume all data");
+                    break;
+                }
+                if (!mIntf->isAdts()) {
                     break;
                 }
             }
+
+            mDrcWrap.submitStreamData(&mStreamInfo, &mOutputInfo, &mMetadataInfo);
+            updateParams();
+            mDrcWrap.update();
+
+            decoderErr = aacDecoder_Decode(mAACDecoder, tmpOutBuffer.data(),
+                                            TMP_BUFFER_COUNT,
+                                            &mOutputInfo, &mStreamInfo,
+                                            &mMetadataInfo);
+            decoded = true;
             *consumed = offset;
+            ALOGV("consumed: %zu", *consumed);
+
+            if (offset > 0) {
+                mIsFirstInput = false;
+            }
         }
+    } else if (mEndOfInput && !mEndOfOutput && !mPendingTimestamps.empty()) {
+        ALOGV("draining");
+        decoderErr = aacDecoder_Drain(
+                mAACDecoder, tmpOutBuffer.data(), TMP_BUFFER_COUNT, &mOutputInfo);
+        ALOGV("Drained %zu samples from decoder, status = %d",
+              (size_t)mOutputInfo.frame_size * mOutputInfo.num_channels, decoderErr);
+        decoded = true;
+    } else {
+        ALOGV("no input, no output, no pending timestamps");
     }
-    if (inFlags & APEXCODEC_FLAG_END_OF_STREAM) {
-        ALOGD("EOS input");
-        mEndOfInput = true;
-    }
-    if (mEndOfInput) {
-        drainDecoder();
-    }
-    numSamples = outputDelayRingBufferSamplesAvailable();
-    ALOGV("numSamples available: %d", numSamples);
-    // Add data from the ring buffer to the output buffer.
-    if (numSamples > 0 && output) {
-        ApexCodec_Status status = outputFromRingBuffer(output, produced, frameIndex, timestamp);
-        if (status != APEXCODEC_STATUS_OK) {
-            return status;
-        }
-    }
-    // If the app using the codec has signaled APEXCODEC_FLAG_END_OF_STREAM and the output buffer
-    // is empty, signal that the output buffer is empty.
-    if (mEndOfInput && outputDelayRingBufferSamplesAvailable() == 0) {
-        if (!mEndOfOutput) {
-            ALOGD("EOS output");
-            if (output) {
-                ApexCodec_BufferFlags outFlags = (ApexCodec_BufferFlags)0;
-                if (*produced > 0) {
-                    uint64_t outFrameIndex, outTimestamp;
-                    output->getBufferInfo(&outFlags, &outFrameIndex, &outTimestamp);
-                    ALOGD("outFrameIndex=%lu, outTimestamp=%lu",
-                          (unsigned long)outFrameIndex,
-                          (unsigned long)outTimestamp);
-                    outFlags = (ApexCodec_BufferFlags)(outFlags | APEXCODEC_FLAG_END_OF_STREAM);
-                    output->setBufferInfo(outFlags, outFrameIndex, outTimestamp);
-                } else {
-                    output->setBufferInfo(APEXCODEC_FLAG_END_OF_STREAM, frameIndex, timestamp);
+
+    if (decoded) {
+        while (decoderErr != AAC_DEC_NOT_ENOUGH_BITS) {
+            ALOGV("decoded data");
+            size_t generatedSamples = 0;
+
+            if (IS_OUTPUT_VALID(decoderErr)) {
+                if (mIsFirstOutput) {
+                    mSamplesToDiscard = mOutputInfo.output_delay * mOutputInfo.num_channels;
+
+                    ALOGV("mOutputInfo.output_delay: %d", mOutputInfo.output_delay);
+                    mIsFirstOutput = false;
+                    size_t delayInFrames = 0;
+                    if (mOutputInfo.frame_size > 0) {
+                        delayInFrames =
+                                (mOutputInfo.output_delay + mOutputInfo.frame_size - 1)
+                                / mOutputInfo.frame_size;
+                    }
+                    if (delayInFrames > 0) {
+                        C2PortActualDelayTuning::output opd(delayInFrames);
+                        std::vector<uint8_t> configUpdate;
+                        AppendParamsToVector(&configUpdate, &opd);
+                        output->setOwnedConfigUpdates(std::move(configUpdate));
+                    }
                 }
-                ALOGD("outFlags: %x", outFlags);
+                generatedSamples = mOutputInfo.frame_size * mOutputInfo.num_channels;
+            }
+            if (generatedSamples > tmpOutBuffer.size()) {
+                ALOGE("too many samples output: %zu", generatedSamples);
+                mSignalledError = true;
+                return APEXCODEC_STATUS_CORRUPTED;
+            }
+            ALOGV("generatedSamples: %zu, mSamplesToDiscard: %d",
+                    generatedSamples, mSamplesToDiscard);
+
+            size_t outOffsetSamples = 0;
+            if (mSamplesToDiscard > 0) {
+                if (mSamplesToDiscard >= generatedSamples) {
+                    mSamplesToDiscard -= generatedSamples;
+                    generatedSamples = 0;
+                } else {
+                    outOffsetSamples = mSamplesToDiscard;
+                    generatedSamples -= mSamplesToDiscard;
+                    mSamplesToDiscard = 0;
+                }
+            }
+
+            if (generatedSamples > 0) {
+                if (mLeftoverSamples + generatedSamples > mLeftoverBuffer.size()) {
+                    mLeftoverBuffer.resize(mLeftoverSamples + generatedSamples);
+                }
+                ALOGV("mLeftoverSamples: %zu -> %zu (added %zu)",
+                        mLeftoverSamples, mLeftoverSamples + generatedSamples, generatedSamples);
+                memcpy(mLeftoverBuffer.data() + mLeftoverSamples,
+                       tmpOutBuffer.data() + outOffsetSamples,
+                       generatedSamples * sizeof(float));
+                mLeftoverSamples += generatedSamples;
+            }
+
+            int32_t pcmEncoding = mIntf->getPcmEncodingInfo();
+            size_t frameSamples = isConfigured() ?
+                    (mOutputInfo.frame_size * mOutputInfo.num_channels) : 0;
+            if (frameSamples > 0 && mLeftoverSamples >= frameSamples) {
+                ALOGV("have enough samples for a frame. frameSamples: %zu, mLeftoverSamples: %zu",
+                        frameSamples, mLeftoverSamples);
+                size_t sampleSize = (pcmEncoding == C2Config::PCM_16)
+                        ? sizeof(int16_t) : sizeof(float);
+                if (frameSamples * sampleSize > outLinearBuffer.size) {
+                    ALOGE("output buffer too small for a frame");
+                    mSignalledError = true;
+                    return APEXCODEC_STATUS_NO_MEMORY;
+                }
+
+                uint8_t *outPtr = outLinearBuffer.data;
+                outPtr += *produced;
+                if (pcmEncoding == C2Config::PCM_16) {
+                    int16_t* out = reinterpret_cast<int16_t*>(outPtr);
+                    for (size_t i = 0; i < frameSamples; ++i) {
+                        float val = mLeftoverBuffer[i] * 32767.f;
+                        val = std::max(-32768.f, std::min(32767.f, val));
+                        out[i] = static_cast<int16_t>(roundf(val));
+                    }
+                } else {
+                    memcpy(outPtr, mLeftoverBuffer.data(), frameSamples * sampleSize);
+                }
+                *produced += frameSamples * sampleSize;
+
+                memmove(mLeftoverBuffer.data(),
+                        mLeftoverBuffer.data() + frameSamples,
+                        (mLeftoverSamples - frameSamples) * sizeof(float));
+                mLeftoverSamples -= frameSamples;
+                ALOGV("consumed %zu samples for a frame, remaining leftover: %zu",
+                        frameSamples, mLeftoverSamples);
+                ALOGV("pending timestamps size : %zu", mPendingTimestamps.size());
+            }
+
+            ALOGV("produced: %zu", *produced);
+            std::vector<uint8_t> configUpdate;
+            uint32_t currentSampleRate = mOutputInfo.sampling_rate;
+            // SBR and PS are dual rate systems, so the sample rate is doubled.
+            if (mStreamInfo.extAot == AOT_SBR || mStreamInfo.extAot == AOT_PS) {
+                currentSampleRate *= 2;
+            }
+            if (isConfigured() && (currentSampleRate != prevSampleRate
+                    || mOutputInfo.num_channels != prevNumChannels)) {
+                ALOGD("config changed: sampleRate %d->%d, channels %d->%d",
+                        prevSampleRate, currentSampleRate, prevNumChannels,
+                        mOutputInfo.num_channels);
+                C2StreamSampleRateInfo::output sampleRateInfo(
+                        0u, currentSampleRate);
+                C2StreamChannelCountInfo::output channelCountInfo(
+                        0u, mOutputInfo.num_channels);
+                C2StreamChannelMaskInfo::output channelMaskInfo(
+                        0u, maskFromCount(mOutputInfo.num_channels));
+                AppendParamsToVector(&configUpdate, &sampleRateInfo,
+                                        &channelCountInfo, &channelMaskInfo);
+            }
+            if (mOutputInfo.output_loudness != prevOutLoudness) {
+                ALOGD("loudness changed: %d->%d", prevOutLoudness,
+                        mOutputInfo.output_loudness);
+                C2StreamDrcOutputLoudnessTuning::output drcOutLoudness(0u,
+                        (float)(mOutputInfo.output_loudness * -0.25));
+                AppendParamsToVector(&configUpdate, &drcOutLoudness);
+            }
+
+            C2StreamDrcAttenuationFactorTuning::input currentAttenuationFactor(
+                    0u, (C2FloatValue)(mIntf->getDrcAttenuationFactor() / 127.));
+            AppendParamsToVector(&configUpdate, &currentAttenuationFactor);
+
+            C2StreamDrcBoostFactorTuning::input currentBoostFactor(
+                    0u, (C2FloatValue)(mIntf->getDrcBoostFactor() / 127.));
+            AppendParamsToVector(&configUpdate, &currentBoostFactor);
+
+            if (mDeviceApiLevel < 31 /* __ANDROID_API_S__ */) {
+                // We used to report DRC compression mode in the output format
+                // in Q and R, but stopped doing that in S
+                C2StreamDrcCompressionModeTuning::input currentCompressMode(
+                        0u, (C2Config::drc_compression_mode_t)mIntf->getDrcCompressMode());
+                AppendParamsToVector(&configUpdate, &currentCompressMode);
+            }
+
+            C2StreamDrcEncodedTargetLevelTuning::input currentEncodedTargetLevel(
+                    0u, (C2FloatValue)(mIntf->getDrcEncTargetLevel() * -0.25));
+            AppendParamsToVector(&configUpdate, &currentEncodedTargetLevel);
+
+            C2StreamDrcAlbumModeTuning::input currentAlbumMode(
+                    0u, (C2Config::drc_album_mode_t)mIntf->getDrcAlbumMode());
+            AppendParamsToVector(&configUpdate, &currentAlbumMode);
+
+            C2StreamDrcTargetReferenceLevelTuning::input currentTargetRefLevel(
+                    0u, (float)(mIntf->getDrcTargetRefLevel() * -0.25));
+            AppendParamsToVector(&configUpdate, &currentTargetRefLevel);
+
+            C2StreamDrcEffectTypeTuning::input currentEffectType(
+                    0u, (C2Config::drc_effect_type_t)mIntf->getDrcEffectType());
+            AppendParamsToVector(&configUpdate, &currentEffectType);
+
+            C2StreamMaxChannelCountInfo::input currentMaxChannelCnt(0u,
+                                                                    mIntf->getMaxChannelCount());
+            AppendParamsToVector(&configUpdate, &currentMaxChannelCnt);
+
+            ALOGV("DRC params: %d, %d, %d, %d, %d, %d, %d, %d",
+                    mIntf->getDrcTargetRefLevel(), mIntf->getDrcAttenuationFactor(),
+                    mIntf->getDrcBoostFactor(), mIntf->getDrcCompressMode(),
+                    mIntf->getDrcEncTargetLevel(), mIntf->getDrcEffectType(),
+                    mIntf->getDrcAlbumMode(), mIntf->getMaxChannelCount());
+
+            if (!configUpdate.empty()) {
+                output->setOwnedConfigUpdates(std::move(configUpdate));
+            }
+            // Write output buffer info into temporary buffers as they will be empty if there
+            // is not enough data to decode a full frame.
+            OutputInfo tempOutputInfo;
+            StreamInfo tempStreamInfo;
+            MetadataInfo tempMetadataInfo;
+            decoderErr = aacDecoder_Decode(mAACDecoder, tmpOutBuffer.data(),
+                                            TMP_BUFFER_COUNT,
+                                            &tempOutputInfo, &tempStreamInfo,
+                                            &tempMetadataInfo);
+        }
+        if (*produced > 0 && !mPendingTimestamps.empty()) {
+            mCurrentTimestampUs = mPendingTimestamps.front().first;
+            mCurrentFrameIndex = mPendingTimestamps.front().second;
+            mPendingTimestamps.pop();
+            ALOGV("popped timestamp %" PRIu64 " and frameIndex %" PRIu64,
+                    mCurrentTimestampUs, mCurrentFrameIndex);
+        }
+    }
+
+    ALOGV("consumed: %zu, produced: %zu", *consumed, *produced);
+    ALOGV("mEndOfInput: %d, mEndOfOutput: %d, mCurrentFrameIndex: %" PRIu64,
+            mEndOfInput, mEndOfOutput, mCurrentFrameIndex);
+    ALOGV("mCurrentTimestampUs: %" PRIu64, mCurrentTimestampUs);
+    ALOGV("mPendingTimestamps size: %zu", mPendingTimestamps.size());
+    ALOGV("mLeftoverSamples: %zu", mLeftoverSamples);
+    ALOGV("frameIndex: %" PRIu64, frameIndex);
+    if (*produced > 0) {
+        bool eos = mEndOfOutput || (mEndOfInput && mPendingTimestamps.empty());
+        if (eos) {
+            if (mCurrentFrameIndex == frameIndex) {
+                ALOGV("produced and emitting EOS with frameIndex: %" PRIu64, mCurrentFrameIndex);
+                output->setBufferInfo(APEXCODEC_FLAG_END_OF_STREAM,
+                        mCurrentFrameIndex, mCurrentTimestampUs);
+            } else {
+                ALOGV("emitting second to last buffer with frameIndex: %"
+                        PRIu64, mCurrentFrameIndex);
+                output->setBufferInfo((ApexCodec_BufferFlags)0,
+                        mCurrentFrameIndex, mCurrentTimestampUs);
             }
             mEndOfOutput = true;
-        }
-    }
-    ALOGV("consumed: %zu", *consumed);
-    return APEXCODEC_STATUS_OK;
-}
-
-ApexCodec_Status C2ApexAacDec::outputFromRingBuffer(
-        ApexCodec_Buffer* output,
-        size_t* produced,
-        uint64_t frameIndex,
-        uint64_t timestamp) {
-    int numSamples = outputDelayRingBufferSamplesAvailable();
-    if (numSamples > 0 && output) {
-        ApexCodec_LinearBuffer outLinearBuffer;
-        if (output->getLinearBuffer(&outLinearBuffer) != APEXCODEC_STATUS_OK) {
-            ALOGE("output->getLinearBuffer failed");
-            return APEXCODEC_STATUS_BAD_VALUE;
-        }
-        int32_t pcmEncoding = mIntf->getPcmEncodingInfo();
-        size_t sampleSize = (pcmEncoding == C2Config::PCM_16) ? sizeof(int16_t) : sizeof(float);
-        int samplesToOutput = numSamples;
-        if ((size_t)samplesToOutput * sampleSize > outLinearBuffer.size) {
-            samplesToOutput = outLinearBuffer.size / sampleSize;
-        }
-        if (!mRingBufferFrameInfos.empty()) {
-            if (samplesToOutput > mRingBufferFrameInfos.front().numSamples) {
-                samplesToOutput = mRingBufferFrameInfos.front().numSamples;
-            }
-        }
-        ALOGV("producing %d samples", samplesToOutput);
-        if (pcmEncoding == C2Config::PCM_16) {
-            std::unique_ptr<float[]> float_buffer(new float[samplesToOutput]);
-            if (outputDelayRingBufferGetSamples(float_buffer.get(), samplesToOutput)
-                    != samplesToOutput) {
-                ALOGE("outputDelayRingBufferGetSamples failed");
-                mSignalledError = true;
-                return APEXCODEC_STATUS_CORRUPTED;
-            }
-            int16_t *outPtr = reinterpret_cast<int16_t*>(outLinearBuffer.data);
-            for (int i = 0; i < samplesToOutput; ++i) {
-                float val = float_buffer[i] * 32767.f;
-                val = std::max(-32768.f, std::min(32767.f, val));
-                outPtr[i] = static_cast<int16_t>(roundf(val));
-            }
-        } else { // PCM_FLOAT
-            if (outputDelayRingBufferGetSamples(
-                        reinterpret_cast<float*>(outLinearBuffer.data), samplesToOutput)
-                    != samplesToOutput) {
-                ALOGE("outputDelayRingBufferGetSamples failed");
-                mSignalledError = true;
-                return APEXCODEC_STATUS_CORRUPTED;
-            }
-        }
-        *produced = samplesToOutput * sampleSize;
-        ALOGV("produced: %zu", *produced);
-        if (!mRingBufferFrameInfos.empty()) {
-            FrameInfo& info = mRingBufferFrameInfos.front();
-            info.numSamples -= samplesToOutput;
-            if (info.numSamples == 0) {
-                mRingBufferFrameInfos.pop_front();
-                output->setBufferInfo((ApexCodec_BufferFlags)0, info.frameIndex, info.timestamp);
-            } else {
-                output->setBufferInfo((ApexCodec_BufferFlags)APEXCODEC_FLAG_INCOMPLETE,
-                                      info.frameIndex, info.timestamp);
-            }
         } else {
-            output->setBufferInfo((ApexCodec_BufferFlags)0, frameIndex, timestamp);
+            ALOGV("emitting buffer with frameIndex: %" PRIu64, mCurrentFrameIndex);
+            output->setBufferInfo((ApexCodec_BufferFlags)0,
+                    mCurrentFrameIndex, mCurrentTimestampUs);
         }
+    } else if (mEndOfInput && mPendingTimestamps.empty()) {
+        ALOGV("emitting EOS with frameIndex: %" PRIu64, frameIndex);
+        output->setBufferInfo(APEXCODEC_FLAG_END_OF_STREAM,
+                frameIndex, timestamp);
+        mEndOfOutput = true;
+    } else if (codecConfig) {
+        ALOGV("emitting buffer with frameIndex: %" PRIu64, frameIndex);
+        output->setBufferInfo((ApexCodec_BufferFlags)0, frameIndex, timestamp);
+    } else if (*consumed > 0) {
+        ALOGV("emitting incomplete buffer with frameIndex: %" PRIu64, frameIndex);
+        output->setBufferInfo(APEXCODEC_FLAG_INCOMPLETE, frameIndex, timestamp);
     }
+
     return APEXCODEC_STATUS_OK;
 }
 
@@ -824,14 +960,13 @@ ApexCodec_Status C2ApexAacDec::initDecoder() {
         ALOGE("aacDecoder_Open failed");
         return APEXCODEC_STATUS_CORRUPTED;
     }
-    ALOGV("aacDecoder_Open successful");
     mOutputInfo = CAacDecoderOutputInfo_default();
-    mOutputDelayCompensated = 0;
-    mOutputDelayRingBufferSize = TMP_BUFFER_COUNT * kNumDelayBlocksMax;
-    mOutputDelayRingBuffer.reset(new float[mOutputDelayRingBufferSize]);
-    mOutputDelayRingBufferWritePos = 0;
-    mOutputDelayRingBufferReadPos = 0;
-    mOutputDelayRingBufferFilled = 0;
+    mStreamInfo = CAacDecoderStreamInfo_default();
+    mMetadataInfo = CAacDecoderMetadataInfo_default();
+    mDrcWrap.setDecoderHandle(mAACDecoder);
+    mDrcWrap.submitStreamData(&mStreamInfo, &mOutputInfo, &mMetadataInfo);
+
+    ALOGV("aacDecoder_Open successful");
     updateParams();
     return APEXCODEC_STATUS_OK;
 }
@@ -840,71 +975,41 @@ void C2ApexAacDec::updateParams() {
     ALOGV("updateParams");
     int32_t targetRefLevel = mIntf->getDrcTargetRefLevel();
     ALOGV("  drc-ref-level: %d", targetRefLevel);
-    aacDecoder_SetParam(mAACDecoder, AAC_DRC_REFERENCE_LEVEL, targetRefLevel);
+    mDrcWrap.setParam(DRC_PRES_MODE_WRAP_DESIRED_TARGET, (unsigned)targetRefLevel);
+
     int32_t attenuationFactor = mIntf->getDrcAttenuationFactor();
     ALOGV("  drc-attenuation-factor: %d", attenuationFactor);
-    aacDecoder_SetParam(mAACDecoder, AAC_DRC_ATTENUATION_FACTOR, attenuationFactor);
+    mDrcWrap.setParam(DRC_PRES_MODE_WRAP_DESIRED_ATT_FACTOR, (unsigned)attenuationFactor);
+
     int32_t boostFactor = mIntf->getDrcBoostFactor();
     ALOGV("  drc-boost-factor: %d", boostFactor);
-    aacDecoder_SetParam(mAACDecoder, AAC_DRC_BOOST_FACTOR, boostFactor);
+    mDrcWrap.setParam(DRC_PRES_MODE_WRAP_DESIRED_BOOST_FACTOR, (unsigned)boostFactor);
+
     int32_t compressMode = mIntf->getDrcCompressMode();
     ALOGV("  drc-compress-mode: %d", compressMode);
-    aacDecoder_SetParam(mAACDecoder, AAC_DRC_HEAVY_COMPRESSION, compressMode);
+    mDrcWrap.setParam(DRC_PRES_MODE_WRAP_DESIRED_HEAVY, (unsigned)compressMode);
+
     int32_t encTargetLevel = mIntf->getDrcEncTargetLevel();
     ALOGV("  drc-enc-target-level: %d", encTargetLevel);
-    aacDecoder_SetParam(mAACDecoder, AAC_DRC_ENC_TARGET_LEVEL, encTargetLevel);
+    mDrcWrap.setParam(DRC_PRES_MODE_WRAP_ENCODER_TARGET, (unsigned)encTargetLevel);
+
     int32_t effectType = mIntf->getDrcEffectType();
     ALOGV("  drc-effect-type: %d", effectType);
     aacDecoder_SetParam(mAACDecoder, AAC_UNIDRC_SET_EFFECT, effectType);
+
     int32_t albumMode = mIntf->getDrcAlbumMode();
     ALOGV("  drc-album-mode: %d", albumMode);
     aacDecoder_SetParam(mAACDecoder, AAC_UNIDRC_ALBUM_MODE, albumMode);
+
     u_int32_t maxChannelCount = mIntf->getMaxChannelCount();
     ALOGV("  max-channel-count: %u", maxChannelCount);
     aacDecoder_SetParam(mAACDecoder, AAC_PCM_MAX_OUTPUT_CHANNELS, maxChannelCount);
-    int32_t defaultPresentationMode = AAC_DRC_PARAMETER_HANDLING_DISABLED;
-    ALOGV("  drc-presentation-mode: %d", defaultPresentationMode);
-    aacDecoder_SetParam(mAACDecoder, AAC_DRC_DEFAULT_PRESENTATION_MODE, defaultPresentationMode);
 }
 
 bool C2ApexAacDec::isConfigured() const {
     bool configured = mOutputInfo.sampling_rate > 0;
     ALOGV("isConfigured: %d (sample_rate=%d)", configured, mOutputInfo.sampling_rate);
     return configured;
-}
-
-void C2ApexAacDec::drainDecoder() {
-    ALOGV("drainDecoder");
-    while (true) {
-        float tmpOutBuffer[TMP_BUFFER_COUNT];
-        AAC_DECODER_ERROR decoderErr =
-            aacDecoder_Drain(mAACDecoder,
-                             tmpOutBuffer,
-                             TMP_BUFFER_COUNT,
-                             &mOutputInfo);
-        if (decoderErr != AAC_DEC_OK) {
-            ALOGV("aacDecoder_Drain finished with error 0x%4.4x", decoderErr);
-            break;
-        }
-        int32_t tmpOutBufferSamples = mOutputInfo.frame_size * mOutputInfo.num_channels;
-        if (tmpOutBufferSamples == 0) {
-            ALOGV("aacDecoder_Drain produced 0 samples, stopping");
-            break;
-        }
-        if (tmpOutBufferSamples > std::size(tmpOutBuffer)) {
-            mSignalledError = true;
-            ALOGE("Drained too many samples: %d", tmpOutBufferSamples);
-            tmpOutBufferSamples = std::size(tmpOutBuffer);
-        }
-        ALOGV("draining %d samples", tmpOutBufferSamples);
-        outputDelayRingBufferPutSamples(tmpOutBuffer, tmpOutBufferSamples);
-        if (!mPendingFrameInfos.empty()) {
-            FrameInfo info = mPendingFrameInfos.front();
-            mPendingFrameInfos.pop_front();
-            info.numSamples = tmpOutBufferSamples;
-            mRingBufferFrameInfos.push_back(info);
-        }
-    }
 }
 
 uint32_t C2ApexAacDec::maskFromCount(uint32_t channelCount) {
@@ -965,68 +1070,4 @@ bool C2ApexAacDec::AppendParamsToVector(
     }
     return true;
 }
-
-bool C2ApexAacDec::outputDelayRingBufferPutSamples(float *samples, int32_t numSamples) {
-    if (numSamples == 0) return true;
-    if (outputDelayRingBufferSpaceLeft() < numSamples) {
-        ALOGE("RING BUFFER WOULD OVERFLOW");
-        return false;
-    }
-    if (mOutputDelayRingBufferWritePos + numSamples <= mOutputDelayRingBufferSize) {
-        memcpy(mOutputDelayRingBuffer.get() + mOutputDelayRingBufferWritePos, samples,
-                numSamples * sizeof(float));
-        mOutputDelayRingBufferWritePos += numSamples;
-        if (mOutputDelayRingBufferWritePos == mOutputDelayRingBufferSize) {
-            mOutputDelayRingBufferWritePos = 0;
-        }
-    } else {
-        int32_t part1 = mOutputDelayRingBufferSize - mOutputDelayRingBufferWritePos;
-        memcpy(mOutputDelayRingBuffer.get() + mOutputDelayRingBufferWritePos, samples,
-                part1 * sizeof(float));
-        int32_t part2 = numSamples - part1;
-        memcpy(mOutputDelayRingBuffer.get(), samples + part1, part2 * sizeof(float));
-        mOutputDelayRingBufferWritePos = part2;
-    }
-    mOutputDelayRingBufferFilled += numSamples;
-    return true;
-}
-
-int32_t C2ApexAacDec::outputDelayRingBufferGetSamples(float *samples, int32_t numSamples) {
-    if (numSamples > mOutputDelayRingBufferFilled) {
-        ALOGE("RING BUFFER WOULD UNDERRUN");
-        return -1;
-    }
-    if (mOutputDelayRingBufferReadPos + numSamples <= mOutputDelayRingBufferSize) {
-        if (samples) {
-            memcpy(samples, mOutputDelayRingBuffer.get() + mOutputDelayRingBufferReadPos,
-                    numSamples * sizeof(float));
-        }
-        mOutputDelayRingBufferReadPos += numSamples;
-        if (mOutputDelayRingBufferReadPos == mOutputDelayRingBufferSize) {
-            mOutputDelayRingBufferReadPos = 0;
-        }
-    } else {
-        int32_t part1 = mOutputDelayRingBufferSize - mOutputDelayRingBufferReadPos;
-        if (samples) {
-            memcpy(samples, mOutputDelayRingBuffer.get() + mOutputDelayRingBufferReadPos,
-                    part1 * sizeof(float));
-        }
-        int32_t part2 = numSamples - part1;
-        if (samples) {
-            memcpy(samples + part1, mOutputDelayRingBuffer.get(), part2 * sizeof(float));
-        }
-        mOutputDelayRingBufferReadPos = part2;
-    }
-    mOutputDelayRingBufferFilled -= numSamples;
-    return numSamples;
-}
-
-int32_t C2ApexAacDec::outputDelayRingBufferSamplesAvailable() {
-    return mOutputDelayRingBufferFilled;
-}
-
-int32_t C2ApexAacDec::outputDelayRingBufferSpaceLeft() {
-    return mOutputDelayRingBufferSize - mOutputDelayRingBufferFilled;
-}
-
 }  // namespace android

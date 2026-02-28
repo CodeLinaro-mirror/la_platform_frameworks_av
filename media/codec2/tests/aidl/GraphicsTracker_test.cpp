@@ -15,6 +15,7 @@
  */
 //#define LOG_NDEBUG 0
 #define LOG_TAG "GraphicsTracker_test"
+#include <poll.h>
 #include <unistd.h>
 
 #include <android/hardware_buffer.h>
@@ -817,4 +818,189 @@ TEST_F(GraphicsTrackerTest, maxDequeueDecreaseTest) {
     ASSERT_EQ(C2_OK, waitFence.wait(1000000000));
     ASSERT_EQ(C2_OK, mTracker->allocate( 0, 0, 0, kTestUsageFlag, &buf, &fence));
     mBqStat->mDequeued++;
+}
+
+TEST_F(GraphicsTrackerTest, DirectAllocationTest) {
+    int maxDequeueCount = 10;
+    mTracker = GraphicsTracker::CreateGraphicsTracker(maxDequeueCount);
+    ASSERT_NE(nullptr, mTracker);
+
+    // Configure with null IGBP for direct allocation
+    ASSERT_EQ(C2_OK, mTracker->configureGraphics(nullptr, 1));
+
+    AHardwareBuffer* buf;
+    sp<Fence> fence;
+    uint64_t bid;
+
+    if (__builtin_available(android __ANDROID_API_T__, *)) {
+        // Direct allocation
+        ASSERT_EQ(C2_OK, mTracker->allocate(640, 480, HAL_PIXEL_FORMAT_RGBA_8888, kTestUsageFlag,
+                                            &buf, &fence));
+        ASSERT_NE(nullptr, buf);
+        ASSERT_EQ(OK, AHardwareBuffer_getId(buf, &bid));
+
+        // Render should fail because there is no surface
+        // Note: requestRender() on a null surface (direct allocation mode) actively removes
+        // the buffer from tracking (reclaims it) and returns C2_BAD_STATE.
+        std::shared_ptr<C2GraphicBlock> blk = _C2BlockFactory::CreateGraphicBlock(buf);
+        IGraphicBufferProducer::QueueBufferInput input(
+                0, false, HAL_DATASPACE_UNKNOWN, android::Rect(0, 0, 1, 1),
+                NATIVE_WINDOW_SCALING_MODE_FREEZE, 0, Fence::NO_FENCE);
+        IGraphicBufferProducer::QueueBufferOutput output{};
+        ASSERT_EQ(C2_BAD_STATE,
+                  mTracker->render(blk->share(C2Rect(640, 480), C2Fence()), input, &output));
+
+        // Buffer should be already removed from tracking by render()
+        ASSERT_EQ(maxDequeueCount, mTracker->getCurDequeueable());
+        ASSERT_EQ(C2_NOT_FOUND, mTracker->deallocate(bid, Fence::NO_FENCE));
+
+        AHardwareBuffer_release(buf);
+    }
+}
+
+TEST_F(GraphicsTrackerTest, ConfigureSameGenerationTest) {
+    uint32_t generation = 1;
+    const int maxDequeueCount = 10;
+    ASSERT_TRUE(init(maxDequeueCount));
+    ASSERT_TRUE(configure(new TestProducerListener(mTracker, mBqStat, generation),
+                          new DummyConsumerListener()));
+
+    ASSERT_EQ(C2_OK, mTracker->configureGraphics(mProducer, generation));
+    // Same generation should fail
+    ASSERT_EQ(C2_BAD_VALUE, mTracker->configureGraphics(mProducer, generation));
+}
+
+TEST_F(GraphicsTrackerTest, MaxDequeueBoundsTest) {
+    const int maxDequeueCount = 10;
+    ASSERT_TRUE(init(maxDequeueCount));
+
+    ASSERT_EQ(C2_BAD_VALUE, mTracker->configureMaxDequeueCount(0));  // Too small
+    ASSERT_EQ(C2_BAD_VALUE, mTracker->configureMaxDequeueCount(
+                                    ::android::BufferQueueDefs::NUM_BUFFER_SLOTS));  // Too large
+    ASSERT_EQ(C2_OK, mTracker->configureMaxDequeueCount(5));                         // Valid
+}
+
+TEST_F(GraphicsTrackerTest, DeallocateInvalidIdTest) {
+    const int maxDequeueCount = 10;
+    ASSERT_TRUE(init(maxDequeueCount));
+    ASSERT_TRUE(
+            configure(new TestProducerListener(mTracker, mBqStat, 1), new DummyConsumerListener()));
+    ASSERT_EQ(C2_OK, mTracker->configureGraphics(mProducer, 1));
+
+    uint64_t invalidId = 0xFFFFFFFFFFFFFFFF;
+    ASSERT_EQ(C2_NOT_FOUND, mTracker->deallocate(invalidId, Fence::NO_FENCE));
+}
+
+TEST_F(GraphicsTrackerTest, DoubleDeallocateTest) {
+    uint32_t generation = 1;
+    const int maxDequeueCount = 10;
+    ASSERT_TRUE(init(maxDequeueCount));
+    ASSERT_TRUE(configure(new TestProducerListener(mTracker, mBqStat, generation),
+                          new DummyConsumerListener()));
+    ASSERT_EQ(C2_OK, mTracker->configureGraphics(mProducer, generation));
+
+    AHardwareBuffer* buf;
+    sp<Fence> fence;
+    uint64_t bid;
+
+    if (__builtin_available(android __ANDROID_API_T__, *)) {
+        ASSERT_EQ(C2_OK, mTracker->allocate(0, 0, 0, kTestUsageFlag, &buf, &fence));
+        ASSERT_EQ(OK, AHardwareBuffer_getId(buf, &bid));
+
+        ASSERT_EQ(C2_OK, mTracker->deallocate(bid, Fence::NO_FENCE));
+        ASSERT_EQ(C2_NOT_FOUND, mTracker->deallocate(bid, Fence::NO_FENCE));  // Double free
+
+        AHardwareBuffer_release(buf);
+    }
+}
+
+TEST_F(GraphicsTrackerTest, OnRequestStopTest) {
+    uint32_t generation = 1;
+    const int maxDequeueCount = 10;
+    ASSERT_TRUE(init(maxDequeueCount));
+    ASSERT_TRUE(configure(new TestProducerListener(mTracker, mBqStat, generation),
+                          new DummyConsumerListener()));
+    ASSERT_EQ(C2_OK, mTracker->configureGraphics(mProducer, generation));
+
+    mTracker->onRequestStop();
+
+    // Allocation should still succeed (via PlaceHolderSurface)
+    AHardwareBuffer* buf;
+    sp<Fence> fence;
+    if (__builtin_available(android __ANDROID_API_T__, *)) {
+        ASSERT_EQ(C2_OK, mTracker->allocate(640, 480, HAL_PIXEL_FORMAT_RGBA_8888, kTestUsageFlag,
+                                            &buf, &fence));
+        ASSERT_NE(nullptr, buf);
+        AHardwareBuffer_release(buf);
+    }
+}
+
+TEST_F(GraphicsTrackerTest, WaitableFdSignalingTest) {
+    uint32_t generation = 1;
+    const int maxDequeueCount = 2;  // Small count to easily exhaust
+    ASSERT_TRUE(init(maxDequeueCount));
+    ASSERT_TRUE(configure(new TestProducerListener(mTracker, mBqStat, generation),
+                          new DummyConsumerListener()));
+    ASSERT_EQ(C2_OK, mTracker->configureGraphics(mProducer, generation));
+    ASSERT_EQ(C2_OK, mTracker->configureMaxDequeueCount(maxDequeueCount));
+
+    int pipeFd = -1;
+    ASSERT_EQ(C2_OK, mTracker->getWaitableFd(&pipeFd));
+    ASSERT_GE(pipeFd, 0);
+
+    AHardwareBuffer *buf1, *buf2;
+    sp<Fence> fence;
+
+    // Allocate all available buffers
+    if (__builtin_available(android __ANDROID_API_T__, *)) {
+        ASSERT_EQ(C2_OK, mTracker->allocate(0, 0, 0, kTestUsageFlag, &buf1, &fence));
+        ASSERT_EQ(C2_OK, mTracker->allocate(0, 0, 0, kTestUsageFlag, &buf2, &fence));
+
+        struct pollfd pfd;
+        pfd.fd = pipeFd;
+        pfd.events = POLLIN;
+        int ret = poll(&pfd, 1, 0);  // Non-blocking check
+        ASSERT_EQ(0, ret);           // Should be 0 (timeout, no data)
+
+        // Deallocate one
+        uint64_t bid;
+        AHardwareBuffer_getId(buf1, &bid);
+        mTracker->deallocate(bid, Fence::NO_FENCE);
+
+        // Now FD SHOULD be readable
+        ret = poll(&pfd, 1, 1000);
+        ASSERT_GT(ret, 0);
+        ASSERT_TRUE(pfd.revents & POLLIN);
+
+        AHardwareBuffer_release(buf1);
+        AHardwareBuffer_release(buf2);
+    }
+    close(pipeFd);
+}
+
+TEST_F(GraphicsTrackerTest, StopIdempotencyTest) {
+    int maxDequeueCount = 10;
+    mTracker = GraphicsTracker::CreateGraphicsTracker(maxDequeueCount);
+    ASSERT_NE(nullptr, mTracker);
+
+    mTracker->stop();
+    mTracker->stop();  // Should not crash
+
+    // Verify allocate fails after stop
+    AHardwareBuffer* buf;
+    sp<Fence> fence;
+    ASSERT_EQ(C2_BAD_STATE, mTracker->allocate(0, 0, 0, kTestUsageFlag, &buf, &fence));
+}
+
+TEST_F(GraphicsTrackerTest, PollForRenderedFramesTest) {
+    uint32_t generation = 1;
+    const int maxDequeueCount = 10;
+    ASSERT_TRUE(init(maxDequeueCount));
+    ASSERT_TRUE(configure(new TestProducerListener(mTracker, mBqStat, generation),
+                          new DummyConsumerListener()));
+    ASSERT_EQ(C2_OK, mTracker->configureGraphics(mProducer, generation));
+
+    // Just verify it doesn't crash on valid or empty call
+    android::FrameEventHistoryDelta delta;
+    mTracker->pollForRenderedFrames(&delta);
 }
