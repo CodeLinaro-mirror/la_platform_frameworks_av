@@ -26,6 +26,7 @@
 // current SDK for this device; filled in when initializing the parser.
 static int mySdk = 0;
 static std::string myCodeName;
+static int myProductFirstApiLevel = 0;
 
 // to help address b/388925029
 
@@ -48,10 +49,11 @@ bool isAtLeastRelease(int minsdk, const char *codename) {
     std::call_once(sCheckOnce, [&](){
         mySdk = android_get_device_api_level();
         myCodeName  = android::base::GetProperty("ro.build.version.codename", "<none>");
+        myProductFirstApiLevel = android::base::GetIntProperty<int>("ro.product.first_api_level", 0);
     });
 
     bool satisfied = false;
-    ALOGI("device sdk %d, minsdk %d", mySdk, minsdk);
+    ALOGI("device sdk %d, minsdk %d, myProductFirstApiLevel %d", mySdk, minsdk, myProductFirstApiLevel);
     if (mySdk >= minsdk) {
         satisfied = true;
     }
@@ -62,6 +64,10 @@ bool isAtLeastRelease(int minsdk, const char *codename) {
         if (myCodeName == codename) {
             satisfied = true;
         }
+    }
+
+    if (myProductFirstApiLevel < minsdk) {
+        satisfied = false;
     }
 
     return satisfied;
