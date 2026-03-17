@@ -44,6 +44,7 @@
 
 #include "common/ExtensionsLoader.hpp"
 #include "stagefright/AVExtensions.h"
+#include <gui/Surface.h>
 
 namespace android {
 
@@ -65,7 +66,7 @@ CameraSource* AVFactory::CreateCameraSourceFromCamera(
             // parameter from CreateFromCamera API.
             bool /*storeMetaDataInVideoBuffers*/) {
     return CameraSource::CreateFromCamera(camera, proxy, cameraId,
-            clientName, clientUid, clientPid, videoSize, frameRate, surface);
+            clientName, clientUid, clientPid, videoSize, frameRate, new Surface(surface));
 }
 
 CameraSourceTimeLapse* AVFactory::CreateCameraSourceTimeLapseFromCamera(
@@ -83,7 +84,7 @@ CameraSourceTimeLapse* AVFactory::CreateCameraSourceTimeLapseFromCamera(
         // parameter from CreateFromCamera API.
         bool /*storeMetaDataInVideoBuffers*/) {
     return CameraSourceTimeLapse::CreateFromCamera(camera, proxy, cameraId,
-            clientName, clientUid, clientPid, videoSize, videoFrameRate, surface,
+            clientName, clientUid, clientPid, videoSize, videoFrameRate, new Surface(surface),
             timeBetweenFrameCaptureUs);
 }
 
