@@ -121,6 +121,7 @@ cc_library_static {
         "-Werror",
         "-Wno-error=deprecated-declarations",
         "-Wno-multichar",
+        "-D__NO_AVEXTENSIONS__",
     ],
 
     sanitize: {
@@ -301,6 +302,7 @@ cc_library {
         "libcodec2",
         "libcodec2_vndk",
         "libcutils",
+        "libcrypto",
         "libdatasource",
         "libdl",
         "libdl_android",
@@ -325,6 +327,7 @@ cc_library {
         "libstagefright_omx_utils",
         "libui",
         "libutils",
+        "android.hidl.memory@1.0",
         "packagemanager_aidl-cpp",
         "server_configurable_flags",
         "libaconfig_storage_read_api_cc",
@@ -351,13 +354,18 @@ cc_library {
         "libyuv",
     ],
 
-    header_libs: [
+    whole_static_libs: [
+        "libavextensions"
+    ],
+
+    header_libs:[
         "libmediadrm_headers",
         "libmediaformatshaper_headers",
         "libnativeloader-headers",
         "libstagefright_xmlparser_headers",
         "media_ndk_headers",
         "media_quality_headers",
+        "libstagefright_mpeg2support_headers",
     ],
 
     export_shared_lib_headers: [
@@ -370,6 +378,13 @@ cc_library {
 
     export_include_dirs: [
         "include",
+
+    ],
+
+    include_dirs: [
+        "frameworks/av/media/libavextensions",
+        "frameworks/av/media/libmediaextractor",
+        "frameworks/av/media/module/mpeg2ts",
     ],
 
     cflags: [
