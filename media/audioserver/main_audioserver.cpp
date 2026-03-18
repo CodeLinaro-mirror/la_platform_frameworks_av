@@ -99,6 +99,11 @@ int main(int argc __unused, char **argv __unused)
 
     signal(SIGPIPE, SIG_IGN);
 
+    // TODO whether it should be part of audioserver
+#ifndef TARGET_QCOM_IOT_LOW_RAM
+        instantiateVRAudioServer();
+#endif
+
     // Make sure IHAVE is registered before AudioFlinger
     registerIHalAdapterVendorExtension();
 
