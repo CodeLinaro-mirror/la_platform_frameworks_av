@@ -52,7 +52,7 @@ public:
             const std::string& clientPackageName,
             const std::optional<std::string>& clientFeatureId,
             const std::string& cameraIdStr, int cameraFacing, int sensorOrientation,
-            int clientPid, uid_t clientUid, int servicePid) :
+            int clientPid, uid_t clientUid, int servicePid, bool sharedMode) :
             CameraService::BasicClient(
                     cameraService,
                     IInterface::asBinder(remoteCallback),
@@ -60,7 +60,7 @@ public:
                     // (v)ndk doesn't have offline session support
                     clientPackageName, /*overridePackageName*/false, clientFeatureId,
                     cameraIdStr, cameraFacing, sensorOrientation, clientPid, clientUid, servicePid,
-                    hardware::ICameraService::ROTATION_OVERRIDE_NONE),
+                    hardware::ICameraService::ROTATION_OVERRIDE_NONE, sharedMode),
             mRemoteCallback(remoteCallback), mOfflineSession(session),
             mCompositeStreamMap(offlineCompositeStreamMap) {}
 
@@ -123,6 +123,7 @@ public:
     void notifyRepeatingRequestError(long lastFrameNumber) override;
     status_t injectCamera(const std::string& injectedCamId,
             sp<CameraProviderManager> manager) override;
+    void notifyClientSharedAccessPriorityChanged(bool primaryClient) override;
     status_t stopInjection() override;
     status_t injectSessionParams(
         const hardware::camera2::impl::CameraMetadataNative& sessionParams) override;

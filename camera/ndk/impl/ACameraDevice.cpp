@@ -26,6 +26,9 @@
 #include "ACameraMetadata.h"
 #include "ACaptureRequest.h"
 #include "ACameraCaptureSession.h"
+#include <com_android_internal_camera_flags.h>
+
+namespace flags = com::android::internal::camera::flags;
 
 ACameraDevice::~ACameraDevice() {
     mDevice->stopLooperAndDisconnect();
@@ -57,12 +60,13 @@ CameraDevice::CameraDevice(
         const char* id,
         ACameraDevice_StateCallbacks* cb,
         sp<ACameraMetadata> chars,
-        ACameraDevice* wrapper) :
+        ACameraDevice* wrapper, bool sharedMode) :
         mCameraId(id),
         mAppCallbacks(*cb),
         mChars(chars),
         mServiceCallback(new ServiceCallback(this)),
         mWrapper(wrapper),
+        mSharedMode(sharedMode),
         mInError(false),
         mError(ACAMERA_OK),
         mIdle(true),
@@ -262,6 +266,28 @@ camera_status_t CameraDevice::isSessionConfigurationSupported(
     } else {
         return supported ? ACAMERA_OK : ACAMERA_ERROR_STREAM_CONFIGURE_FAIL;
     }
+}
+
+camera_status_t CameraDevice::stopStreamingLocked() {
+    camera_status_t ret = checkCameraClosedOrErrorLocked();
+    if (ret != ACAMERA_OK) {
+        ALOGE("%s: camera is in closed or error state %d", __FUNCTION__, ret);
+        return ret;
+    }
+    ret = stopRepeatingLocked();
+    if (ret != ACAMERA_OK) {
+        ALOGE("%s: error when trying to stop streaming %d", __FUNCTION__, ret);
+        return ret;
+    }
+    for (auto& outputTarget : mPreviewRequestOutputs) {
+        ACameraOutputTarget_free(outputTarget);
+    }
+    mPreviewRequestOutputs.clear();
+    if (mPreviewRequest) {
+        ACaptureRequest_free(mPreviewRequest);
+        mPreviewRequest = nullptr;
+    }
+    return ACAMERA_OK;
 }
 
 camera_status_t CameraDevice::updateOutputConfigurationLocked(ACaptureSessionOutput *output) {
@@ -682,6 +708,11 @@ CameraDevice::configureStreamsLocked(const ACaptureSessionOutputContainer* outpu
         if (ret != ACAMERA_OK) {
             return ret;
         }
+        // Surface sharing cannot be enabled when a camera has been opened
+        // in shared mode.
+        if (mSharedMode && outConfig.mIsShared) {
+            return ACAMERA_ERROR_INVALID_PARAMETER;
+        }
         outputSet.insert(std::make_pair(
                 anw, OutputConfiguration(iGBP, outConfig.mRotation, outConfig.mPhysicalCameraId,
                         OutputConfiguration::INVALID_SET_ID, outConfig.mIsShared)));
@@ -706,10 +737,14 @@ CameraDevice::configureStreamsLocked(const ACaptureSessionOutputContainer* outpu
         return ret;
     }
 
-    ret = waitUntilIdleLocked();
-    if (ret != ACAMERA_OK) {
-        ALOGE("Camera device %s wait until idle failed, ret %d", getId(), ret);
-        return ret;
+    // If device is opened in shared mode, there can be multiple clients accessing the
+    // camera device. So do not wait for idle if the device is opened in shared mode.
+    if (!mSharedMode) {
+        ret = waitUntilIdleLocked();
+        if (ret != ACAMERA_OK) {
+            ALOGE("Camera device %s wait until idle failed, ret %d", getId(), ret);
+            return ret;
+        }
     }
 
     // Send onReady to previous session
@@ -970,6 +1005,7 @@ void CameraDevice::CallbackHandler::onMessageReceived(
         case kWhatCaptureSeqAbort:
         case kWhatCaptureBufferLost:
         case kWhatPreparedCb:
+        case kWhatClientSharedAccessPriorityChanged:
             ALOGV("%s: Received msg %d", __FUNCTION__, msg->what());
             break;
         case kWhatCleanUpSessions:
@@ -1007,6 +1043,29 @@ void CameraDevice::CallbackHandler::onMessageReceived(
             (*onDisconnected)(context, dev);
             break;
         }
+
+        case kWhatClientSharedAccessPriorityChanged:
+        {
+            ACameraDevice* dev;
+            found = msg->findPointer(kDeviceKey, (void**) &dev);
+            if (!found || dev == nullptr) {
+                ALOGE("%s: Cannot find device pointer!", __FUNCTION__);
+                return;
+            }
+            ACameraDevice_ClientSharedAccessPriorityChangedCallback
+                    onClientSharedAccessPriorityChanged;
+            found = msg->findPointer(kCallbackFpKey, (void**) &onClientSharedAccessPriorityChanged);
+            if (!found) {
+                ALOGE("%s: Cannot find onClientSharedAccessPriorityChanged!", __FUNCTION__);
+                return;
+            }
+            if (onClientSharedAccessPriorityChanged == nullptr) {
+                return;
+            }
+            (*onClientSharedAccessPriorityChanged)(context, dev, dev->isPrimaryClient());
+            break;
+        }
+
         case kWhatOnError:
         {
             ACameraDevice* dev;
@@ -1621,6 +1680,28 @@ CameraDevice::ServiceCallback::onDeviceError(
             break;
     }
     return ret;
+}
+
+binder::Status
+CameraDevice::ServiceCallback::onClientSharedAccessPriorityChanged(bool primaryClient) {
+    ALOGV("onClientSharedAccessPriorityChanged received. primaryClient = %d", primaryClient);
+    binder::Status ret = binder::Status::ok();
+    sp<CameraDevice> dev = mDevice.promote();
+    if (dev == nullptr) {
+        return ret; // device has been closed
+    }
+    Mutex::Autolock _l(dev->mDeviceLock);
+    if (dev->isClosed() || dev->mRemote == nullptr) {
+        return ret;
+    }
+    dev->setPrimaryClient(primaryClient);
+    sp<AMessage> msg = new AMessage(kWhatClientSharedAccessPriorityChanged, dev->mHandler);
+    msg->setPointer(kContextKey, dev->mAppCallbacks.context);
+    msg->setPointer(kDeviceKey, (void*) dev->getWrapper());
+    msg->setPointer(kCallbackFpKey, (void*) dev->mAppCallbacks.onClientSharedAccessPriorityChanged);
+    msg->post();
+
+    return binder::Status::ok();
 }
 
 binder::Status
