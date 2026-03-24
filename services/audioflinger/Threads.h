@@ -27,6 +27,7 @@
 #include <afutils/AudioWatchdog.h>
 #include <afutils/NBAIO_Tee.h>
 #include <audio_utils/Balance.h>
+#include <audio_utils/CommandThread.h>
 #include <audio_utils/SimpleLog.h>
 #include <datapath/ThreadMetrics.h>
 #include <fastpath/FastCapture.h>
@@ -530,6 +531,8 @@ public:
 
     void broadcast_l() final REQUIRES(mutex());
 
+    void asyncBroadcast() final;
+
     bool isTimestampCorrectionEnabled_l() const override REQUIRES(mutex()) { return false; }
 
     bool isMsdDevice() const final { return mIsMsdDevice; }
@@ -544,6 +547,14 @@ public:
         return mMutex;
     }
     mutable audio_utils::mutex mMutex{audio_utils::MutexOrder::kThreadBase_Mutex};
+
+    // Freeze handling, override on a thread basis.
+    void onClientUnfrozen(pid_t pid __unused) override EXCLUDES_ThreadBase_Mutex {}
+    void onClientFrozen(pid_t pid __unused) override EXCLUDES_ThreadBase_Mutex {}
+
+    // invalidateTracksForPid_l, invalidates tracks associated with pid.
+    // returns the port IDs of the tracks invalidated.
+    std::vector<audio_port_handle_t> invalidateTracksForPid_l(pid_t pid) REQUIRES(mutex());
 
     void onEffectEnable(const sp<IAfEffectModule>& effect) final EXCLUDES_ThreadBase_Mutex;
     void onEffectDisable(const sp<IAfEffectModule>& effect) final EXCLUDES_ThreadBase_Mutex;
@@ -811,9 +822,6 @@ protected:
                     size_t count(const sp<IAfTrackBase>& track) const {
                         return mActiveTracks.count(track);
                     }
-                    auto erase(const std::set<sp<IAfTrackBase>>::iterator& it) {
-                        return mActiveTracks.erase(it);
-                    }
                     auto begin() {
                         return mActiveTracks.begin();
                     }
@@ -873,6 +881,8 @@ protected:
                 SimpleLog mLocalLog {/* maxLogLines= */ 120};  // locked internally
 
     ActiveTracks mActiveTracks GUARDED_BY(mutex()) {&mLocalLog};
+
+    sp<IAfTrackBase> getActiveTrackById_l(audio_port_handle_t portId) REQUIRES(mutex());
 
         // The Tracks class manages tracks added and removed from the Thread.
 
@@ -1038,6 +1048,15 @@ protected:
             final REQUIRES(mutex());
 
     void boostThreadPriority(const int priority);
+
+    // AsyncCommandThread is a singleton thread which operates independently
+    // of the ThreadBase Thread and is used to launch async commands
+    // which take the ThreadBase mutex from contexts where acquiring such mutex
+    // would cause deadlocks.
+    //
+    // Currently there is only one AsyncCommandThread shared among all
+    // Threads, so do not do compute heavy operations on it.
+    static audio_utils::CommandThread& getAsyncCommandThread();
 
     private:
     void dumpBase_l(int fd, const Vector<String16>& args) REQUIRES(mutex());
@@ -2199,6 +2218,8 @@ public:
 
     std::string getLocalLogHeader() const override;
 
+    void onClientFrozen(pid_t pid) override EXCLUDES_ThreadBase_Mutex;
+
 protected:
     void dumpInternals_l(int fd, const Vector<String16>& args) override REQUIRES(mutex());
     void dumpTracks_l(int fd, const Vector<String16>& args) override REQUIRES(mutex());
@@ -2269,10 +2290,6 @@ private:
             // If a fast capture is present, the Pipe as IMemory, otherwise clear
             sp<IMemory>                         mPipeMemory;
 
-            // TODO: add comment and adjust size as needed
-            static const size_t                 kFastCaptureLogSize = 4 * 1024;
-            sp<NBLog::Writer>                   mFastCaptureNBLogWriter;
-
             bool                                mFastTrackAvail;    // true if fast track available
             // common state to all record threads
             std::atomic_bool                    mBtNrecSuspended;
@@ -2328,10 +2345,13 @@ class MmapThread : public ThreadBase, public virtual IAfMmapThread
             EXCLUDES_ThreadBase_Mutex;
     status_t getMmapPosition(struct audio_mmap_position* position) const override
             EXCLUDES_ThreadBase_Mutex;
-    status_t start(const AudioClient& client,
-                   const audio_attributes_t *attr,
-            audio_port_handle_t* handle) final EXCLUDES_ThreadBase_Mutex;
-    status_t stop(audio_port_handle_t handle) final EXCLUDES_ThreadBase_Mutex;
+    status_t createTrack(const AudioClient& client,
+                         const audio_attributes_t& attr,
+                         audio_port_handle_t* portId,
+                         audio_io_handle_t* ioHandle) final EXCLUDES_ThreadBase_Mutex;
+    status_t startTrack(audio_port_handle_t portId) final EXCLUDES_ThreadBase_Mutex;
+    status_t stopTrack(audio_port_handle_t portId) final EXCLUDES_ThreadBase_Mutex;
+    status_t releaseTrack(audio_port_handle_t portId) final EXCLUDES_ThreadBase_Mutex;
     status_t standby() final EXCLUDES_ThreadBase_Mutex;
     status_t getObservablePosition(uint64_t* position, int64_t* timeNanos) const
             EXCLUDES_ThreadBase_Mutex = 0;
@@ -2426,6 +2446,7 @@ class MmapThread : public ThreadBase, public virtual IAfMmapThread
  protected:
     void dumpInternals_l(int fd, const Vector<String16>& args) override REQUIRES(mutex());
     void dumpTracks_l(int fd, const Vector<String16>& args) final REQUIRES(mutex());
+    void releaseAllTracks() EXCLUDES_ThreadBase_Mutex;
 
                 /**
                  * @brief mDeviceIds current device port unique identifiers

@@ -793,7 +793,12 @@ ndk::ScopedAStatus VirtualCameraDevice::getResourceCost(
   if (_aidl_return == nullptr) {
     return cameraStatus(Status::ILLEGAL_ARGUMENT);
   }
-  _aidl_return->resourceCost = 100;  // ¯\_(ツ)_/¯
+  // a virtual camera uses global device resources, has no specific camera hardware limitations
+  if (flags::virtual_camera_lower_resource_cost()) {
+    _aidl_return->resourceCost = 10;
+  } else {
+    _aidl_return->resourceCost = 100;
+  }
   return ndk::ScopedAStatus::ok();
 }
 
@@ -1027,8 +1032,8 @@ std::shared_ptr<VirtualCameraDevice> VirtualCameraDevice::sharedFromThis() {
   return ref<VirtualCameraDevice>();
 }
 
-void VirtualCameraDevice::closeSession() {
-  ALOGV("Close all sessions");
+void VirtualCameraDevice::closeSession(bool notifyError) {
+  ALOGV("Close all sessions. notifyError %d", notifyError);
   std::shared_ptr<VirtualCameraSession> session;
   {
     std::lock_guard<std::mutex> lock(mSessionLock);
@@ -1036,7 +1041,11 @@ void VirtualCameraDevice::closeSession() {
     mSession.reset();
   }
   if (session != nullptr) {
-    session->close();
+    if (notifyError) {
+      session->onSessionError();
+    } else {
+      session->close();
+    }
   }
 }
 

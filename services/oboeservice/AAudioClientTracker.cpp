@@ -19,13 +19,17 @@
 //#define LOG_NDEBUG 0
 #include <utils/Log.h>
 
+// go/keep-sorted start
 #include <assert.h>
+#include <audio_utils/threads.h>
 #include <binder/IPCThreadState.h>
+#include <com_android_media_audioserver.h>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <mutex>
 #include <utils/Singleton.h>
+// go/keep-sorted end
 
 #include "utility/AAudioUtilities.h"
 #include "AAudioEndpointManager.h"
@@ -83,6 +87,11 @@ aaudio_result_t AAudioClientTracker::registerClient(pid_t pid,
 
         status = binder->linkToDeath(notificationClient);
         ALOGW_IF(status != NO_ERROR, "registerClient() linkToDeath = %d\n", status);
+        if (com::android::media::audioserver::mmap_freezer_awareness()) {
+            status = binder->addFrozenStateChangeCallback(notificationClient);
+            ALOGW_IF(status != NO_ERROR, "registerClient() addFrozenStateChangeCallback = %d\n",
+                     status);
+        }
         return AAudioConvert_androidToAAudioResult(status);
     } else {
         ALOGW("registerClient(%d) already registered!", pid);
@@ -93,6 +102,13 @@ aaudio_result_t AAudioClientTracker::registerClient(pid_t pid,
             if (status != NO_ERROR) {
                 ALOGE("registerClient() linkToDeath status = %d\n", status);
             } else {
+                if (com::android::media::audioserver::mmap_freezer_awareness()) {
+                    status = binder->addFrozenStateChangeCallback(notificationClient);
+                    if (status != NO_ERROR) {
+                        ALOGE("registerClient() addFrozenStateChangeCallback status = %d\n",
+                              status);
+                    }
+                }
                 notificationClient->setBinder(binder);
             }
         }
@@ -192,6 +208,8 @@ aaudio_result_t AAudioClientTracker::NotificationClient::unregisterClientStream(
 
 // Close any open streams for the client.
 void AAudioClientTracker::NotificationClient::binderDied(const wp<IBinder>& who __unused) {
+    audio_utils::set_priority_for_binder_callback(__func__);
+
     AAudioService *aaudioService = AAudioClientTracker::getInstance().getAAudioService();
     if (aaudioService != nullptr) {
         // Copy the current list of streams to another vector because closing them below
@@ -206,6 +224,10 @@ void AAudioClientTracker::NotificationClient::binderDied(const wp<IBinder>& who 
         }
 
         for (const auto& serviceStream : streamsToClose) {
+            if (com::android::media::audioserver::mmap_freezer_awareness()) {
+                // if the process is frozen but not dead, we need to disconnect the client side
+                serviceStream->disconnect();
+            }
             const aaudio_handle_t handle = serviceStream->getHandle();
             ALOGW("binderDied() close abandoned stream 0x%08X\n", handle);
             AAudioHandleInfo handleInfo(DEFAULT_AAUDIO_SERVICE_ID, handle);
@@ -215,6 +237,14 @@ void AAudioClientTracker::NotificationClient::binderDied(const wp<IBinder>& who 
     }
     const sp<NotificationClient> keep(this);
     AAudioClientTracker::getInstance().unregisterClient(mProcessId);
+}
+
+void AAudioClientTracker::NotificationClient::onStateChanged(
+        const wp<IBinder>& who, State state) {
+    if (state == IBinder::FrozenStateChangeCallback::State::FROZEN) {
+        ALOGW("process frozen close abandoned MMAP stream");
+        binderDied(who);
+    }
 }
 
 

@@ -66,7 +66,7 @@ public:
     virtual status_t deleteInternalStreams() = 0;
 
     // Stream configuration completed.
-    virtual status_t configureStream() = 0;
+    virtual status_t configureStream(bool outputConnected = true) = 0;
 
     // Finalize deferred composite stream
     virtual status_t setConsumerSurfaces(int /*streamId*/,
@@ -117,7 +117,7 @@ protected:
         void onBufferReleased() override { /*No impl. for now*/ };
         bool needsReleaseNotify() override { return true; };
         void onBuffersDiscarded(const std::vector<sp<GraphicBuffer>>& /*buffers*/) override {};
-        void onBufferDetached(int /*slot*/) override {};
+        void onBufferDetached(uint64_t /*bufferId*/) override {};
     };
 
     status_t registerCompositeStreamListener(int32_t streamId);

@@ -208,6 +208,7 @@ public:
     virtual bool isExternalTrack() const = 0;
 
     virtual void invalidate() = 0;
+    virtual void poison() = 0;
     virtual bool isInvalid() const = 0;
 
     virtual void terminate() = 0;
@@ -432,7 +433,8 @@ class AfPlaybackCommon : public virtual RefBase {
     // TODO: atomic necessary if underneath thread lock?
     std::atomic<mute_state_t> mMuteState;
 
-    const EnforcementLevel mEnforcementLevel;
+    EnforcementLevel mEnforcementLevel;
+    media::IAudioManagerNative::HardeningExemptionReason mExemptionReason;
 
     std::atomic<bool> mHasOpControlPartial {true};
     std::atomic<bool> mHasOpControlFull {true};

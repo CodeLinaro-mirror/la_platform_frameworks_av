@@ -17,6 +17,7 @@
 #ifndef ANDROID_COMPANION_VIRTUALCAMERA_VIRTUALCAMERASESSION_H
 #define ANDROID_COMPANION_VIRTUALCAMERA_VIRTUALCAMERASESSION_H
 
+#include <atomic>
 #include <memory>
 #include <set>
 #include <vector>
@@ -112,10 +113,17 @@ class VirtualCameraSession
 
   std::set<int> getStreamIds() const EXCLUDES(mLock);
 
+  // Fatal session error, notifies framework and closes the session.
+  void onSessionError();
+
  private:
   ndk::ScopedAStatus processCaptureRequest(
       const ::aidl::android::hardware::camera::device::CaptureRequest& request)
       EXCLUDES(mLock);
+
+  bool isInFatalError() const {
+    return mSessionContext.isInFatalError();
+  }
 
   std::weak_ptr<VirtualCameraDevice> mCameraDevice;
 
@@ -157,6 +165,10 @@ class VirtualCameraSession
           halStreams);
 
   std::vector<int> mOpenStreams GUARDED_BY(mLock);
+
+  // Frame number of the last frame that was flushed.
+  // Requests with frame number less than or equal to this value are dropped.
+  std::atomic<int> mMaxFrameToFlush{-1};
 
   void createRenderThread(
       VirtualCameraDevice& virtualCamera,

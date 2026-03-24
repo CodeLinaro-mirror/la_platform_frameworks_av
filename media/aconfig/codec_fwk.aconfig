@@ -13,10 +13,13 @@ flag {
 }
 
 flag {
-  name: "ahardware_buffer_fetch_flag"
+  name: "ahardware_buffer_fetch_bugfix"
   namespace: "codec_fwk"
-  description: "Feature flag to enabling ahardwarebuffer graphic buffer fetch"
+  description: "Feature flag to enabling ahardwarebuffer graphic buffer fetch (Bugfix)"
   bug: "456253311"
+  metadata {
+    purpose: PURPOSE_BUGFIX
+  }
 }
 
 flag {
@@ -25,13 +28,6 @@ flag {
   namespace: "codec_fwk"
   description: "Feature flags for enabling AIDL HAL InputSurface handling"
   bug: "201479783"
-}
-
-flag {
-  name: "app_codec_usage_metrics"
-  namespace: "codec_fwk"
-  description: "Feature flag for application codec usage metrics"
-  bug: "406819941"
 }
 
 flag {
@@ -270,6 +266,20 @@ flag {
   namespace: "codec_fwk"
   description: "Feature flag retrying decryption upon HDCP failure"
   bug: "338440115"
+}
+
+flag {
+  name: "reuse_graphic_import_and_mapping"
+  namespace: "codec_fwk"
+  description: "Cache and reuse graphic import and address mapping for better performance"
+  bug: "479258399"
+}
+
+flag {
+  name: "reuse_linear_mapping"
+  namespace: "codec_fwk"
+  description: "Cache and reuse linear(1D) address mapping for better performance"
+  bug: "419655746"
 }
 
 flag {

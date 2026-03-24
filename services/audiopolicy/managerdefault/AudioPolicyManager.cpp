@@ -1543,9 +1543,10 @@ status_t AudioPolicyManager::getOutputForAttrInt(
     }
 
     // FIXME: in case of RENDER policy, the output capabilities should be checked
-    if ((secondaryMixes != nullptr && !secondaryMixes->empty())
-            && (!audio_is_linear_pcm(config->format) ||
-                    *flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD)) {
+    if ((secondaryMixes != nullptr && !secondaryMixes->empty()) &&
+        (!audio_is_linear_pcm(config->format) ||
+         ((*flags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) &&
+          !com::android::media::audioserver::capture_offloaded_audio()))) {
         ALOGD("%s: rejecting request as secondary mixes only support pcm", __func__);
         return BAD_VALUE;
     }
@@ -2888,13 +2889,7 @@ status_t AudioPolicyManager::startSource(const sp<SwAudioOutputDescriptor>& outp
     outputDesc->setClientActive(client, true);
 
     if (client->hasPreferredDevice(true)) {
-        if (outputDesc->sameExclusivePreferredDevicesCount() > 0) {
-            // Preferred device may be exclusive, use only if no other active clients on this output
-            devices = DeviceVector(
-                        mAvailableOutputDevices.getDeviceFromId(client->preferredDeviceId()));
-        } else {
-            devices = getNewOutputDevices(outputDesc, false /*fromCache*/);
-        }
+        devices = getNewOutputDevices(outputDesc, false /*fromCache*/);
         if (devices != outputDesc->devices()) {
             checkStrategyRoute(clientStrategy, outputDesc->mIoHandle);
         }
@@ -3033,11 +3028,9 @@ status_t AudioPolicyManager::startSource(const sp<SwAudioOutputDescriptor>& outp
         if (policyMix->mIsPersistent) {
             ALOGV("%s: Skipping input device connect for persistent policy mix with address %s",
                   __func__, address);
-            if (getDeviceConnectionState(AUDIO_DEVICE_IN_REMOTE_SUBMIX, address) !=
-                AUDIO_POLICY_DEVICE_STATE_AVAILABLE) {
-                ALOGE("%s: Input device connect is not connected for persistent policy mix",
-                      __func__);
-            }
+            ALOGE_IF(getDeviceConnectionState(AUDIO_DEVICE_IN_REMOTE_SUBMIX, address) !=
+                     AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
+                     "%s: Input device is not connected for persistent policy mix", __func__);
         } else {
             setDeviceConnectionStateInt(AUDIO_DEVICE_IN_REMOTE_SUBMIX,
                                         AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
@@ -3847,9 +3840,20 @@ status_t AudioPolicyManager::startInput(audio_port_handle_t portId)
                 address = policyMix->mDeviceAddress;
             }
             if (address != "") {
-                setDeviceConnectionStateInt(AUDIO_DEVICE_OUT_REMOTE_SUBMIX,
+                // output devices for remote submix persistent mixes are expected to be already
+                // connected from the mix registration
+                if (policyMix != nullptr && policyMix->mIsPersistent) {
+                    ALOGV("%s: Skipping output device connect for persistent policy mix "
+                          "with address %s", __func__, address.c_str());
+                    ALOGE_IF(getDeviceConnectionState(AUDIO_DEVICE_OUT_REMOTE_SUBMIX, address) !=
+                             AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
+                             "%s: Output device is not connected for persistent policy mix",
+                             __func__);
+                } else {
+                    setDeviceConnectionStateInt(AUDIO_DEVICE_OUT_REMOTE_SUBMIX,
                         AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
                         address, "remote-submix", AUDIO_FORMAT_DEFAULT);
+                }
             }
         }
     } else if (status != NO_ERROR) {
@@ -3897,7 +3901,7 @@ status_t AudioPolicyManager::stopInput(audio_port_handle_t portId)
         }
 
         // automatically disable the remote submix output when input is stopped if not
-        // used by a policy mix of type MIX_TYPE_RECORDERS
+        // used by a policy mix of type MIX_TYPE_RECORDERS nor is persistent
         if (audio_is_remote_submix_device(inputDesc->getDeviceType())) {
             String8 address = String8("");
             if (policyMix == nullptr) {
@@ -3906,9 +3910,14 @@ status_t AudioPolicyManager::stopInput(audio_port_handle_t portId)
                 address = policyMix->mDeviceAddress;
             }
             if (address != "") {
-                setDeviceConnectionStateInt(AUDIO_DEVICE_OUT_REMOTE_SUBMIX,
-                                         AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE,
-                                         address, "remote-submix", AUDIO_FORMAT_DEFAULT);
+                if (policyMix != nullptr && policyMix->mIsPersistent) {
+                    ALOGV("%s: Skipping output device disconnect for persistent policy mix"
+                          " with address %s", __func__, address.c_str());
+                } else {
+                    setDeviceConnectionStateInt(AUDIO_DEVICE_OUT_REMOTE_SUBMIX,
+                                                AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE,
+                                                address, "remote-submix", AUDIO_FORMAT_DEFAULT);
+                }
             }
         }
         resetInputDevice(input);
@@ -4565,6 +4574,8 @@ bool AudioPolicyManager::isSourceActive(audio_source_t source) const
 //  - 1 look for a mix matching the address passed in attributes tags if any
 //  - 2 if none found, look for a mix matching the attributes usage
 //  - 3 if none found, default to device and output selection by policy rules.
+//
+// For persistent mixes both input and output devices are connected at registration
 
 status_t AudioPolicyManager::registerPolicyMixes(const std::vector<AudioMix>& mixes)
 {
@@ -4641,23 +4652,23 @@ status_t AudioPolicyManager::registerPolicyMixes(const std::vector<AudioMix>& mi
 
             // for persistent mixes, connect also the device at the other end when the policy
             // is registered
-            if (deviceTypeToMakeAvailable == AUDIO_DEVICE_OUT_REMOTE_SUBMIX && mix.mIsPersistent) {
-                ALOGV("%s: Connect AUDIO_DEVICE_IN_REMOTE_SUBMIX for persistent mix"
-                      " with address %s", __func__, address.c_str());
-                if ((res = setDeviceConnectionStateInt(AUDIO_DEVICE_IN_REMOTE_SUBMIX,
+            if (mix.mIsPersistent) {
+                ALOGV("%s: Connect pair device for persistent mix with address %s",
+                      __func__, address.c_str());
+                if ((res = setDeviceConnectionStateInt(mix.mDeviceType,
                         AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
                         address.c_str(),
                         "remote-submix",
                         AUDIO_FORMAT_DEFAULT)) != NO_ERROR) {
-                    // the persistent mix requires both OUT and IN devices available
-                    // disconnect the OUT device since the IN device can't be connected
+                    // the persistent mix requires both input and output devices available
+                    // disconnect the first connected device if the seconds can't be also connected
                     setDeviceConnectionStateInt(deviceTypeToMakeAvailable,
                                                 AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE,
                                                 address.c_str(),
                                                 "remote-submix",
                                                 AUDIO_FORMAT_DEFAULT);
-                    ALOGE("%s: Failed to set input remote submix device available with address %s",
-                          __func__, address.c_str());
+                    ALOGE("%s: Failed to connect pair remote submix device for persistent mix"
+                          " with address %s", __func__, address.c_str());
                     break;
                 }
             }
@@ -4958,16 +4969,24 @@ status_t AudioPolicyManager::setDevicesRoleForStrategy(product_strategy_t strate
 
     checkForDeviceAndOutputChanges();
 
-    bool forceVolumeReeval = false;
-    // FIXME: workaround for truncated touch sounds
-    // to be removed when the problem is handled by system UI
-    uint32_t delayMs = 0;
-    if (strategy == mCommunnicationStrategy) {
-        forceVolumeReeval = true;
-        delayMs = TOUCH_SOUND_FIXED_DELAY_MS;
+    if (strategy == mCommunnicationStrategy &&
+            std::any_of(devices.begin(), devices.end(), [](const auto& x) {
+                return audio_is_bluetooth_out_sco_device(x.mType);
+                })) {
+        updateCallAndOutputRouting(/*forceVolumeReeval=*/ true, /*delayMs=*/ 0);
         updateInputRouting();
+    } else {
+        bool forceVolumeReeval = false;
+        // FIXME: workaround for truncated touch sounds
+        // to be removed when the problem is handled by system UI
+        uint32_t delayMs = 0;
+        if (strategy == mCommunnicationStrategy) {
+            forceVolumeReeval = true;
+            delayMs = TOUCH_SOUND_FIXED_DELAY_MS;
+            updateInputRouting();
+        }
+        updateCallAndOutputRouting(forceVolumeReeval, delayMs);
     }
-    updateCallAndOutputRouting(forceVolumeReeval, delayMs);
 
     return NO_ERROR;
 }
@@ -8486,14 +8505,14 @@ void AudioPolicyManager::checkSecondaryOutputs() {
                 clientsToInvalidate.push_back(client->portId());
                 continue;
             }
-            if (std::equal(
-                    client->getSecondaryOutputs().begin(),
-                    client->getSecondaryOutputs().end(),
-                    secondaryDescs.begin(), secondaryDescs.end())) {
+            if (std::equal(client->getSecondaryOutputs().begin(),
+                           client->getSecondaryOutputs().end(), secondaryDescs.begin(),
+                           secondaryDescs.end())) {
                 continue;
             }
-            if (client->flags() & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD
-                    || !audio_is_linear_pcm(client->config().format)) {
+            if ((client->flags() & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD &&
+                 !com::android::media::audioserver::capture_offloaded_audio()) ||
+                !audio_is_linear_pcm(client->config().format)) {
                 // If the format is not PCM, the tracks should be invalidated to get correct
                 // behavior when the secondary output is changed.
                 clientsToInvalidate.push_back(client->portId());
@@ -8632,7 +8651,17 @@ DeviceVector AudioPolicyManager::getNewOutputDevices(const sp<SwAudioOutputDescr
     sp<DeviceDescriptor> device =
         findPreferredDevice(outputDesc, PRODUCT_STRATEGY_NONE, active, mAvailableOutputDevices);
     if (device != nullptr) {
-        return DeviceVector(device);
+        // Never honor explicit routing for SCO unless defined by communication strategy:
+        // (1) BT stack must be primed (done via setCommunicationDevice)
+        // (2) Required mutual exclusion with A2DP, which is enforced with the strategy routing
+        if (audio_is_bluetooth_out_sco_device(device->type())) {
+            if (isScoRequestedForComm()) {
+                return DeviceVector(device);
+            }
+            ALOGI("Suppressing explicit SCO preference");
+        } else {
+            return DeviceVector(device);
+        }
     }
 
     // Legacy Engine cannot take care of bus devices and mix, so we need to handle the conflict
@@ -8681,7 +8710,21 @@ DeviceVector AudioPolicyManager::getNewOutputDevices(const sp<SwAudioOutputDescr
             break;
         }
     }
-    ALOGV("%s selected devices %s", __func__, devices.toString().c_str());
+    if (devices.empty()) {
+        // Consider the selected route for the most recently active strategy. This ensures that, if
+        // we haven't yet moved to standby, but there are no recent clients, we still re-route that
+        // patch, which is important for cleaning stale SCO patches.
+        // 7000ms to encompass standby time.
+        const auto strat = outputDesc->getMostRecentStrategy(/* inPastMs */ 7000);
+
+        if (strat != PRODUCT_STRATEGY_NONE) {
+            devices = mEngine->getOutputDevicesForStrategy(strat, nullptr, fromCache);
+            ALOGI("%s io %d recent device override %s", __func__, outputDesc->mIoHandle,
+                  devices.toString().c_str());
+        }
+    }
+    ALOGV("%s io %d selected devices %s", __func__, outputDesc->mIoHandle,
+          devices.toString().c_str());
     return devices;
 }
 
@@ -8705,8 +8748,20 @@ sp<DeviceDescriptor> AudioPolicyManager::getNewInputDevice(
     // for other apps by setting a preferred device.
     bool active;
     device = findPreferredDevice(inputDesc, AUDIO_SOURCE_DEFAULT, active, mAvailableInputDevices);
+    bool ignorePreferredDevice = false;
     if (device != nullptr) {
-        return device;
+        // Never honor explicit routing for SCO unless defined by communication strategy:
+        // (1) BT stack must be primed (done via setCommunicationDevice)
+        // (2) Required mutual exclusion with A2DP, which is enforced with the strategy routing
+        if (audio_is_bluetooth_in_sco_device(device->type())) {
+            if (isScoRequestedForComm()) {
+                return device;
+            }
+            ignorePreferredDevice = true;
+            ALOGI("Suppressing explicit SCO input preference");
+        } else {
+            return device;
+        }
     }
 
     // If we are not in call and no client is active on this input, this methods returns
@@ -8730,7 +8785,7 @@ sp<DeviceDescriptor> AudioPolicyManager::getNewInputDevice(
     }
     if (attributes.source != AUDIO_SOURCE_DEFAULT) {
         device = mEngine->getInputDeviceForAttributes(
-                attributes, false /*ignorePreferredDevice*/, uid, session);
+                attributes, ignorePreferredDevice, uid, session);
     }
 
     if (device && com::android::media::audioserver::enable_strict_port_routing_checks()
@@ -8992,12 +9047,27 @@ uint32_t AudioPolicyManager::setOutputDevices(const char *caller,
     // output profile or if new device is not routable AND previous device(s) is(are) still
     // available (otherwise reset device must be done on the output)
     if (!devices.isEmpty() && filteredDevices.isEmpty() && !availPrevDevices.empty()) {
-        ALOGV("%s: %s unsupported device %s for output", __func__, logPrefix.c_str(),
-              devices.toString().c_str());
-        // restore previous device after evaluating strategy mute state
-        outputDesc->setDevices(prevDevices);
-        applyStreamVolumes(outputDesc, prevDevices.types(), delayMs, true /*force*/);
-        return muteWaitMs;
+        // SCO/A2DP is an exception: we should never restore the previous route to SCO, since it has
+        // implications for the overall HAL state. In that case, we proceed and reset the route,
+        // similar to explicitly setting the device to NONE.
+        if (std::any_of(availPrevDevices.begin(), availPrevDevices.end(), [](const auto& x) {
+                return audio_is_bluetooth_out_sco_device(x->type()) ||
+                       audio_is_a2dp_out_device(x->type());
+            })) {
+            ALOGV("%s: %s unsupported device %s for output %s with %d clients. However, force "
+                  "clearing prev device",
+                  __func__, logPrefix.c_str(), devices.toString().c_str(),
+                  outputDesc->info().c_str(),
+                  static_cast<int>(outputDesc->getActiveClients().size()));
+            force = true;
+        } else {
+            ALOGV("%s: %s unsupported device %s for output", __func__, logPrefix.c_str(),
+                  devices.toString().c_str());
+            // restore previous device after evaluating strategy mute state
+            outputDesc->setDevices(prevDevices);
+            applyStreamVolumes(outputDesc, prevDevices.types(), delayMs, true /*force*/);
+            return muteWaitMs;
+        }
     }
 
     // Do not change the routing if:
@@ -10504,6 +10574,72 @@ status_t AudioPolicyManager::getFlushFromFrameSupport(
                 VALUE_OR_RETURN_STATUS(legacy2aidl_audio_output_flags_t_int32_t_mask(flags)));
         return mpClientInterface->getFlushFromFrameSupport(
                 profile->getModuleHandle(), portConfig, support);
+}
+
+status_t AudioPolicyManager::useMmapForPcmOffload(bool* result) {
+    if (result == nullptr) {
+        return BAD_VALUE;
+    }
+
+    if (mUseMmapForPcmOffload.has_value()) {
+        *result = mUseMmapForPcmOffload.value();
+        return NO_ERROR;
+    }
+
+    // Prefer MMap for PCM offload when
+    // 1) persist.media.audio.prefer_mmap_pcm_offload is set and mmap pcm offload is available or
+    // 2) persist.media.audio.prefer_mmap_pcm_offload is not set and mmap pcm offload has the same
+    //    routing capabilities as the classical pcm offload.
+
+    static const std::string kPreferMmapPcmOffloadSysProp =
+            "persist.media.audio.prefer_mmap_pcm_offload";
+
+    // TODO: b/479291234, change default value to true when fully tested.
+    if (!property_get_bool(kPreferMmapPcmOffloadSysProp.c_str(),
+                           false /* default_value */)) {
+        ALOGD("%s: do not prefer mmap pcm offload as by %s is false",
+              __func__, kPreferMmapPcmOffloadSysProp.c_str());
+        *result = false;
+        mUseMmapForPcmOffload.emplace(*result);
+        return NO_ERROR;
+    }
+
+    static constexpr uint32_t kMmapOffloadFlags =
+            (AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD | AUDIO_OUTPUT_FLAG_MMAP_NOIRQ |
+             AUDIO_OUTPUT_FLAG_DIRECT);
+
+    const sp<IOProfile> mmapOffloadProfile =
+            mHwModules.getCompatibleProfile(kMmapOffloadFlags, false /*isInput*/);
+    if (mmapOffloadProfile == nullptr) {
+        // If MMAP offload is not supported, never use MMAP for PCM offload.
+        *result = false;
+        mUseMmapForPcmOffload.emplace(*result);
+        return NO_ERROR;
+    }
+
+    char buf[PROPERTY_VALUE_MAX] = {};
+    if (property_get(kPreferMmapPcmOffloadSysProp.c_str(), buf, "") >= 1) {
+        // persist.media.audio.prefer_mmap_pcm_offload is set to true and mmap pcm offload is
+        // supported. Always prefer MMAP PCM offload in this case.
+        *result = true;
+        mUseMmapForPcmOffload.emplace(*result);
+        return NO_ERROR;
+    }
+
+    static constexpr uint32_t kClassicalOffloadFlags =
+            (AUDIO_OUTPUT_FLAG_DIRECT | AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD |
+             AUDIO_OUTPUT_FLAG_NON_BLOCKING);
+
+    const sp<IOProfile> classicalOffloadProfile = mHwModules.getCompatibleProfile(
+            kClassicalOffloadFlags, false /*isInput*/);
+    // Prefer mmap offload if supported devices of mmap offload is a superset of classical offload
+    // so that there won't be a switch from mmap offload to classical offload when the routing is
+    // changed.
+    *result = classicalOffloadProfile == nullptr ||
+            mmapOffloadProfile->getSupportedDevices().containsAllDevices(
+                    classicalOffloadProfile->getSupportedDevices());
+    mUseMmapForPcmOffload.emplace(*result);
+    return NO_ERROR;
 }
 
 uid_t AudioPolicyManager::enforceUid(uid_t uid) {
