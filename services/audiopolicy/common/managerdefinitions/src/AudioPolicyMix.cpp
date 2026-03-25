@@ -442,18 +442,20 @@ bool AudioPolicyMixCollection::mixMatch(const AudioMix* mix, size_t mixIndex,
                 return false;
             }
         }
-
-        // Permit match only if requested format and mix format are PCM and can be format
-        // adapted by the mixer, or are the same format on direct output.
-        if (!is_mix_loopback(mix->mRouteFlags) &&
-                config.format != AUDIO_CONFIG_BASE_INITIALIZER.format) {
-            if (!audio_output_is_mixed_output_flags(outputFlags)) {
-                // Direct output must match format exactly.
-                if (config.format != mix->mFormat.format) return false;
-            } else {
-                // If mixable, both requested and mix format must be linear pcm.
-                if (!audio_is_linear_pcm(config.format) ||
-                          !audio_is_linear_pcm(mix->mFormat.format)) return false;
+        // if alert usage is using mp3 format skip below check
+        if (!(attributes.usage >= AUDIO_USAGE_EMERGENCY && config.format == AUDIO_FORMAT_MP3)) {
+            // Permit match only if requested format and mix format are PCM and can be format
+            // adapted by the mixer, or are the same format on direct output.
+            if (!is_mix_loopback(mix->mRouteFlags) &&
+                    config.format != AUDIO_CONFIG_BASE_INITIALIZER.format) {
+                if (!audio_output_is_mixed_output_flags(outputFlags)) {
+                    // Direct output must match format exactly.
+                    if (config.format != mix->mFormat.format) return false;
+                } else {
+                    // If mixable, both requested and mix format must be linear pcm.
+                    if (!audio_is_linear_pcm(config.format) ||
+                              !audio_is_linear_pcm(mix->mFormat.format)) return false;
+                }
             }
         }
 
