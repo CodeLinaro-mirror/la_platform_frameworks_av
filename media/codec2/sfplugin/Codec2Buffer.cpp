@@ -298,8 +298,10 @@ public:
 
         bool tryWrapping = !copy;
 
-        // Temporarily disable wrapping
+#if defined(__aarch64__)
+        // Temporarily disable wrapping for 64 bit
         tryWrapping = false;
+#endif
 
         switch (layout.type) {
             case C2PlanarLayout::TYPE_YUV: {
