@@ -81,6 +81,8 @@ static constexpr int32_t kAidlVersion1 = 1;
 static constexpr int32_t kAidlVersion2 = 2;
 static constexpr int32_t kAidlVersion3 = 3;
 
+static const int64_t HalCommandTimeoutNs = 3000000000LL;
+
 static constexpr const char* kCreateMmapBuffer = "aosp.createMmapBuffer";
 
 template<HalCommand::Tag cmd> HalCommand makeHalCommand() {
@@ -753,15 +755,17 @@ status_t StreamHalAidl::sendCommand(
     StreamDescriptor::Reply localReply{};
     {
         std::lock_guard l(mCommandReplyLock);
-        if (!mContext.getCommandMQ()->writeBlocking(&command, 1)) {
-            AUGMENT_LOG(E, "failed to write command %s to MQ", command.toString().c_str());
+        // Added timeout mechanism to prevent deadlocks
+        if (!mContext.getCommandMQ()->writeBlocking(&command, 1, HalCommandTimeoutNs / 10)) {
+            AUGMENT_LOG(E, "failed to write command %s to MQ(TIMEOUT)", command.toString().c_str());
             return NOT_ENOUGH_DATA;
         }
         if (reply == nullptr) {
             reply = &localReply;
         }
-        if (!mContext.getReplyMQ()->readBlocking(reply, 1)) {
-            AUGMENT_LOG(E, "failed to read from reply MQ, command %s", command.toString().c_str());
+        // Added timeout mechanism to prevent deadlocks
+        if (!mContext.getReplyMQ()->readBlocking(reply, 1, HalCommandTimeoutNs)) {
+            AUGMENT_LOG(E, "failed to read from reply MQ(TIMEOUT), command %s", command.toString().c_str());
             return NOT_ENOUGH_DATA;
         }
         {
