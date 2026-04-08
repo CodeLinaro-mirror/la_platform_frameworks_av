@@ -1605,7 +1605,6 @@ status_t AudioPolicyManager::getOutputForAttrInt(
                 if (status == NO_ERROR) {
                     policyDesc = mOutputs.valueFor(newOutput);
                     mDirectOutput = policyDesc;
-                    primaryMix->setOutput(policyDesc);
                 } else {
                     // offload/direct failed, fallback to primary
                     ALOGW("%s: openDirectOutput failed(%d), downgrade to primary",
