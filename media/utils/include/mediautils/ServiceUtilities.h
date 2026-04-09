@@ -92,7 +92,7 @@ bool recordingAllowed(const AttributionSourceState& attributionSource,
 bool recordingAllowed(const AttributionSourceState &attributionSource,
                       uint32_t virtualDeviceId,
                       audio_source_t source);
-bool startRecording(const AttributionSourceState& attributionSource, uint32_t virtualDeviceId,
+int startRecording(const AttributionSourceState& attributionSource, uint32_t virtualDeviceId,
                     const String16& msg, audio_source_t source);
 void finishRecording(const AttributionSourceState& attributionSource, uint32_t virtualDeviceId,
                      audio_source_t source);
@@ -115,6 +115,8 @@ bool bypassInterruptionPolicyAllowed(const AttributionSourceState& attributionSo
 bool callAudioInterceptionAllowed(const AttributionSourceState& attributionSource);
 void purgePermissionCache();
 int32_t getOpForSource(audio_source_t source);
+
+bool isRecordOpRequired(audio_source_t source);
 
 AttributionSourceState getCallingAttributionSource();
 
