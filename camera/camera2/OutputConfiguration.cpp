@@ -32,6 +32,7 @@
 namespace android {
 
 const int OutputConfiguration::INVALID_ROTATION = -1;
+const int OutputConfiguration::ROTATION_0 = 0;
 const int OutputConfiguration::INVALID_SET_ID = -1;
 
 const std::vector<sp<IGraphicBufferProducer>>&
@@ -140,6 +141,29 @@ OutputConfiguration::OutputConfiguration() :
         mFormat(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED),
         mDataspace(0),
         mUsage(0) {
+}
+
+OutputConfiguration::OutputConfiguration(int surfaceType, int width, int height, int format,
+        int32_t colorSpace, int mirrorMode, bool useReadoutTimestamp, int timestampBase,
+        int dataspace, int64_t usage, int64_t streamusecase, std::string physicalCamId):
+        mRotation(ROTATION_0),
+        mSurfaceSetID(INVALID_SET_ID),
+        mSurfaceType(surfaceType),
+        mWidth(width),
+        mHeight(height),
+        mIsDeferred(false),
+        mIsShared(false),
+        mPhysicalCameraId(physicalCamId),
+        mIsMultiResolution(false),
+        mDynamicRangeProfile(ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD),
+        mColorSpace(colorSpace),
+        mStreamUseCase(streamusecase),
+        mTimestampBase(timestampBase),
+        mMirrorMode(mirrorMode),
+        mUseReadoutTimestamp(useReadoutTimestamp),
+        mFormat(format),
+        mDataspace(dataspace),
+        mUsage(usage){
 }
 
 OutputConfiguration::OutputConfiguration(const android::Parcel& parcel) :

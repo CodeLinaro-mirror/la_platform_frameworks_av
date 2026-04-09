@@ -61,7 +61,8 @@ protected:
             int clientPid,
             uid_t clientUid,
             int servicePid,
-            int rotationOverride);
+            int rotationOverride,
+            bool sharedMode);
 
     sp<hardware::camera2::ICameraDeviceCallbacks> mRemoteCallback;
 };
@@ -95,6 +96,11 @@ public:
     virtual binder::Status cancelRequest(int requestId,
             /*out*/
             int64_t* lastFrameNumber = NULL) override;
+    virtual binder::Status startStreaming(
+            const std::vector<int>& streamIds,
+            const std::vector<int>& surfaceIds,
+            /*out*/
+            hardware::camera2::utils::SubmitInfo *submitInfo = nullptr) override;
 
     virtual binder::Status beginConfigure() override;
 
@@ -175,6 +181,8 @@ public:
             /*out*/
             sp<hardware::camera2::ICameraOfflineSession>* session) override;
 
+    virtual binder::Status isPrimaryClient(/*out*/bool* isPrimary) override;
+
     /**
      * Interface used by CameraService
      */
@@ -194,7 +202,8 @@ public:
             int servicePid,
             bool overrideForPerfClass,
             int rotationOverride,
-            const std::string& originalCameraId);
+            const std::string& originalCameraId,
+            bool sharedMode);
     virtual ~CameraDeviceClient();
 
     virtual status_t      initialize(sp<CameraProviderManager> manager,
@@ -237,6 +246,7 @@ public:
     virtual void notifyPrepared(int streamId);
     virtual void notifyRequestQueueEmpty();
     virtual void notifyRepeatingRequestError(long lastFrameNumber);
+    virtual void notifyClientSharedAccessPriorityChanged(bool primaryClient);
 
     void setImageDumpMask(int mask) { if (mDevice != nullptr) mDevice->setImageDumpMask(mask); }
     /**
@@ -315,6 +325,11 @@ private:
             /*out*/SurfaceMap* surfaceMap, /*out*/Vector<int32_t>* streamIds,
             /*out*/int32_t*  currentStreamId);
 
+    bool matchSharedStreamingRequest(int reqId);
+    bool matchSharedCaptureRequest(int reqId);
+    void markClientActive();
+    void markClientIdle();
+
     // IGraphicsBufferProducer binder -> Stream ID + Surface ID for output streams
     KeyedVector<sp<IBinder>, StreamSurfaceId> mStreamMap;
 
@@ -336,6 +351,9 @@ private:
     // Streaming request ID
     int32_t mStreamingRequestId;
     Mutex mStreamingRequestIdLock;
+    std::pair<int32_t, int32_t> mSharedStreamingRequest;
+    std::map<int32_t, int32_t> mSharedRequestMap;
+    int64_t mStreamingRequestLastFrameNumber;
     static const int32_t REQUEST_ID_NONE = -1;
 
     int32_t mRequestIdCounter;

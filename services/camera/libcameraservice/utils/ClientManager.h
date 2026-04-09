@@ -20,6 +20,7 @@
 #include <utils/Condition.h>
 #include <utils/Mutex.h>
 #include <utils/Timers.h>
+#include <utils/Log.h>
 
 #include <algorithm>
 #include <utility>
@@ -27,6 +28,9 @@
 #include <set>
 #include <map>
 #include <memory>
+#include <com_android_internal_camera_flags.h>
+
+namespace flags = com::android::internal::camera::flags;
 
 namespace android {
 namespace resource_policy {
@@ -142,10 +146,10 @@ class ClientDescriptor final {
 public:
     ClientDescriptor(const KEY& key, const VALUE& value, int32_t cost,
             const std::set<KEY>& conflictingKeys, int32_t score, int32_t ownerId, int32_t state,
-            bool isVendorClient, int32_t oomScoreOffset);
+            bool isVendorClient, int32_t oomScoreOffset, bool sharedMode = false);
     ClientDescriptor(KEY&& key, VALUE&& value, int32_t cost, std::set<KEY>&& conflictingKeys,
             int32_t score, int32_t ownerId, int32_t state, bool isVendorClient,
-            int32_t oomScoreOffset);
+            int32_t oomScoreOffset, bool sharedMode = false);
 
     ~ClientDescriptor();
 
@@ -189,6 +193,11 @@ public:
      */
     void setPriority(const ClientPriority& priority);
 
+    /**
+     * Returns true when camera is opened in shared mode.
+     */
+    bool getSharedMode() const;
+
     // This class is ordered by key
     template<class K, class V>
     friend bool operator < (const ClientDescriptor<K, V>& a, const ClientDescriptor<K, V>& b);
@@ -200,6 +209,7 @@ private:
     std::set<KEY> mConflicting;
     ClientPriority mPriority;
     int32_t mOwnerId;
+    bool mSharedMode;
 }; // class ClientDescriptor
 
 template<class K, class V>
@@ -210,18 +220,19 @@ bool operator < (const ClientDescriptor<K, V>& a, const ClientDescriptor<K, V>& 
 template<class KEY, class VALUE>
 ClientDescriptor<KEY, VALUE>::ClientDescriptor(const KEY& key, const VALUE& value, int32_t cost,
         const std::set<KEY>& conflictingKeys, int32_t score, int32_t ownerId, int32_t state,
-        bool isVendorClient, int32_t scoreOffset) :
+        bool isVendorClient, int32_t scoreOffset, bool sharedMode) :
         mKey{key}, mValue{value}, mCost{cost}, mConflicting{conflictingKeys},
         mPriority(score, state, isVendorClient, scoreOffset),
-        mOwnerId{ownerId} {}
+        mOwnerId{ownerId}, mSharedMode{sharedMode} {}
 
 template<class KEY, class VALUE>
 ClientDescriptor<KEY, VALUE>::ClientDescriptor(KEY&& key, VALUE&& value, int32_t cost,
         std::set<KEY>&& conflictingKeys, int32_t score, int32_t ownerId, int32_t state,
-        bool isVendorClient, int32_t scoreOffset) :
+        bool isVendorClient, int32_t scoreOffset, bool sharedMode) :
         mKey{std::forward<KEY>(key)}, mValue{std::forward<VALUE>(value)}, mCost{cost},
         mConflicting{std::forward<std::set<KEY>>(conflictingKeys)},
-        mPriority(score, state, isVendorClient, scoreOffset), mOwnerId{ownerId} {}
+        mPriority(score, state, isVendorClient, scoreOffset), mOwnerId{ownerId},
+        mSharedMode{sharedMode} {}
 
 template<class KEY, class VALUE>
 ClientDescriptor<KEY, VALUE>::~ClientDescriptor() {}
@@ -253,7 +264,10 @@ int32_t ClientDescriptor<KEY, VALUE>::getOwnerId() const {
 
 template<class KEY, class VALUE>
 bool ClientDescriptor<KEY, VALUE>::isConflicting(const KEY& key) const {
-    if (key == mKey) return true;
+    // In shared mode, there can be more than one client using the camera.
+    // Hence, having more than one client with the same key is not considered as
+    // conflicting.
+    if (!mSharedMode && key == mKey) return true;
     for (const auto& x : mConflicting) {
         if (key == x) return true;
     }
@@ -263,6 +277,11 @@ bool ClientDescriptor<KEY, VALUE>::isConflicting(const KEY& key) const {
 template<class KEY, class VALUE>
 std::set<KEY> ClientDescriptor<KEY, VALUE>::getConflicting() const {
     return mConflicting;
+}
+
+template<class KEY, class VALUE>
+bool ClientDescriptor<KEY, VALUE>::getSharedMode() const {
+    return mSharedMode;
 }
 
 template<class KEY, class VALUE>
@@ -349,14 +368,19 @@ public:
     void removeAll();
 
     /**
-     * Remove and return the ClientDescriptor with a given key.
+     * Remove all ClientDescriptors with a given key.
+     */
+    std::vector<std::shared_ptr<ClientDescriptor<KEY, VALUE>>> removeAll(const KEY& key);
+
+    /**
+     * Remove and return the ClientDescriptors with a given key.
      */
     std::shared_ptr<ClientDescriptor<KEY, VALUE>> remove(const KEY& key);
 
     /**
      * Remove the given ClientDescriptor.
      */
-    void remove(const std::shared_ptr<ClientDescriptor<KEY, VALUE>>& value);
+    virtual void remove(const std::shared_ptr<ClientDescriptor<KEY, VALUE>>& value);
 
     /**
      * Return a vector of the ClientDescriptors that would be evicted by adding the given
@@ -390,10 +414,18 @@ public:
     std::vector<int32_t> getAllOwners() const;
 
     /**
+     * Return the ClientDescriptor for a client which has opened the camera in
+     * shared mode corresponding to the given pid.
+     */
+    std::shared_ptr<ClientDescriptor<KEY, VALUE>> getSharedClient(int pid) const;
+
+    /**
      * Return the ClientDescriptor corresponding to the given key, or an empty shared pointer
      * if none exists.
      */
     std::shared_ptr<ClientDescriptor<KEY, VALUE>> get(const KEY& key) const;
+
+    std::shared_ptr<ClientDescriptor<KEY, VALUE>> getPrimaryClient(const KEY& key) const;
 
     /**
      * Block until the given client is no longer in the active clients list, or the timeout
@@ -495,6 +527,8 @@ ClientManager<KEY, VALUE, LISTENER>::wouldEvictLocked(
     int32_t cost = client->getCost();
     ClientPriority priority = client->getPriority();
     int32_t owner = client->getOwnerId();
+    bool sharedMode = client->getSharedMode();
+
 
     int64_t totalCost = getCurrentCostLocked() + cost;
 
@@ -520,9 +554,10 @@ ClientManager<KEY, VALUE, LISTENER>::wouldEvictLocked(
         int32_t curCost = i->getCost();
         ClientPriority curPriority = i->getPriority();
         int32_t curOwner = i->getOwnerId();
-
-        bool conflicting = (curKey == key || i->isConflicting(key) ||
-                client->isConflicting(curKey));
+        bool curSharedMode = i->getSharedMode();
+        bool conflicting;
+        conflicting = (((!sharedMode || !curSharedMode) && curKey == key)
+                || i->isConflicting(key) || client->isConflicting(curKey));
 
         if (!returnIncompatibleClients) {
             // Find evicted clients
@@ -647,6 +682,18 @@ std::vector<int32_t> ClientManager<KEY, VALUE, LISTENER>::getAllOwners() const {
 }
 
 template<class KEY, class VALUE, class LISTENER>
+std::shared_ptr<ClientDescriptor<KEY, VALUE>> ClientManager<KEY, VALUE, LISTENER>::getSharedClient(
+        int pid) const {
+    Mutex::Autolock lock(mLock);
+    for (const auto& i : mClients) {
+        if ((i->getOwnerId() == pid) && (i->getSharedMode())) {
+            return i;
+        }
+    }
+    return std::shared_ptr<ClientDescriptor<KEY, VALUE>>(nullptr);
+}
+
+template<class KEY, class VALUE, class LISTENER>
 void ClientManager<KEY, VALUE, LISTENER>::updatePriorities(
         const std::map<int32_t,ClientPriority>& ownerPriorityList) {
     Mutex::Autolock lock(mLock);
@@ -669,6 +716,23 @@ std::shared_ptr<ClientDescriptor<KEY, VALUE>> ClientManager<KEY, VALUE, LISTENER
 }
 
 template<class KEY, class VALUE, class LISTENER>
+std::shared_ptr<ClientDescriptor<KEY, VALUE>> ClientManager<KEY, VALUE, LISTENER>::getPrimaryClient(
+        const KEY& key) const {
+    Mutex::Autolock lock(mLock);
+    for (const auto& i : mClients) {
+        bool sharedMode =  i->getSharedMode();
+        bool primaryClient;
+        status_t ret = i->getValue()->isPrimaryClient(&primaryClient);
+        if (ret == OK) {
+            if ((i->getKey() == key) && sharedMode && primaryClient) {
+                return i;
+            }
+        }
+    }
+    return std::shared_ptr<ClientDescriptor<KEY, VALUE>>(nullptr);
+}
+
+template<class KEY, class VALUE, class LISTENER>
 void ClientManager<KEY, VALUE, LISTENER>::removeAll() {
     Mutex::Autolock lock(mLock);
     if (mListener != nullptr) {
@@ -678,6 +742,25 @@ void ClientManager<KEY, VALUE, LISTENER>::removeAll() {
     }
     mClients.clear();
     mRemovedCondition.broadcast();
+}
+
+template<class KEY, class VALUE, class LISTENER>
+std::vector<std::shared_ptr<ClientDescriptor<KEY, VALUE>>>
+        ClientManager<KEY, VALUE, LISTENER>::removeAll(const KEY& key) {
+    Mutex::Autolock lock(mLock);
+    std::vector<std::shared_ptr<ClientDescriptor<KEY, VALUE>>> clients;
+    for (auto it = mClients.begin(); it != mClients.end();)
+    {
+        if ((*it)->getKey() == key) {
+            if (mListener != nullptr) mListener->onClientRemoved(**it);
+            clients.push_back(*it);
+            it = mClients.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    mRemovedCondition.broadcast();
+    return clients;
 }
 
 template<class KEY, class VALUE, class LISTENER>

@@ -30,6 +30,8 @@
 
 #include "device3/DistortionMapper.h"
 #include "device3/ZoomRatioMapper.h"
+#include <filesystem>
+#include <utils/AttributionAndPermissionUtils.h>
 #include <utils/SessionConfigurationUtils.h>
 #include <utils/Trace.h>
 
@@ -692,6 +694,13 @@ AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         // in ICameraDevice.isSessionConfigurationWithSettingsSupported.
         mAdditionalKeysForFeatureQuery.insert(mAdditionalKeysForFeatureQuery.end(),
                 {ANDROID_CONTROL_VIDEO_STABILIZATION_MODE, ANDROID_CONTROL_AE_TARGET_FPS_RANGE});
+    }
+
+    std::filesystem::path sharedSessionConfigFilePath =
+            std::string(SHARED_SESSION_FILE_PATH) + std::string(SHARED_SESSION_FILE_NAME);
+    if (std::filesystem::exists(sharedSessionConfigFilePath)
+            && mSystemCameraKind == SystemCameraKind::SYSTEM_ONLY_CAMERA) {
+        addSharedSessionConfigurationTags(id);
     }
 
     if (!kEnableLazyHal) {
