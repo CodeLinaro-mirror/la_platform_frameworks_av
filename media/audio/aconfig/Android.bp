@@ -3,6 +3,15 @@
 cc_defaults {
     name: "audio-aconfig-cc-defaults",
     host_supported: true,
+    cflags: [
+        "-fstack-protector-strong",
+        "-Wno-unused-variable",
+    ],
+    target: {
+        vendor: {
+            cflags: ["-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=2"],
+        },
+    },
 }
 
 aconfig_declarations {

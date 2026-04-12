@@ -79,6 +79,7 @@ cc_library {
     cflags: [
         "-Wall",
         "-Werror",
+        "-fstack-protector-strong",
     ],
     include_dirs: ["system/media/audio_utils/include"],
     export_include_dirs: ["include"],
