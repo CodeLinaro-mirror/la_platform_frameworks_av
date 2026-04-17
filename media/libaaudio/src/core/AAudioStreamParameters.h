@@ -223,6 +223,11 @@ public:
         mPerformanceMode = performanceMode;
     }
 
+    audio_port_handle_t getPortHandle() const { return mPortHandle; }
+    audio_io_handle_t getIoHandle() const { return mIoHandle; }
+    void setPortHandle(audio_port_handle_t portHandle) { mPortHandle = portHandle; }
+    void setIoHandle(audio_io_handle_t ioHandle) { mIoHandle = ioHandle; }
+
     /**
      * Copy variables defined in other AAudioStreamParameters instance to this one.
      * @param other
@@ -235,6 +240,9 @@ public:
 
 protected:
     std::set<std::string>           mTags;
+
+    audio_port_handle_t mPortHandle = AUDIO_PORT_HANDLE_NONE;
+    audio_io_handle_t mIoHandle = AUDIO_IO_HANDLE_NONE;
 
 private:
     aaudio_result_t validateChannelMask() const;

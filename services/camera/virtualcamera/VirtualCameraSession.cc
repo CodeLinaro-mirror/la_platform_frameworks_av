@@ -71,9 +71,12 @@ using ::aidl::android::hardware::camera::device::BufferCache;
 using ::aidl::android::hardware::camera::device::CameraMetadata;
 using ::aidl::android::hardware::camera::device::CameraOfflineSessionInfo;
 using ::aidl::android::hardware::camera::device::CaptureRequest;
+using ::aidl::android::hardware::camera::device::ErrorCode;
+using ::aidl::android::hardware::camera::device::ErrorMsg;
 using ::aidl::android::hardware::camera::device::HalStream;
 using ::aidl::android::hardware::camera::device::ICameraDeviceCallback;
 using ::aidl::android::hardware::camera::device::ICameraOfflineSession;
+using ::aidl::android::hardware::camera::device::NotifyMsg;
 using ::aidl::android::hardware::camera::device::RequestTemplate;
 using ::aidl::android::hardware::camera::device::Stream;
 using ::aidl::android::hardware::camera::device::StreamBuffer;
@@ -350,7 +353,8 @@ VirtualCameraSession::VirtualCameraSession(
     : mCameraDevice(cameraDevice),
       mCameraDeviceCallback(cameraDeviceCallback),
       mVirtualCameraClientCallback(virtualCameraClientCallback),
-      mSessionContext(cameraDevice->isMultiInputStreamEnabled()),
+      mSessionContext(cameraDevice->isMultiInputStreamEnabled(),
+                      [this]() { onSessionError(); }),
       mCurrentInputStreamId(kInvalidStreamId) {
   mRequestMetadataQueue = std::make_unique<RequestMetadataQueue>(
       kMetadataMsgQueueSize, false /* non blocking */);
@@ -375,7 +379,8 @@ VirtualCameraSession::VirtualCameraSession(
 }
 
 ndk::ScopedAStatus VirtualCameraSession::close() {
-  ALOGV("%s", __func__);
+  ALOGV("%s: isMultiInputStreamEnabled %d", __func__,
+        mSessionContext.isMultiInputStreamEnabled());
 
   if (mSessionContext.isMultiInputStreamEnabled()) {
     std::set<int> staleStream =
@@ -385,7 +390,9 @@ ndk::ScopedAStatus VirtualCameraSession::close() {
       ALOGV(
           "VirtualCameraSession::close: closing input stream for thread id %d",
           streamId);
-      mVirtualCameraClientCallback->onStreamClosed(streamId);
+      if (mVirtualCameraClientCallback != nullptr) {
+        mVirtualCameraClientCallback->onStreamClosed(streamId);
+      }
     }
 
     closeUnusedRenderThreads();
@@ -400,7 +407,8 @@ ndk::ScopedAStatus VirtualCameraSession::close() {
         mRenderThread = nullptr;
       }
 
-      if (mVirtualCameraClientCallback != nullptr) {
+      if (mVirtualCameraClientCallback != nullptr &&
+          mCurrentInputStreamId != kInvalidStreamId) {
         ALOGV("Calling onStreamClosed for %d", mCurrentInputStreamId);
         mVirtualCameraClientCallback->onStreamClosed(mCurrentInputStreamId);
       }
@@ -422,6 +430,9 @@ ndk::ScopedAStatus VirtualCameraSession::close() {
 ndk::ScopedAStatus VirtualCameraSession::configureStreams(
     const StreamConfiguration& in_requestedConfiguration,
     std::vector<HalStream>* _aidl_return) {
+  if (isInFatalError()) {
+    return cameraStatus(Status::INTERNAL_ERROR);
+  }
   ALOGV("%s: requestedConfiguration: %s", __func__,
         in_requestedConfiguration.toString().c_str());
 
@@ -630,7 +641,9 @@ ndk::ScopedAStatus VirtualCameraSession::configureMultiStream(
   for (int streamId : staleInputStreams) {
     ALOGV("configureMultiStream: closing input stream for thread id %d",
           streamId);
-    mVirtualCameraClientCallback->onStreamClosed(streamId);
+    if (mVirtualCameraClientCallback != nullptr) {
+      mVirtualCameraClientCallback->onStreamClosed(streamId);
+    }
   }
 
   // Now that the streams are closed, we can close the renderThread that were
@@ -665,25 +678,35 @@ void VirtualCameraSession::createRenderThread(
 
 void VirtualCameraSession::closeUnusedRenderThreads() {
   // Remove render threads that are no longer needed
-  std::lock_guard<std::mutex> lock(mLock);
-  const std::set<int> usedInputStreamIds =
-      mSessionContext.getUsedInputStreamIds();
-  auto it = mRenderThreads.begin();
-  while (it != mRenderThreads.end()) {
-    auto& [streamId, renderThread] = *it;
-    if (usedInputStreamIds.find(streamId) == usedInputStreamIds.end()) {
-      ALOGV("Closing thread for input stream %d", streamId);
-      renderThread->flush();
-      renderThread->stop();
-      it = mRenderThreads.erase(it);
-    } else {
-      ++it;
+  std::vector<std::unique_ptr<VirtualCameraRenderThread>> threadsToStop;
+  {
+    std::lock_guard<std::mutex> lock(mLock);
+    const std::set<int> usedInputStreamIds =
+        mSessionContext.getUsedInputStreamIds();
+    auto it = mRenderThreads.begin();
+    while (it != mRenderThreads.end()) {
+      auto& [streamId, renderThread] = *it;
+      if (usedInputStreamIds.find(streamId) == usedInputStreamIds.end()) {
+        ALOGV("Closing thread for input stream %d", streamId);
+        threadsToStop.push_back(std::move(it->second));
+        it = mRenderThreads.erase(it);
+      } else {
+        ++it;
+      }
     }
+  }
+
+  for (auto& renderThread : threadsToStop) {
+    renderThread->flush();
+    renderThread->stop();
   }
 }
 
 ndk::ScopedAStatus VirtualCameraSession::constructDefaultRequestSettings(
     RequestTemplate in_type, CameraMetadata* _aidl_return) {
+  if (isInFatalError()) {
+    return cameraStatus(Status::INTERNAL_ERROR);
+  }
   ALOGV("%s: type %d", __func__, static_cast<int32_t>(in_type));
 
   std::shared_ptr<VirtualCameraDevice> camera = mCameraDevice.lock();
@@ -718,10 +741,16 @@ ndk::ScopedAStatus VirtualCameraSession::constructDefaultRequestSettings(
 }
 
 ndk::ScopedAStatus VirtualCameraSession::flush() {
+  ALOGV("[%s]", __func__);
+  if (isInFatalError()) {
+    return cameraStatus(Status::INTERNAL_ERROR);
+  }
+  int flushFrame = mMaxFrameToFlush.exchange(-1, std::memory_order_relaxed);
+
   ALOGV("%s", __func__);
   std::lock_guard<std::mutex> lock(mLock);
   if (mRenderThread != nullptr) {
-    mRenderThread->flush();
+    mRenderThread->flush(flushFrame);
   }
   return ndk::ScopedAStatus::ok();
 }
@@ -806,9 +835,9 @@ ndk::ScopedAStatus VirtualCameraSession::switchToOffline(
 
 ndk::ScopedAStatus VirtualCameraSession::repeatingRequestEnd(
     int32_t in_frameNumber, const std::vector<int32_t>& in_streamIds) {
-  ALOGV("%s", __func__);
-  (void)in_frameNumber;
+  ALOGV("[%s] frameNumber:%d", __func__, in_frameNumber);
   (void)in_streamIds;
+  mMaxFrameToFlush.store(in_frameNumber, std::memory_order_relaxed);
   return ndk::ScopedAStatus::ok();
 }
 
@@ -819,6 +848,9 @@ std::set<int> VirtualCameraSession::getStreamIds() const {
 ndk::ScopedAStatus VirtualCameraSession::processCaptureRequest(
     const CaptureRequest& request) {
   ALOGV("%s: CaptureRequest { frameNumber:%d }", __func__, request.frameNumber);
+  if (isInFatalError()) {
+    return cameraStatus(Status::INTERNAL_ERROR);
+  }
 
   std::shared_ptr<ICameraDeviceCallback> cameraCallback = nullptr;
   RequestSettings requestSettings;
@@ -867,6 +899,13 @@ ndk::ScopedAStatus VirtualCameraSession::processCaptureRequest(
 
   {
     std::lock_guard<std::mutex> lock(mLock);
+
+    // Double check fatal error state while holding the lock to prevent
+    // race conditions during teardown.
+    if (isInFatalError()) {
+      return cameraStatus(Status::INTERNAL_ERROR);
+    }
+
     if (!mSessionContext.isMultiInputStreamEnabled()) {
       if (mRenderThread == nullptr) {
         ALOGE(
@@ -957,6 +996,37 @@ ndk::ScopedAStatus VirtualCameraSession::processCaptureRequest(
   }
 
   return ndk::ScopedAStatus::ok();
+}
+
+void VirtualCameraSession::onSessionError() {
+  ALOGW("Camera session error, notifying framework and stopping all streams.");
+  std::shared_ptr<ICameraDeviceCallback> cameraDeviceCallback;
+  {
+    std::lock_guard<std::mutex> lock(mLock);
+    // Don't call session close() since that removes the mThread(s) references,
+    // hence calling the render thread destructor(s). If this is called from the
+    // same thread, the join() from the destructor can deadlock. Flush the
+    // single-stream render thread if it's being used.
+    if (mRenderThread != nullptr) {
+      mRenderThread->flush();
+      mRenderThread->stop();
+    }
+    // Flush all multi-stream render threads if they are being used.
+    for (auto& [_, thread] : mRenderThreads) {
+      thread->flush();
+      thread->stop();
+    }
+    cameraDeviceCallback = mCameraDeviceCallback;
+  }
+
+  if (cameraDeviceCallback != nullptr) {
+    NotifyMsg msg;
+    msg.set<NotifyMsg::Tag::error>(
+        ErrorMsg{.frameNumber = -1,
+                 .errorStreamId = -1,
+                 .errorCode = ErrorCode::ERROR_DEVICE});
+    cameraDeviceCallback->notify({msg});
+  }
 }
 
 }  // namespace virtualcamera

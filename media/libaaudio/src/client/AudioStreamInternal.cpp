@@ -221,6 +221,9 @@ aaudio_result_t AudioStreamInternal::open(const AAudioStreamOpenRequest& openReq
     setHardwareSampleRate(configurationOutput.getHardwareSampleRate());
     setHardwareFormat(configurationOutput.getHardwareFormat());
 
+    mPortId = configurationOutput.getPortHandle();
+    mIoHandle = configurationOutput.getIoHandle();
+
     result = mServiceInterface.getStreamDescription(mServiceStreamHandleInfo, mEndPointParcelable);
     if (result != AAUDIO_OK) {
         goto error;
@@ -244,6 +247,12 @@ aaudio_result_t AudioStreamInternal::open(const AAudioStreamOpenRequest& openReq
     }
 
     setState(AAUDIO_STREAM_STATE_OPEN);
+
+    if (!isInService() && getRoutingChangedCallback() != nullptr) {
+        mDeviceCallback = sp<AAudioDeviceCallback>::make(
+                android::wp<AudioStreamInternal>::fromExisting(this));
+        android::AudioSystem::addAudioDeviceCallback(mDeviceCallback, mIoHandle, mPortId);
+    }
 
     return result;
 
@@ -366,6 +375,9 @@ aaudio_result_t AudioStreamInternal::configureDataInformation(int32_t callbackFr
 aaudio_result_t AudioStreamInternal::release_l() {
     aaudio_result_t result = AAUDIO_OK;
     ALOGD("%s(): mServiceStreamHandle = 0x%08X", __func__, getServiceHandle());
+    if (mDeviceCallback != nullptr) {
+        android::AudioSystem::removeAudioDeviceCallback(mDeviceCallback, mIoHandle, mPortId);
+    }
     if (getServiceHandle() != AAUDIO_HANDLE_INVALID) {
         // Don't release a stream while it is running. Stop it first.
         // If DISCONNECTED then we should still try to stop in case the
@@ -664,17 +676,29 @@ aaudio_result_t AudioStreamInternal::unregisterThread() {
     return mServiceInterface.unregisterAudioThread(mServiceStreamHandleInfo, gettid());
 }
 
-aaudio_result_t AudioStreamInternal::startClient(const android::AudioClient& client,
-                                                 const audio_attributes_t *attr,
-                                                 audio_port_handle_t *portHandle) {
+aaudio_result_t AudioStreamInternal::createClient(const android::AudioClient& client,
+                                                  const audio_attributes_t& attr,
+                                                  audio_port_handle_t* portHandle,
+                                                  audio_io_handle_t* ioHandle) {
     ALOGV("%s() called", __func__);
     if (getServiceHandle() == AAUDIO_HANDLE_INVALID) {
         ALOGE("%s() getServiceHandle() is invalid", __func__);
         return AAUDIO_ERROR_INVALID_STATE;
     }
-    aaudio_result_t result =  mServiceInterface.startClient(mServiceStreamHandleInfo,
-                                                            client, attr, portHandle);
-    ALOGV("%s(), got %d, returning %d", __func__, *portHandle, result);
+    aaudio_result_t result = mServiceInterface.createClient(
+            mServiceStreamHandleInfo, client, attr, portHandle, ioHandle);
+    ALOGV("%s(), got port %d, io %d, returning %d", __func__, *portHandle, *ioHandle, result);
+    return result;
+}
+
+aaudio_result_t AudioStreamInternal::startClient(audio_port_handle_t portHandle) {
+    ALOGV("%s() called", __func__);
+    if (getServiceHandle() == AAUDIO_HANDLE_INVALID) {
+        ALOGE("%s() getServiceHandle() is invalid", __func__);
+        return AAUDIO_ERROR_INVALID_STATE;
+    }
+    aaudio_result_t result =  mServiceInterface.startClient(mServiceStreamHandleInfo, portHandle);
+    ALOGV("%s(), got %d, returning %d", __func__, portHandle, result);
     return result;
 }
 
@@ -685,6 +709,17 @@ aaudio_result_t AudioStreamInternal::stopClient(audio_port_handle_t portHandle) 
         return AAUDIO_ERROR_INVALID_STATE;
     }
     aaudio_result_t result = mServiceInterface.stopClient(mServiceStreamHandleInfo, portHandle);
+    ALOGV("%s(%d) returning %d", __func__, portHandle, result);
+    return result;
+}
+
+aaudio_result_t AudioStreamInternal::releaseClient(audio_port_handle_t portHandle) {
+    ALOGV("%s(%d) called", __func__, portHandle);
+    if (getServiceHandle() == AAUDIO_HANDLE_INVALID) {
+        ALOGE("%s(%d) getServiceHandle() is invalid", __func__, portHandle);
+        return AAUDIO_ERROR_INVALID_STATE;
+    }
+    aaudio_result_t result = mServiceInterface.releaseClient(mServiceStreamHandleInfo, portHandle);
     ALOGV("%s(%d) returning %d", __func__, portHandle, result);
     return result;
 }
@@ -1053,4 +1088,16 @@ android::binder::Status AudioStreamInternal::onWakeUp(
     std::lock_guard _l(mStreamMutex);
     onWakeUp_l(legacy);
     return android::binder::Status::ok();
+}
+
+//------------------------------------------------------------------------------
+// Implementation of AAudioDeviceCallback
+
+void AudioStreamInternal::AAudioDeviceCallback::onAudioDeviceUpdate(
+        audio_io_handle_t audioIo, const android::DeviceIdVector& deviceIds) {
+    auto stream = mStream.promote();
+    if (stream != nullptr && audioIo == stream->getIoHandle()) {
+        stream->setDeviceIds(deviceIds);
+        stream->maybeSignalRoutingChangedCallback();
+    }
 }

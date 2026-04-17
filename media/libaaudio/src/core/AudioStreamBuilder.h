@@ -53,13 +53,13 @@ public:
     }
 
     AudioStreamBuilder* setPartialDataCallbackProc(AAudioStream_partialDataCallback proc) {
-        mPartialDataCallbackProc = proc;
+        setPartialDataCallbackProcVoid(proc);
         mDataCallbackProc = nullptr;
         return this;
     }
 
     AudioStreamBuilder* setDataCallbackUserData(void *userData) {
-        mDataCallbackUserData = userData;
+        setDataCallbackUserDataVoid(userData);
         return this;
     }
 
@@ -74,24 +74,18 @@ public:
     }
 
     AudioStreamBuilder* setPresentationEndCallbackProc(AAudioStream_presentationEndCallback proc) {
-        mPresentationEndCallbackProc = proc;
+        setPresentationEndCallbackProcVoid(proc);
         return this;
     }
 
     AudioStreamBuilder* setPresentationEndCallbackUserData(void *userData) {
-        mPresentationEndCallbackUserData = userData;
+        setPresentationEndCallbackUserDataVoid(userData);
         return this;
     }
 
-    AudioStreamBuilder* setRoutingChangedCallbackProc(AAudioStream_routingChangedCallback proc) {
-        mRoutingChangedCallbackProc = proc;
-        return this;
-    }
+    AudioStreamBuilder* setRoutingChangedCallbackProc(AAudioStream_routingChangedCallback proc);
 
-    AudioStreamBuilder* setRoutingChangedCallbackUserData(void *userData) {
-        mRoutingChangedCallbackUserData = userData;
-        return this;
-    }
+    AudioStreamBuilder* setRoutingChangedCallbackUserData(void *userData);
 
     AudioStreamBuilder* setFramesPerDataCallback(int32_t sizeInFrames) {
         mFramesPerDataCallback = sizeInFrames;

@@ -114,13 +114,8 @@ using H2BGraphicBufferProducer2 = ::android::hardware::graphics::bufferqueue::
         V2_0::utils::H2BGraphicBufferProducer;
 using ::android::hardware::media::c2::V1_2::SurfaceSyncObj;
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
-using AidlGraphicBufferAllocator = ::aidl::android::hardware::media::c2::
-        implementation::GraphicBufferAllocator;
-#else
 using AidlGraphicBufferAllocator =
         ::aidl::android::hardware::media::c2::implementation::LegacyGraphicBufferAllocator;
-#endif
 
 namespace bufferpool2_aidl = ::aidl::android::hardware::media::bufferpool2;
 namespace bufferpool_hidl = ::android::hardware::media::bufferpool::V2_0;
@@ -2193,13 +2188,8 @@ public:
             mCurrentInterface.reset();
         }
         // TODO: integrate initial value with CCodec/CCodecBufferChannel
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_MEDIA_MIGRATION)
-        mCurrent =
-                AidlGraphicBufferAllocator::CreateGraphicBufferAllocator(3 /* maxDequeueCount */);
-#else
         mCurrent = AidlGraphicBufferAllocator::CreateLegacyGraphicBufferAllocator(
                 3 /* maxDequeueCount */);
-#endif
         mCurrentInterface = std::make_shared<C2IgbaInterfaceImpl>(
                 c2_aidl::IGraphicBufferAllocator::fromBinder(mCurrent->asBinder()));
         ALOGD("GraphicBufferAllocator created");
@@ -3193,8 +3183,9 @@ public:
 
     void unlinkToDeath(size_t seq, const std::shared_ptr<AidlBase> &base) {
         std::unique_lock lock(mMutex);
-        AIBinder_unlinkToDeath(base->asBinder().get(), mDeathRecipient.get(), (void *)seq);
-        mMap.erase(seq);
+        if (mMap.erase(seq) > 0) {
+            AIBinder_unlinkToDeath(base->asBinder().get(), mDeathRecipient.get(), (void *)seq);
+        }
     }
 
 private:
@@ -3944,6 +3935,18 @@ void Codec2Client::Component::onBufferAttachedToOutputSurface(
         return;
     }
     mOutputBufferQueue->onBufferAttached(generation);
+}
+
+void Codec2Client::Component::onBufferDetachedFromOutputSurface(uint32_t generation,
+                                                                uint64_t bufferId) {
+    (void)generation;
+    (void)bufferId;
+}
+
+void Codec2Client::Component::onBuffersRemovedFromOutputSurface(
+        uint32_t generation, const std::vector<uint64_t>& removedBufferIds) {
+    (void)generation;
+    (void)removedBufferIds;
 }
 
 void Codec2Client::Component::holdIgbaBlocks(

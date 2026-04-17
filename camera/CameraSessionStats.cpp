@@ -144,6 +144,12 @@ status_t CameraStreamStats::readFromParcel(const android::Parcel* parcel) {
         return err;
     }
 
+    int32_t multiResMode = 0;
+    if ((err = parcel->readInt32(&multiResMode)) != OK) {
+        ALOGE("%s: Failed to read multiResolution mode from parcel", __FUNCTION__);
+        return err;
+    }
+
     mWidth = width;
     mHeight = height;
     mFormat = format;
@@ -162,6 +168,7 @@ status_t CameraStreamStats::readFromParcel(const android::Parcel* parcel) {
     mDynamicRangeProfile = dynamicRangeProfile;
     mStreamUseCase = streamUseCase;
     mColorSpace = colorSpace;
+    mMultiResMode = multiResMode;
 
     return OK;
 }
@@ -264,6 +271,10 @@ status_t CameraStreamStats::writeToParcel(android::Parcel* parcel) const {
         return err;
     }
 
+    if ((err = parcel->writeInt32(mMultiResMode)) != OK) {
+        ALOGE("%s: failed to write MultiResolution mode!", __FUNCTION__);
+        return err;
+    }
 
     return OK;
 }
@@ -287,6 +298,7 @@ CameraSessionStats::CameraSessionStats() :
         mIsNdk(false),
         mSharedMode(false),
         mLatencyMs(-1),
+        mInputFormat(-1),
         mLogId(0),
         mMaxPreviewFps(0),
         mSessionType(0),
@@ -310,6 +322,7 @@ CameraSessionStats::CameraSessionStats(const std::string& cameraId,
                 mIsNdk(isNdk),
                 mSharedMode(sharedMode),
                 mLatencyMs(latencyMs),
+                mInputFormat(-1),
                 mLogId(logId),
                 mMaxPreviewFps(0),
                 mSessionType(0),
@@ -369,6 +382,12 @@ status_t CameraSessionStats::readFromParcel(const android::Parcel* parcel) {
     int32_t latencyMs;
     if ((err = parcel->readInt32(&latencyMs)) != OK) {
         ALOGE("%s: Failed to read latencyMs from parcel", __FUNCTION__);
+        return err;
+    }
+
+    int32_t inputFormat;
+    if ((err = parcel->readInt32(&inputFormat)) != OK) {
+        ALOGE("%s: Failed to read inputFormat from parcel", __FUNCTION__);
         return err;
     }
 
@@ -486,6 +505,7 @@ status_t CameraSessionStats::readFromParcel(const android::Parcel* parcel) {
     mIsNdk = isNdk;
     mSharedMode = sharedMode;
     mLatencyMs = latencyMs;
+    mInputFormat = inputFormat;
     mLogId = logId;
     mMaxPreviewFps = maxPreviewFps;
     mSessionType = sessionType;
@@ -546,6 +566,11 @@ status_t CameraSessionStats::writeToParcel(android::Parcel* parcel) const {
 
     if ((err = parcel->writeInt32(mLatencyMs)) != OK) {
         ALOGE("%s: Failed to write latency in Ms!", __FUNCTION__);
+        return err;
+    }
+
+    if ((err = parcel->writeInt32(mInputFormat)) != OK) {
+        ALOGE("%s: Failed to write inputFormat!", __FUNCTION__);
         return err;
     }
 
