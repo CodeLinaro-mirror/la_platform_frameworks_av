@@ -227,6 +227,7 @@ aaudio_result_t AAudioStreamParameters::validate() const {
         case AAUDIO_PERFORMANCE_MODE_NONE:
         case AAUDIO_PERFORMANCE_MODE_POWER_SAVING:
         case AAUDIO_PERFORMANCE_MODE_LOW_LATENCY:
+        case AAUDIO_PERFORMANCE_MODE_HD_APTX:
             break;
         case AAUDIO_PERFORMANCE_MODE_POWER_SAVING_OFFLOADED:
             if (mDirection != AAUDIO_DIRECTION_OUTPUT ||
