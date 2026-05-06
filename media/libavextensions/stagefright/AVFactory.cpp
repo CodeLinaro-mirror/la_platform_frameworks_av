@@ -61,12 +61,12 @@ CameraSource* AVFactory::CreateCameraSourceFromCamera(
             pid_t clientPid,
             Size videoSize,
             int32_t frameRate,
-            const sp<IGraphicBufferProducer>& surface,
+            const sp<SurfaceType>& surface,
             // TODO(b/168051781) review removal of storeMetaDataInVideoBuffers
             // parameter from CreateFromCamera API.
             bool /*storeMetaDataInVideoBuffers*/) {
     return CameraSource::CreateFromCamera(camera, proxy, cameraId,
-            clientName, clientUid, clientPid, videoSize, frameRate, new Surface(surface));
+            clientName, clientUid, clientPid, videoSize, frameRate, surface);
 }
 
 CameraSourceTimeLapse* AVFactory::CreateCameraSourceTimeLapseFromCamera(
@@ -78,13 +78,17 @@ CameraSourceTimeLapse* AVFactory::CreateCameraSourceTimeLapseFromCamera(
         pid_t clientPid,
         Size videoSize,
         int32_t videoFrameRate,
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+        const sp<Surface>& surface,
+#else
         const sp<IGraphicBufferProducer>& surface,
+#endif
         int64_t timeBetweenFrameCaptureUs,
         // TODO(b/168051781) review removal of storeMetaDataInVideoBuffers
         // parameter from CreateFromCamera API.
         bool /*storeMetaDataInVideoBuffers*/) {
     return CameraSourceTimeLapse::CreateFromCamera(camera, proxy, cameraId,
-            clientName, clientUid, clientPid, videoSize, videoFrameRate, new Surface(surface),
+            clientName, clientUid, clientPid, videoSize, videoFrameRate, surface,
             timeBetweenFrameCaptureUs);
 }
 
