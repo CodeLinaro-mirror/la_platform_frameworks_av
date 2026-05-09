@@ -7513,7 +7513,12 @@ PlaybackThread::mixer_state OffloadThread::prepareTracks_l(
                             if ((mDrainSequence & 1) == 0) {
                                 mSleepTimeUs = 0;
                                 mStandbyTimeNs = systemTime() + mStandbyDelayNs;
-                                mixerStatus = MIXER_DRAIN_TRACK;
+                                if (!mUseAsyncWrite) {
+                                    // Sync mode has no callbacks, so no early notify.
+                                    mixerStatus = MIXER_DRAIN_ALL;
+                                } else {
+                                    mixerStatus = MIXER_DRAIN_TRACK;
+                                }
                                 mDrainSequence += 2;
                             }
                             if (mHwPaused) {
