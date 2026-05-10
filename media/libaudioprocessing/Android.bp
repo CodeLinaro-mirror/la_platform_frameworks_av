@@ -27,8 +27,14 @@ cc_defaults {
         // uncomment to disable NEON on architectures that actually do support NEON, for benchmarking
 
         "-Werror",
+        "-fstack-protector-strong",
         // "-DUSE_NEON=false",
     ],
+    target: {
+        vendor: {
+            cflags: ["-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=2"],
+        },
+    },
 
     arch: {
         x86: {

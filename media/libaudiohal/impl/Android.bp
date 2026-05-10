@@ -52,6 +52,7 @@ cc_defaults {
         "-Werror",
         "-Wextra",
         "-fvisibility=hidden",
+        "-fstack-protector-strong",
     ],
     shared_libs: [
         "audioclient-types-aidl-cpp",

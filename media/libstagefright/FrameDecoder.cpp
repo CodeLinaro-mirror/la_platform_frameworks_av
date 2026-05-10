@@ -824,6 +824,16 @@ status_t FrameDecoder::handleOutputBufferAsync(int32_t index, int64_t timeUs) {
                 int32_t stride = img->mPlane[0].mRowInc;
                 mOutputFormat->setInt32(KEY_STRIDE, stride);
                 ALOGD("updating stride = %d", stride);
+                // Advance frameData past any top-padding rows introduced by the
+                // hardware decoder (e.g. VENUS_P010 alignment padding). This
+                // mirrors CCodecBuffers::handleImageData which calls
+                // buffer->setRange(mPlane[0].mOffset, ...) on the non-block-model
+                // path. Without this, ColorConverter reads from offset 0 (padding
+                // rows) instead of the actual content start, producing a colored
+                // line artifact at the top of the thumbnail.
+                if (img->mNumPlanes > 1) {
+                    frameData += img->mPlane[0].mOffset;
+                }
             }
         }
 
@@ -994,9 +1004,30 @@ status_t VideoFrameDecoder::onOutputReceived(
         crop_bottom = height - 1;
     }
 
+    // slice-height is the physical buffer height (may include alignment padding rows,
+    // e.g. VENUS_P010 1920x1080 content in a 1920x1088 physical buffer).
+    // ColorConverter needs the physical height to correctly locate the UV plane
+    // (UV offset = stride * slice_height for NV12/P010). Keep 'height' as the
+    // content height (used for frame allocation via crop rect) and pass derived_height
+    // to colorConverter.convert() so the UV plane is found correctly
+    // without corrupting the crop-based frame dimensions.
+    //
+    // On the C2/block-model path "slice-height" is typically absent from the output
+    // format; derive Y_SCANLINES from the MediaImage2 UV plane offset instead.
     int32_t slice_height;
     if (outputFormat->findInt32("slice-height", &slice_height) && slice_height > 0) {
         height = slice_height;
+    }
+    if (imgObj != nullptr) {
+        MediaImage2 *imgData = (MediaImage2 *)(imgObj.get()->data());
+        if (imgData != nullptr && imgData->mNumPlanes > 1
+                 && imgData->mPlane[0].mRowInc > 0) {
+           int32_t derivedHeight =
+                   imgData->mPlane[1].mOffset / imgData->mPlane[0].mRowInc;
+           if (derivedHeight > height) {
+               height = derivedHeight;
+           }
+        }
     }
 
     uint32_t bitDepth = 8;

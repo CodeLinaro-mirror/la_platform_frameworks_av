@@ -30,6 +30,9 @@ cc_library {
     cflags: [
         "-O2",
         "-fvisibility=hidden",
+        "-fstack-protector-strong",
+        "-U_FORTIFY_SOURCE",
+        "-D_FORTIFY_SOURCE=2",
 
         "-Wall",
         "-Werror",

@@ -75,7 +75,7 @@ struct AVFactory {
             pid_t clientPid,
             Size videoSize,
             int32_t frameRate,
-            const sp<IGraphicBufferProducer>& surface,
+            const sp<SurfaceType>& surface,
             bool storeMetaDataInVideoBuffers = true);
 
     virtual CameraSourceTimeLapse *CreateCameraSourceTimeLapseFromCamera(
@@ -87,7 +87,11 @@ struct AVFactory {
             pid_t clientPid,
             Size videoSize,
             int32_t videoFrameRate,
+#if WB_LIBCAMERASERVICE_WITH_DEPENDENCIES
+            const sp<Surface>& surface,
+#else
             const sp<IGraphicBufferProducer>& surface,
+#endif
             int64_t timeBetweenFrameCaptureUs,
             bool storeMetaDataInVideoBuffers = true);
     virtual AudioSource* createAudioSource(

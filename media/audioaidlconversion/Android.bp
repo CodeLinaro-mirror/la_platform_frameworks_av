@@ -91,17 +91,21 @@ cc_defaults {
         "-Wall",
         "-Werror",
         "-Wno-error=deprecated-declarations",
+        "-fstack-protector-strong",
     ],
+    target: {
+        vendor: {
+            cflags: ["-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=2"],
+        },
+        darwin: {
+            enabled: false,
+        },
+    },
     sanitize: {
         misc_undefined: [
             "signed-integer-overflow",
             "unsigned-integer-overflow",
         ],
-    },
-    target: {
-        darwin: {
-            enabled: false,
-        },
     },
 }
 
@@ -187,6 +191,7 @@ cc_library {
     ],
     cflags: [
         "-DBACKEND_NDK",
+        "-fstack-protector-strong",
     ],
     min_sdk_version: "31", //AParcelableHolder has been introduced in 31
 }
