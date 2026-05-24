@@ -30,12 +30,24 @@ cc_library {
     cflags: [
         "-O2",
         "-fvisibility=hidden",
-        "-fstack-protector-strong",
+        "-fstack-protector-all",
+        "-fno-builtin-__memcpy_chk",
+        "-fno-builtin-__memset_chk",
+        "-fno-builtin-__memmove_chk",
+        "-fno-builtin-__strcpy_chk",
+        "-fno-builtin-__snprintf_chk",
         "-U_FORTIFY_SOURCE",
         "-D_FORTIFY_SOURCE=2",
 
         "-Wall",
         "-Werror",
+    ],
+    ldflags: [
+        "-Wl,-u,__memcpy_chk",
+        "-Wl,-u,__memset_chk",
+        "-Wl,-u,__memmove_chk",
+        "-Wl,-u,__strcpy_chk",
+        "-Wl,-u,__snprintf_chk",
     ],
 
     shared_libs: [
@@ -65,6 +77,21 @@ cc_library_shared {
     ],
     cflags: [
         "-Wthread-safety",
+        "-fstack-protector-all",
+        "-fno-builtin-__memcpy_chk",
+        "-fno-builtin-__memset_chk",
+        "-fno-builtin-__memmove_chk",
+        "-fno-builtin-__strcpy_chk",
+        "-fno-builtin-__snprintf_chk",
+        "-U_FORTIFY_SOURCE",
+        "-D_FORTIFY_SOURCE=2",
+    ],
+    ldflags: [
+        "-Wl,-u,__memcpy_chk",
+        "-Wl,-u,__memset_chk",
+        "-Wl,-u,__memmove_chk",
+        "-Wl,-u,__strcpy_chk",
+        "-Wl,-u,__snprintf_chk",
     ],
     shared_libs: [
         "libaudioutils",
