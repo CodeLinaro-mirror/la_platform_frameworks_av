@@ -449,8 +449,10 @@ private:
     std::atomic_bool mInputMetEos;
     std::once_flag mRenderWarningFlag;
 
+    // Timestamp of last pipeline activity: either a successful input buffer queue or a render/release
+    // of output buffer. Used to detect pipeline stall and trigger queueDummyWork.
+    uint64_t mLastPipelineActiveTs;
 // QTI_BEGIN: 2021-03-29: Video: [WA] Codec2: queue a empty work to HAL to wake up allocation thread
-    uint64_t mLastInputBufferAvailableTs;
     std::mutex mTsLock;
 // QTI_END: 2021-03-29: Video: [WA] Codec2: queue a empty work to HAL to wake up allocation thread
 // QTI_BEGIN: 2022-04-26: Video: CCodec: Use pipelineRoom only for HW decoder
