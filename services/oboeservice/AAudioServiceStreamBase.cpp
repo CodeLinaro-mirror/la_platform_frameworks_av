@@ -26,6 +26,7 @@
 #include <media/MediaMetricsItem.h>
 #include <media/TypeConverter.h>
 #include <mediautils/SchedulingPolicyService.h>
+#include <mediautils/ServiceUtilities.h>
 
 #include "binding/AAudioServiceMessage.h"
 #include "core/AudioGlobal.h"
@@ -145,6 +146,18 @@ aaudio_result_t AAudioServiceStreamBase::open(const aaudio::AAudioStreamRequest 
         legacy2aidl_uid_t_int32_t(IPCThreadState::self()->getCallingUid()));
     mMmapClient.attributionSource.pid = VALUE_OR_FATAL(
         legacy2aidl_pid_t_int32_t(IPCThreadState::self()->getCallingPid()));
+
+    // Take a chance to check MODIDFY_AUDIO_ROUTING to open a stream
+    // using system usages. Since the caller identity
+    // is cleared by AAudioEndpointManager for e.g. shared mode feature,
+    // permission check of native audioserver will pass.
+    auto usage = request.getConstantConfiguration().getUsage();
+    if (isSystemUsage(usage)
+            && !modifyAudioRoutingAllowed(mMmapClient.attributionSource)) {
+        ALOGE("%s: modify audio routing not allowed for attribution source: %s",
+                __func__, request.getAttributionSource().toString().c_str());
+        return AAUDIO_ERROR_INTERNAL;
+    }
 
     // Limit scope of lock to avoid recursive lock in close().
     {

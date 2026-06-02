@@ -363,4 +363,16 @@ aaudio_policy_t AAudio_getAAudioPolicy(
         android::media::audio::common::AudioMMapPolicy defaultPolicy =
                 android::media::audio::common::AudioMMapPolicy::NEVER);
 
+static inline bool isSystemUsage(aaudio_usage_t usage) {
+   switch(usage) {
+        case AAUDIO_SYSTEM_USAGE_EMERGENCY:
+        case AAUDIO_SYSTEM_USAGE_SAFETY:
+        case AAUDIO_SYSTEM_USAGE_VEHICLE_STATUS:
+        case AAUDIO_SYSTEM_USAGE_ANNOUNCEMENT:
+            return true;
+        default:
+            return false;
+    }
+}
+
 #endif //UTILITY_AAUDIO_UTILITIES_H
