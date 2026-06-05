@@ -9587,11 +9587,13 @@ sp<SwAudioOutputDescriptor> AudioPolicyManager::openOutputWithProfileAndDevice(
                 config.sample_rate, config.channel_mask, config.format);
         config.offload_info.sample_rate = config.sample_rate;
         config.offload_info.format = config.format;
-        if (property_get_bool("vendor.audio.gaming.enabled", false /* default_value */))
+        if (property_get_bool("vendor.audio.gaming.enabled", false /* default_value */)) {
             config.channel_mask = AUDIO_CHANNEL_OUT_STEREO_HAPTIC_AB;
+            flags = AUDIO_OUTPUT_FLAG_NONE;
+        }
         config.offload_info.channel_mask = config.channel_mask;
         status = desc->open(&config, mixerConfig, devices,
-                            AUDIO_STREAM_DEFAULT, AUDIO_OUTPUT_FLAG_NONE, &output);
+                            AUDIO_STREAM_DEFAULT, &flags, &output, attributes);
         if (status != NO_ERROR) {
             return nullptr;
         }

@@ -2991,9 +2991,9 @@ status_t PlaybackThread::addTrack_l(const sp<IAfTrack>& track)
             // call Tracks.mute/unmute which also require thread's lock.
             mutex().unlock();
             if (property_get_bool("vendor.audio.gaming.enabled", false /* default_value */)) {
-               intensity  = {os::HapticLevel::NONE};
+               intensity = os::HapticScale::none();
             } else {
-                intensity    = afutils::onExternalVibrationStart(track->getExternalVibration());
+                intensity = afutils::onExternalVibrationStart(track->getExternalVibration());
             }
             std::optional<media::AudioVibratorInfo> vibratorInfo;
             {

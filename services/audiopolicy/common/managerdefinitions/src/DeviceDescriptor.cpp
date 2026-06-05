@@ -393,11 +393,12 @@ DeviceVector DeviceVector::getDevicesFromTypes(const DeviceTypeSet& types) const
 // QTI_END: 2025-07-14: Audio: audiopolicy: select last connected device from same type of devices
     for (size_t i = 0; i < size(); i++) {
 // QTI_BEGIN: 2025-07-14: Audio: audiopolicy: select last connected device from same type of devices
-        if (types.count(itemAt(i)->type()) != 0 && (foundType.count(itemAt(i)->type()) == 0)) {
+        //if (types.count(itemAt(i)->type()) != 0 && (foundType.count(itemAt(i)->type()) == 0)) {
+        if (types.count(itemAt(i)->type()) != 0) {
 // QTI_END: 2025-07-14: Audio: audiopolicy: select last connected device from same type of devices
             devices.add(itemAt(i));
 // QTI_BEGIN: 2025-07-14: Audio: audiopolicy: select last connected device from same type of devices
-            foundType.insert(itemAt(i)->type());
+            //foundType.insert(itemAt(i)->type());
             ALOGV("DeviceVector::%s() for type %08x address %s",
                     __func__, itemAt(i)->type(), itemAt(i)->address().c_str());
 // QTI_END: 2025-07-14: Audio: audiopolicy: select last connected device from same type of devices
