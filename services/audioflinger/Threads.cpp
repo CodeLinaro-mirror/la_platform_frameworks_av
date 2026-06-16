@@ -2932,6 +2932,7 @@ void PlaybackThread::checkUpdateTrackMetadataForUid(uid_t uid) {
 status_t PlaybackThread::addTrack_l(const sp<IAfTrack>& track)
 {
     status_t status = ALREADY_EXISTS;
+    os::HapticScale intensity;
 
     if (mActiveTracks.indexOf(track) < 0) {
         // the track is newly added, make sure it fills up all its
@@ -2989,8 +2990,11 @@ status_t PlaybackThread::addTrack_l(const sp<IAfTrack>& track)
             // Unlock due to VibratorService will lock for this call and will
             // call Tracks.mute/unmute which also require thread's lock.
             mutex().unlock();
-            const os::HapticScale hapticScale = afutils::onExternalVibrationStart(
-                    track->getExternalVibration());
+            if (property_get_bool("vendor.audio.gaming.enabled", false /* default_value */)) {
+               intensity  = {os::HapticLevel::NONE};
+            } else {
+                intensity    = afutils::onExternalVibrationStart(track->getExternalVibration());
+            }
             std::optional<media::AudioVibratorInfo> vibratorInfo;
             {
                 // TODO(b/184194780): Use the vibrator information from the vibrator that will be
@@ -2999,7 +3003,7 @@ status_t PlaybackThread::addTrack_l(const sp<IAfTrack>& track)
                 vibratorInfo = mAfThreadCallback->getDefaultVibratorInfo_l();
             }
             mutex().lock();
-            track->setHapticScale(hapticScale);
+            track->setHapticScale(intensity);
             if (vibratorInfo) {
                 track->setHapticMaxAmplitude(vibratorInfo->maxAmplitude);
             }
@@ -3015,7 +3019,7 @@ status_t PlaybackThread::addTrack_l(const sp<IAfTrack>& track)
 
             // Set haptic intensity for effect
             if (chain != nullptr) {
-                chain->setHapticScale_l(track->id(), hapticScale);
+                chain->setHapticScale_l(track->id(), intensity);
             }
         }
 
@@ -8184,6 +8188,9 @@ void DuplicatingThread::addOutputTrack(IAfPlaybackThread* thread)
     attributionSource.pid = VALUE_OR_FATAL(legacy2aidl_pid_t_int32_t(
       IPCThreadState::self()->getCallingPid()));
     attributionSource.token = sp<BBinder>::make();
+
+    if (property_get_bool("vendor.audio.gaming.enabled", false /* default_value */))
+        mChannelMask = (audio_channel_mask_t)(mChannelMask | mHapticChannelMask);
     sp<IAfOutputTrack> outputTrack = IAfOutputTrack::create(thread,
                                             this,
                                             mSampleRate,
