@@ -13,6 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
 
 #define LOG_TAG "APM_AudioPolicyManager"
 
@@ -1109,8 +1113,24 @@ void AudioPolicyManager::setPhoneState(audio_mode_t state)
     bool wasLeUnicastActive = isLeUnicastActive();
 
     if (mEngine->setPhoneState(state) != NO_ERROR) {
-        ALOGW("setPhoneState() invalid or same state %d", state);
-        return;
+        // The engine may return BAD_VALUE ("same state") if startSource() defensively
+        // pre-corrected mPhoneState to AUDIO_MODE_NORMAL to avoid misrouting media
+        // tracks immediately after HFP call teardown (see mPhoneStatePreCorrected).
+        // In that case we still need to run the full call-end cleanup that normally
+        // happens here, so emulate oldState = IN_CALL and fall through.
+        if (mPhoneStatePreCorrected && state == AUDIO_MODE_NORMAL) {
+            ALOGW("setPhoneState(%d): engine was pre-corrected by startSource; "
+                  "running call-end cleanup with emulated oldState=IN_CALL", state);
+            mPhoneStatePreCorrected = false;
+            oldState = AUDIO_MODE_IN_CALL;  // emulate the true prior state for cleanup
+            // fall through — all cleanup below uses oldState
+        } else {
+            mPhoneStatePreCorrected = false;  // clear stale flag on any other path
+            ALOGW("setPhoneState() invalid or same state %d", state);
+            return;
+        }
+    } else {
+        mPhoneStatePreCorrected = false;  // normal state change — clear any stale flag
     }
     /// Opens: can these line be executed after the switch of volume curves???
     if (isStateInCall(oldState)) {
@@ -2923,6 +2943,60 @@ status_t AudioPolicyManager::startSource(const sp<SwAudioOutputDescriptor>& outp
         if (devices.isEmpty()) {
             devices = getNewOutputDevices(outputDesc, false /*fromCache*/);
         }
+
+        // --- Defensive fix: stale mPhoneState after HFP call teardown ---
+        // Race window: stop_hfp tears down the SCO path and triggers audio-focus
+        // abandonment (which immediately re-grants GAIN to a media player).  The
+        // media player calls startOutput() before setPhoneState(NORMAL) has arrived
+        // from AudioService (delayed by AudioService lock contention, up to ~1.3 s).
+        // With mPhoneState still set to AUDIO_MODE_IN_CALL the engine selects the
+        // built-in BUS output for MEDIA strategy instead of A2DP, causing music to
+        // play on the DUT speaker.
+        //
+        // Detect: MUSIC stream starting, mPhoneState=IN_CALL, but NO SCO output is
+        // active/routed (HFP audio path already torn down) and A2DP IS available.
+        //
+        // Fix: pre-correct the engine phone state to NORMAL, rebuild strategy->device
+        // routing (checkOutputForAllStrategies will invalidate BUS-bound tracks so
+        // they reconnect to the A2DP output), and refresh the device selection for
+        // the current output.  The mPhoneStatePreCorrected flag tells setPhoneState()
+        // to run its full call-end cleanup even though the engine will report
+        // "same state" when the real setPhoneState(NORMAL) eventually arrives.
+        // Guard is intentionally narrow — all four conditions must hold simultaneously:
+        //   (a) HFP cellular only (IN_CALL), not VoIP (IN_COMMUNICATION)
+        //   (b) no output currently patched/active to an SCO device
+        //   (c) SCO device itself has been removed from available set (teardown, not setup)
+        //   (d) A2DP is still reachable for re-routing
+        // This combination is only true during the post-stop_hfp / pre-setPhoneState(NORMAL)
+        // race window and excludes call-setup, VoIP calls, and multi-zone false positives.
+        if (stream == AUDIO_STREAM_MUSIC
+                && mEngine->getPhoneState() == AUDIO_MODE_IN_CALL  // (a) HFP cellular only
+                && !isScoOutputActive()                              // (b) no active SCO patch
+                && mAvailableOutputDevices.getDevicesFromType(      // (c) SCO device gone
+                        AUDIO_DEVICE_OUT_BLUETOOTH_SCO).isEmpty()
+                && !mAvailableOutputDevices.getDevicesFromType(     // (d) A2DP present
+                        AUDIO_DEVICE_OUT_BLUETOOTH_A2DP).isEmpty()) {
+            ALOGW("%s: stale IN_CALL state detected (mPhoneState=IN_CALL, no active SCO"
+                  " output/device, A2DP available) for output %d. Correcting routing early.",
+                  __func__, outputDesc->mIoHandle);
+            // Correct the engine — this makes getOutputDevicesForStrategy() return
+            // A2DP for MEDIA strategy on the very next (fromCache=false) query.
+            mEngine->setPhoneState(AUDIO_MODE_NORMAL);
+            // Mark so that the eventual setPhoneState(NORMAL) from AudioService still
+            // runs full call-end cleanup even though the engine now says "same state".
+            mPhoneStatePreCorrected = true;
+            // Sync mPreviousOutputs before re-evaluating so checkOutputForStrategy()
+            // builds correct "move from" patches (matches what checkForDeviceAndOutputChanges
+            // does before calling checkOutputForAllStrategies in the normal path).
+            mPreviousOutputs = mOutputs;
+            // Re-evaluate all strategy outputs.  MEDIA strategy will move to A2DP;
+            // any tracks on BUS outputs (including this one) will be invalidated and
+            // will reconnect to the A2DP output via getOutputForAttr().
+            checkOutputForAllStrategies();
+            // Refresh the device selection for the current output with the corrected state.
+            devices = getNewOutputDevices(outputDesc, false /*fromCache*/);
+        }
+        // --- End defensive fix ---
         bool shouldWait =
             (followsSameRouting(clientUid, clientAttr, clientUid,
                                 attributes_initializer(AUDIO_USAGE_ALARM)) ||
@@ -8647,6 +8721,23 @@ bool AudioPolicyManager::isScoRequestedForComm() const {
     for (const auto &device : devices) {
         if (audio_is_bluetooth_out_sco_device(device.mType)) {
             return true;
+        }
+    }
+    return false;
+}
+
+bool AudioPolicyManager::isScoOutputActive() const {
+    for (size_t i = 0; i < mOutputs.size(); i++) {
+        const sp<SwAudioOutputDescriptor>& desc = mOutputs.valueAt(i);
+        // Consider an output "active" if it has clients playing or is already patched
+        // to a hardware SCO device (covers the brief window between patch creation and
+        // first write).
+        if (desc->isActive() || desc->isRouted()) {
+            for (const auto& device : desc->devices()) {
+                if (audio_is_bluetooth_out_sco_device(device->type())) {
+                    return true;
+                }
+            }
         }
     }
     return false;

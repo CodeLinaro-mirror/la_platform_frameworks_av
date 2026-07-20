@@ -13,6 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
 
 #pragma once
 
@@ -1435,7 +1439,19 @@ private:
 
         bool isScoRequestedForComm() const;
 
+        /**
+         * @brief isScoOutputActive: returns true if at least one output is currently
+         * active or routed to a Bluetooth SCO device (HFP). Used to detect stale
+         * mPhoneState after HFP call teardown.
+         */
+        bool isScoOutputActive() const;
+
         bool isHearingAidUsedForComm() const;
+
+        // Set to true when startSource() defensively pre-corrects mPhoneState in the
+        // engine to AUDIO_MODE_NORMAL before the official setPhoneState(NORMAL) arrives
+        // from AudioService (post-HFP race window). Cleared by setPhoneState().
+        bool mPhoneStatePreCorrected = false;
 
         bool areAllActiveTracksRerouted(const sp<SwAudioOutputDescriptor>& output);
 
