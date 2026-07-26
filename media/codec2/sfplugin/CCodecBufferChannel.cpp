@@ -1759,7 +1759,8 @@ status_t CCodecBufferChannel::start(
 
     if (inputFormat != nullptr) {
         bool graphic = (iStreamFormat.value == C2BufferData::GRAPHIC);
-        bool audioEncoder = !graphic && (kind.value == C2Component::KIND_ENCODER);
+        bool encoder = (kind.value == C2Component::KIND_ENCODER);
+        bool audioEncoder = !graphic && encoder;
         C2Config::api_feature_t apiFeatures = C2Config::api_feature_t(
                 API_REFLECTION |
                 API_VALUES |
@@ -1873,9 +1874,14 @@ status_t CCodecBufferChannel::start(
         bool conforming = buffersBoundToCodec && (apiFeatures & API_SAME_INPUT_BUFFER);
         // For encrypted content, framework decrypts source buffer (ashmem) into
         // C2Buffers. Thus non-conforming codecs can process these.
+        // For graphic encoders using block model (buffersBoundToCodec=false), SlotInputBuffers
+        // must be used so that attachBuffer() can store the client-provided C2Buffer via
+        // DummyContainerBuffer::copy(). Without this, GraphicInputBuffers is selected and
+        // GraphicBlockBuffer::copy() returns false, causing INVALID_OPERATION on
+        // native_queueHardwareBuffer in EncoderBlockModelTest.
         if (!buffersBoundToCodec
                 && !input->frameReassembler
-                && (hasCryptoOrDescrambler() || conforming)) {
+                && (hasCryptoOrDescrambler() || (graphic && encoder) || conforming)) {
             input->buffers.reset(new SlotInputBuffers(mName));
         } else if (graphic) {
             if (mHasInputSurface) {
