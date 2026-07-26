@@ -4,8 +4,20 @@ cc_defaults {
     name: "audio-aconfig-cc-defaults",
     host_supported: true,
     cflags: [
-        "-fstack-protector-strong",
+        "-fstack-protector-all",
+        "-fno-builtin-__memcpy_chk",
+        "-fno-builtin-__memset_chk",
+        "-fno-builtin-__memmove_chk",
+        "-fno-builtin-__strcpy_chk",
+        "-fno-builtin-__snprintf_chk",
         "-Wno-unused-variable",
+    ],
+    ldflags: [
+        "-Wl,-u,__memcpy_chk",
+        "-Wl,-u,__memset_chk",
+        "-Wl,-u,__memmove_chk",
+        "-Wl,-u,__strcpy_chk",
+        "-Wl,-u,__snprintf_chk",
     ],
     target: {
         vendor: {

@@ -28,6 +28,19 @@ cc_defaults {
         "-Werror",
         "-Wextra",
         "-Wno-unused-parameter",
+        "-fstack-protector-strong",
+        "-fno-builtin-__memcpy_chk",
+        "-fno-builtin-__memset_chk",
+        "-fno-builtin-__memmove_chk",
+        "-fno-builtin-__strcpy_chk",
+        "-fno-builtin-__snprintf_chk",
+    ],
+    ldflags: [
+        "-Wl,-u,__memcpy_chk",
+        "-Wl,-u,__memset_chk",
+        "-Wl,-u,__memmove_chk",
+        "-Wl,-u,__strcpy_chk",
+        "-Wl,-u,__snprintf_chk",
     ],
 
     shared_libs: [
@@ -44,6 +57,9 @@ cc_defaults {
         "libhardware_headers",
     ],
     target: {
+        vendor: {
+            cflags: ["-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=2"],
+        },
         darwin: {
             enabled: false,
         },
@@ -88,6 +104,19 @@ cc_library_shared {
     cflags: [
         "-Wno-unused-parameter",
         "-Wthread-safety",
+        "-fstack-protector-strong",
+        "-fno-builtin-__memcpy_chk",
+        "-fno-builtin-__memset_chk",
+        "-fno-builtin-__memmove_chk",
+        "-fno-builtin-__strcpy_chk",
+        "-fno-builtin-__snprintf_chk",
+    ],
+    ldflags: [
+        "-Wl,-u,__memcpy_chk",
+        "-Wl,-u,__memset_chk",
+        "-Wl,-u,__memmove_chk",
+        "-Wl,-u,__strcpy_chk",
+        "-Wl,-u,__snprintf_chk",
     ],
     relative_install_path: "soundfx",
     visibility: [
