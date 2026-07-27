@@ -759,6 +759,10 @@ void MediaCodecSource::resume(int64_t resumeStartTimeUs) {
 
 status_t MediaCodecSource::feedEncoderInputBuffers() {
     MediaBufferBase* mbuf = NULL;
+    if (mPuller == NULL) {
+        ALOGW("feedEncoderInputBuffers: mPuller is null, skipping");
+        return OK;
+    }
     while (!mAvailEncoderInputIndices.empty() && mPuller->readBuffer(&mbuf)) {
         if (!mEncoder) {
             return BAD_VALUE;
