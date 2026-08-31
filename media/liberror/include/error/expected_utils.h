@@ -97,7 +97,7 @@
     ({                                                                      \
         auto _tmp = (exp);                                                  \
         if (!errorIsOk(_tmp)) {                                             \
-            ALOGE("Function: %s Line: %d Failed ", __FUNCTION__, __LINE__); \
+            ALOGD("Function: %s Line: %d Failed ", __FUNCTION__, __LINE__); \
             return _tmp;                                                    \
         }                                                                   \
     })
