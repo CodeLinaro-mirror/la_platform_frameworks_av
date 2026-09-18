@@ -95,7 +95,6 @@ cc_library_static {
             cflags: [
                 "-DARM",
                 "-DARMV7",
-                "-DASM_OPT",
             ],
             local_include_dirs: [
                 "src/asm/ARMV7",
