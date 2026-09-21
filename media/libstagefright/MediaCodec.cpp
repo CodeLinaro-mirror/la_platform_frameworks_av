@@ -1666,6 +1666,12 @@ MediaCodec::MediaCodec(
     // we want an empty metrics record for any early getMetrics() call
     // this should be the *only* initMediametrics() call that's not on the Looper thread
     initMediametrics();
+    // tracer
+    if (android::media::codec::provider_->trace_codec_activity()) {
+        if (ATRACE_ENABLED()) [[unlikely]] {
+            mTracer.reset(new Tracer(uid, pid));
+        }
+    }
     if(android::media::codec::provider_->retry_decrypt_for_hdcp_failure()) {
         int32_t maxRetrySecs = property_get_int32(
                 "ro.media.codec.retry_decrypt_for_hdcp_failure_secs",
@@ -2647,7 +2653,7 @@ status_t MediaCodec::init(const AString &name, bool nameIsType) {
         //as these components are not present in media_codecs.xml and MediaCodecList won't find
         //these component by findCodecByName
         //Video and Flac decoder are present in list so exclude them.
-        if ((!(name.find("qti", 0) > 0 || name.find("filter", 0) > 0)
+        if ((!(name.find("qcom", 0) > 0 || name.find("qti", 0) > 0 || name.find("filter", 0) > 0)
               || name.find("video", 0) > 0 || name.find("flac", 0) > 0 || name.find("c2.qti", 0) >= 0)
               && !(name.find("tme",0) > 0)) {
             err = mGetCodecInfo(name, &mCodecInfo);
