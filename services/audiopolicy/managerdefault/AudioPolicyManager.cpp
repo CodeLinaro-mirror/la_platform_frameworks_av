@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 /*
- * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
- * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -1954,7 +1954,8 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
         if (!offloadDisable && stream == AUDIO_STREAM_MUSIC) {
            if ((*flags == AUDIO_OUTPUT_FLAG_NONE) &&
                 (config->offload_info.usage == AUDIO_USAGE_MEDIA ||
-                 config->offload_info.usage == AUDIO_USAGE_GAME)) {
+                 config->offload_info.usage == AUDIO_USAGE_GAME) &&
+                devices.types().count(AUDIO_DEVICE_OUT_BUS) == 0) {
                 ALOGV("Force direct flags to use pcm offload, original flags(0x%x)", *flags);
                 *flags = AUDIO_OUTPUT_FLAG_DIRECT;
             }

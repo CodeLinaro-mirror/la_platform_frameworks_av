@@ -57,11 +57,12 @@ genrule {
     name: "ParameterFrameworkConfigurationCapSrc_gen",
     out: ["ParameterFrameworkConfigurationCap.xml"],
     srcs: [":ParameterFrameworkConfigurationCapSrc"],
-    product_variables: {
-        debuggable: {
-            cmd: "sed -e 's|TuningAllowed=\"false\"|TuningAllowed=\"true\" ServerPort=\"unix:///dev/socket/audioserver/policy_debug\"|g' <$(in) > $(out)",
-        },
-    },
+// Disabling Tuning feature due to security concerns
+//    product_variables: {
+//        debuggable: {
+//            cmd: "sed -e 's|TuningAllowed=\"false\"|TuningAllowed=\"true\" ServerPort=\"unix:///dev/socket/audioserver/policy_debug\"|g' <$(in) > $(out)",
+//        },
+//    },
     cmd: "cp -f $(in) $(out)",
 }
 
