@@ -257,6 +257,15 @@ NoiseSuppression::Level PreProcessingContext::getNoiseSuppressionLevel() const {
     return mLevel;
 }
 
+RetCode PreProcessingContext::setNoiseSuppressionType(NoiseSuppression::Type type) {
+    mNsType = type;
+    return RetCode::SUCCESS;
+}
+
+NoiseSuppression::Type PreProcessingContext::getNoiseSuppressionType() const {
+    return mNsType;
+}
+
 IEffect::Status PreProcessingContext::process(float* in, float* out, int samples) {
     IEffect::Status status = {EX_NULL_POINTER, 0, 0};
     RETURN_VALUE_IF(!in, status, "nullInput");

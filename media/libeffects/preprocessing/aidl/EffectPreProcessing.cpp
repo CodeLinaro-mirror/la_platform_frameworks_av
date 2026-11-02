@@ -231,6 +231,7 @@ ndk::ScopedAStatus EffectPreProcessing::setParameterAutomaticGainControlV2(
 ndk::ScopedAStatus EffectPreProcessing::setParameterNoiseSuppression(
         const Parameter::Specific& specific) {
     auto& param = specific.get<Parameter::Specific::noiseSuppression>();
+    RETURN_IF(!inRange(param, kNoiseSuppressionRanges), EX_ILLEGAL_ARGUMENT, "outOfRange");
     auto tag = param.getTag();
 
     switch (tag) {
@@ -238,6 +239,12 @@ ndk::ScopedAStatus EffectPreProcessing::setParameterNoiseSuppression(
             RETURN_IF(mContext->setNoiseSuppressionLevel(param.get<NoiseSuppression::level>()) !=
                               RetCode::SUCCESS,
                       EX_ILLEGAL_ARGUMENT, "levelNotSupported");
+            return ndk::ScopedAStatus::ok();
+        }
+        case NoiseSuppression::type: {
+            RETURN_IF(mContext->setNoiseSuppressionType(param.get<NoiseSuppression::type>()) !=
+                              RetCode::SUCCESS,
+                      EX_ILLEGAL_ARGUMENT, "typeNotSupported");
             return ndk::ScopedAStatus::ok();
         }
         default: {
@@ -383,6 +390,10 @@ ndk::ScopedAStatus EffectPreProcessing::getParameterNoiseSuppression(
     switch (tag) {
         case NoiseSuppression::level: {
             param.set<NoiseSuppression::level>(mContext->getNoiseSuppressionLevel());
+            break;
+        }
+        case NoiseSuppression::type: {
+            param.set<NoiseSuppression::type>(mContext->getNoiseSuppressionType());
             break;
         }
         default: {
