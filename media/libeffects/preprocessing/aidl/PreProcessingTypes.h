@@ -81,13 +81,18 @@ static const Descriptor kAutomaticGainControlV2Desc = {
 
 // Noise suppression
 static const std::string kNoiseSuppressionEffectName = "Noise Suppression";
+static const std::vector<Range::NoiseSuppressionRange> kNoiseSuppressionRanges = {
+        MAKE_RANGE(NoiseSuppression, type, NoiseSuppression::Type::SINGLE_CHANNEL,
+                   NoiseSuppression::Type::SINGLE_CHANNEL)};
+static const Capability kNoiseSuppressionCap = {.range = kNoiseSuppressionRanges};
 static const Descriptor kNoiseSuppressionDesc = {
         .common = {.id = {.type = getEffectTypeUuidNoiseSuppression(),
                           .uuid = getEffectImplUuidNoiseSuppressionSw(),
                           .proxy = std::nullopt},
                    .flags = {.type = Flags::Type::PRE_PROC, .deviceIndication = true},
                    .name = kNoiseSuppressionEffectName,
-                   .implementor = "The Android Open Source Project"}};
+                   .implementor = "The Android Open Source Project"},
+        .capability = kNoiseSuppressionCap};
 
 enum class PreProcessingEffectType {
     ACOUSTIC_ECHO_CANCELLATION,
