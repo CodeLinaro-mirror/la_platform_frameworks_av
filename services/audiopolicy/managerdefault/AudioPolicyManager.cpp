@@ -1530,17 +1530,20 @@ status_t AudioPolicyManager::getOutputForAttrInt(
     bool usePrimaryOutputFromPolicyMixes = false;
     audio_usage_t usageFlagRequested = resultAttr->usage;
     /* if usage flag type is media/game and port id is zero
-    (i.e no preferred device by client/app) then prefer a2dp device */
+    (i.e no preferred device by client/app) then prefer a2dp/BLE device if available*/
     if (!requestedPortId &&
         (usageFlagRequested == AUDIO_USAGE_MEDIA || usageFlagRequested == AUDIO_USAGE_GAME)) {
             requestedDevice = mAvailableOutputDevices.getFirstExistingDevice({
                                             AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,
                                             AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES,
-                                            AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER});
+                                            AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER,
+                                            AUDIO_DEVICE_OUT_BLE_HEADSET,
+                                            AUDIO_DEVICE_OUT_BLE_SPEAKER,
+                                            AUDIO_DEVICE_OUT_BLE_BROADCAST});
             if (requestedDevice == nullptr)
                 ALOGD("%s: requestedDevice is null", __func__);
             else
-                ALOGD("%s: requestedDevice is A2DP", __func__);
+                ALOGD("%s: requestedDevice is A2DP/BLE as it is available", __func__);
     }
     //Check for preferred devices in output devices list and if present, skip policy mixes
     sp<DeviceDescriptor> preferredDevice = mAvailableOutputDevices.getFirstExistingDevice({
