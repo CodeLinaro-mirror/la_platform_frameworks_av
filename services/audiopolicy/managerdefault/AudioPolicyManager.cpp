@@ -1530,17 +1530,20 @@ status_t AudioPolicyManager::getOutputForAttrInt(
     bool usePrimaryOutputFromPolicyMixes = false;
     audio_usage_t usageFlagRequested = resultAttr->usage;
     /* if usage flag type is media/game and port id is zero
-    (i.e no preferred device by client/app) then prefer a2dp device */
+    (i.e no preferred device by client/app) then prefer a2dp/BLE device if available*/
     if (!requestedPortId &&
         (usageFlagRequested == AUDIO_USAGE_MEDIA || usageFlagRequested == AUDIO_USAGE_GAME)) {
             requestedDevice = mAvailableOutputDevices.getFirstExistingDevice({
                                             AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,
                                             AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES,
-                                            AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER});
+                                            AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER,
+                                            AUDIO_DEVICE_OUT_BLE_HEADSET,
+                                            AUDIO_DEVICE_OUT_BLE_SPEAKER,
+                                            AUDIO_DEVICE_OUT_BLE_BROADCAST});
             if (requestedDevice == nullptr)
                 ALOGD("%s: requestedDevice is null", __func__);
             else
-                ALOGD("%s: requestedDevice is A2DP", __func__);
+                ALOGD("%s: requestedDevice is A2DP/BLE as it is available", __func__);
     }
     //Check for preferred devices in output devices list and if present, skip policy mixes
     sp<DeviceDescriptor> preferredDevice = mAvailableOutputDevices.getFirstExistingDevice({
@@ -2139,6 +2142,7 @@ audio_io_handle_t AudioPolicyManager::getOutputForDevices(
         if (*flags & AUDIO_OUTPUT_FLAG_MMAP_NOIRQ) {
             ALOGV("Set MMAP output flags for PCM format");
         } else if (*flags & AUDIO_OUTPUT_FLAG_FAST) {
+            *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX | AUDIO_OUTPUT_FLAG_FAST);
             ALOGV("Set Fast output flags for PCM format");
         } else if ((*flags & AUDIO_OUTPUT_FLAG_INCALL_MUSIC) == 0) {
            *flags = (audio_output_flags_t)(AUDIO_OUTPUT_FLAG_VOIP_RX |
@@ -3683,6 +3687,10 @@ audio_io_handle_t AudioPolicyManager::getInputForDevice(const sp<DeviceDescripto
             flags = (audio_input_flags_t)(flags | AUDIO_INPUT_FLAG_VOIP_TX);
             ALOGV("Set VoIP flag for PCM format");
         }
+    } else if (attributes.source == AUDIO_SOURCE_VOICE_COMMUNICATION &&
+               audio_is_linear_pcm(config.format) && (((flags & AUDIO_INPUT_FLAG_FAST) == 1))) {
+        flags = (audio_input_flags_t)(AUDIO_INPUT_FLAG_FAST | AUDIO_INPUT_FLAG_VOIP_TX);
+        ALOGV("Set VoIP flag for PCM format");
     }
 
     if (attributes.source == AUDIO_SOURCE_ULTRASOUND) {
